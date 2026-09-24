@@ -30,7 +30,7 @@ export function Escaner({ onCodigo, onCerrar }: { onCodigo: (c: string) => void;
       try {
         const Nativo = (window as unknown as { BarcodeDetector?: new (o: object) => DetectorNativo }).BarcodeDetector
         if (Nativo) {
-          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
           if (!video.current) return
           video.current.srcObject = stream
           await video.current.play()
@@ -45,10 +45,20 @@ export function Escaner({ onCodigo, onCerrar }: { onCodigo: (c: string) => void;
           }, 300)
         } else {
           const { BrowserMultiFormatReader } = await import('@zxing/browser')
-          const lector = new BrowserMultiFormatReader()
-          const controles = await lector.decodeFromVideoDevice(undefined, video.current!, (res) => {
-            if (res) listo(res.getText())
-          })
+          const { BarcodeFormat, DecodeHintType } = await import('@zxing/library')
+          // TRY_HARDER también prueba la imagen girada: el código del gafete va vertical
+          const pistas = new Map<number, unknown>([
+            [DecodeHintType.TRY_HARDER, true],
+            [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_39, BarcodeFormat.CODE_128, BarcodeFormat.CODE_93, BarcodeFormat.CODABAR, BarcodeFormat.ITF, BarcodeFormat.QR_CODE]],
+          ])
+          const lector = new BrowserMultiFormatReader(pistas as Map<never, unknown>, { delayBetweenScanAttempts: 150 })
+          const controles = await lector.decodeFromConstraints(
+            { video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },
+            video.current!,
+            (res) => {
+              if (res) listo(res.getText())
+            },
+          )
           detenerZxing = () => controles.stop()
         }
       } catch {
@@ -82,7 +92,10 @@ export function Escaner({ onCodigo, onCerrar }: { onCodigo: (c: string) => void;
           />
         </div>
       )}
-      <p class="muted small">Acerque el código de barras de la credencial al recuadro.</p>
+      <p class="muted small">
+        Acerque el código de barras al recuadro. El del gafete va de arriba abajo: gire el gafete (o el celular) para que las barras queden horizontales. Si no lo lee, use
+        «Gafete» para leerlo con una foto.
+      </p>
     </Modal>
   )
 }

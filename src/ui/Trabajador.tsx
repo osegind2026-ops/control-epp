@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { AREAS } from '../db/semilla'
 import { buscarTrabajadores, resolverRpe } from '../domain/logica'
 import type { Trabajador } from '../domain/types'
-import { diasEntre, fechaLocal, hace, iniciales } from '../lib/util'
+import { diasEntre, fechaLocal, hace, iniciales, normalizar } from '../lib/util'
 import { guardarTrabajador } from '../state/servicios'
 import * as S from '../state/store'
-import { intentar, Modal } from './comunes'
+import { avisar, intentar, Modal } from './comunes'
 import { Escaner } from './Escaner'
 import { Icono } from './iconos'
 
@@ -15,15 +15,33 @@ export function listaAreas(): string[] {
   return [...set].sort()
 }
 
+export function listaPuestos(): string[] {
+  const set = new Set(['OPERADOR / TÉCNICO'])
+  for (const t of S.personal.value.values()) if (t.puesto) set.add(t.puesto)
+  return [...set].sort()
+}
+
+const OTRA = '__otra__'
+
 /** Alta o edición de un trabajador (planta o eventual). */
-export function FormTrabajador(props: { inicial?: Partial<Trabajador>; onListo: (t: Trabajador) => void; onCerrar: () => void }) {
+export function FormTrabajador(props: {
+  inicial?: Partial<Trabajador>
+  onListo: (t: Trabajador) => void
+  onCerrar: () => void
+  /** Foto del gafete, para comparar lo que se leyó. */
+  vistaPrevia?: string
+  aviso?: string
+}) {
   const i = props.inicial ?? {}
   const existente = !!(i.rpe && S.personal.value.get(i.rpe))
+  const areas = listaAreas()
   const [rpe, setRpe] = useState(i.rpe ?? '')
   const [nombre, setNombre] = useState(i.nombre ?? '')
   const [area, setArea] = useState(i.area ?? '')
+  const [areaLibre, setAreaLibre] = useState(!!i.area && !areas.includes(i.area))
   const [puesto, setPuesto] = useState(i.puesto ?? 'OPERADOR / TÉCNICO')
   const [casillero, setCasillero] = useState(i.casillero ?? '')
+  const [gafete, setGafete] = useState(i.gafete ?? '')
   const [tipo, setTipo] = useState<Trabajador['tipo']>(i.tipo ?? 'eventual')
   const [vigencia, setVigencia] = useState(i.vigencia ?? '')
   const [activo, setActivo] = useState(i.activo ?? true)
@@ -34,10 +52,11 @@ export function FormTrabajador(props: { inicial?: Partial<Trabajador>; onListo: 
         rpe,
         nombre,
         area: area.trim().toUpperCase() || 'SIN ÁREA',
-        puesto,
+        puesto: puesto.trim().toUpperCase(),
         casillero,
+        gafete: gafete.trim() || undefined,
         tipo,
-        vigencia: tipo === 'eventual' ? vigencia || undefined : undefined,
+        vigencia: vigencia || undefined,
         activo,
       }),
     )
@@ -59,6 +78,13 @@ export function FormTrabajador(props: { inicial?: Partial<Trabajador>; onListo: 
         </>
       }
     >
+      {props.vistaPrevia && <img class="gafete-vista" src={props.vistaPrevia} alt="Foto del gafete" />}
+      {props.aviso && (
+        <div class="aviso info small">
+          <Icono n="info" />
+          <span>{props.aviso}</span>
+        </div>
+      )}
       <div class="row" role="group" aria-label="Tipo de trabajador">
         <button class="chip" aria-pressed={tipo === 'eventual'} onClick={() => setTipo('eventual')}>
           Eventual
@@ -70,7 +96,7 @@ export function FormTrabajador(props: { inicial?: Partial<Trabajador>; onListo: 
       <div class="row" style={{ alignItems: 'start' }}>
         <label class="campo" style={{ width: '120px' }}>
           RPE
-          <input class="input" id="tr-rpe" value={rpe} disabled={existente} onInput={(e) => setRpe((e.target as HTMLInputElement).value.toUpperCase())} />
+          <input class="input mono" id="tr-rpe" value={rpe} maxLength={8} disabled={existente} onInput={(e) => setRpe((e.target as HTMLInputElement).value.toUpperCase().replace(/\s/g, ''))} />
         </label>
         <label class="campo grow">
           Nombre completo
@@ -79,29 +105,59 @@ export function FormTrabajador(props: { inicial?: Partial<Trabajador>; onListo: 
       </div>
       <label class="campo">
         Área
-        <input class="input" id="tr-area" list="areas-lista" value={area} onInput={(e) => setArea((e.target as HTMLInputElement).value)} />
-        <datalist id="areas-lista">
-          {listaAreas().map((a) => (
-            <option key={a} value={a} />
+        {areaLibre ? (
+          <div class="row" style={{ flexWrap: 'nowrap' }}>
+            <input class="input grow" id="tr-area-otra" placeholder="Escriba el área" value={area} onInput={(e) => setArea((e.target as HTMLInputElement).value)} />
+            <button class="btn sm" type="button" onClick={() => (setAreaLibre(false), setArea(''))}>
+              Lista
+            </button>
+          </div>
+        ) : (
+          <select
+            class="input"
+            id="tr-area"
+            value={area}
+            onChange={(e) => {
+              const v = (e.target as HTMLSelectElement).value
+              if (v === OTRA) {
+                setAreaLibre(true)
+                setArea('')
+              } else setArea(v)
+            }}
+          >
+            <option value="">Elija el área…</option>
+            {areas.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+            <option value={OTRA}>Otra área…</option>
+          </select>
+        )}
+      </label>
+      <label class="campo">
+        Puesto
+        <input class="input" id="tr-puesto" list="puestos-lista" value={puesto} onInput={(e) => setPuesto((e.target as HTMLInputElement).value)} />
+        <datalist id="puestos-lista">
+          {listaPuestos().map((p) => (
+            <option key={p} value={p} />
           ))}
         </datalist>
       </label>
       <div class="row" style={{ alignItems: 'start' }}>
         <label class="campo grow">
-          Puesto
-          <input class="input" id="tr-puesto" value={puesto} onInput={(e) => setPuesto((e.target as HTMLInputElement).value)} />
+          No. de gafete
+          <input class="input mono" id="tr-gafete" inputMode="numeric" value={gafete} onInput={(e) => setGafete((e.target as HTMLInputElement).value)} />
         </label>
-        <label class="campo" style={{ width: '120px' }}>
+        <label class="campo grow">
           Casillero
           <input class="input" id="tr-casillero" value={casillero} onInput={(e) => setCasillero((e.target as HTMLInputElement).value)} />
         </label>
       </div>
-      {tipo === 'eventual' && (
-        <label class="campo">
-          Vigencia del contrato (opcional)
-          <input class="input" id="tr-vigencia" type="date" value={vigencia} onInput={(e) => setVigencia((e.target as HTMLInputElement).value)} />
-        </label>
-      )}
+      <label class="campo">
+        {tipo === 'eventual' ? 'Vigencia del contrato o del gafete (opcional)' : 'Vigencia del gafete (opcional)'}
+        <input class="input" id="tr-vigencia" type="date" value={vigencia} onInput={(e) => setVigencia((e.target as HTMLInputElement).value)} />
+      </label>
       {existente && (
         <label class="check">
           <input type="checkbox" checked={activo} onChange={(e) => setActivo((e.target as HTMLInputElement).checked)} />
@@ -109,6 +165,99 @@ export function FormTrabajador(props: { inicial?: Partial<Trabajador>; onListo: 
         </label>
       )}
     </Modal>
+  )
+}
+
+/**
+ * Toma una foto del gafete y la interpreta. Si el RPE ya está en el padrón elige
+ * al trabajador; si no, abre el alta con los datos leídos para confirmarlos.
+ */
+export function LectorGafete({ onElegir, onCerrar }: { onElegir: (t: Trabajador) => void; onCerrar: () => void }) {
+  const [estado, setEstado] = useState<{ texto: string; avance?: number } | null>(null)
+  const [alta, setAlta] = useState<{ datos: Partial<Trabajador>; vista: string; aviso: string } | null>(null)
+  const archivo = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    archivo.current?.click()
+  }, [])
+
+  const procesar = async (f: File) => {
+    setEstado({ texto: 'Buscando código de barras…' })
+    try {
+      const { leerGafete } = await import('../lib/lectorGafete')
+      const { interpretarGafete, rpeMasVotado, rpeParecido } = await import('../lib/gafete')
+      const r = await leerGafete(f, (texto, avance) => setEstado({ texto, avance }))
+      if (import.meta.env.DEV) (window as unknown as { __gafete: unknown }).__gafete = r
+      const existe = (x: string) => S.personal.value.has(x)
+      // 1) Código de barras: es la fuente más confiable. Trae el RPE y un dígito verificador al final.
+      const limpio = r.codigo.toUpperCase().replace(/[^A-Z0-9]/g, '')
+      const rpeCodigo = limpio.length === 6 ? limpio.slice(0, 5) : limpio.length === 5 ? limpio : ''
+      if (limpio) {
+        const t = S.personal.value.get(resolverRpe(limpio, existe))
+        if (t) return onElegir(t)
+      }
+      // 2) Texto impreso
+      const d = interpretarGafete(r.texto, listaAreas())
+      const z = interpretarGafete(r.zona, [])
+      d.rpe = rpeCodigo || rpeMasVotado(r.zona) || z.rpe || d.rpe
+      d.numero = z.numero || d.numero
+      let rpe = d.rpe ? resolverRpe(d.rpe, existe) : ''
+      if (rpe && !existe(rpe)) rpe = rpeParecido(rpe, S.personal.value.keys()) || rpe
+      const porRpe = rpe ? S.personal.value.get(rpe) : undefined
+      if (porRpe) return onElegir(porRpe)
+      const porNombre = d.nombre ? [...S.personal.value.values()].filter((t) => normalizar(t.nombre) === normalizar(d.nombre)) : []
+      if (porNombre.length === 1) return onElegir(porNombre[0])
+      setEstado(null)
+      setAlta({
+        datos: { rpe, nombre: d.nombre, area: d.area, puesto: d.puesto || undefined, gafete: d.numero, vigencia: d.vigencia || undefined },
+        vista: r.vistaPrevia,
+        aviso: d.nombre || d.rpe
+          ? 'Datos leídos del gafete: revíselos antes de guardar (la cámara puede confundir letras como O y 0).'
+          : 'No se pudo leer el gafete. Capture los datos a mano o tome otra foto más cerca y con buena luz.',
+      })
+    } catch (e) {
+      setEstado(null)
+      avisar(`No se pudo leer la foto: ${(e as Error).message}`, { tipo: 'bad', ms: 6000 })
+      onCerrar()
+    }
+  }
+
+  if (alta) {
+    return <FormTrabajador inicial={alta.datos} vistaPrevia={alta.vista} aviso={alta.aviso} onCerrar={onCerrar} onListo={onElegir} />
+  }
+  return (
+    <>
+      <input
+        ref={archivo}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        onChange={(e) => {
+          const f = (e.target as HTMLInputElement).files?.[0]
+          if (f) procesar(f)
+          else onCerrar()
+        }}
+      />
+      {estado ? (
+        <Modal titulo="Leyendo gafete" onCerrar={onCerrar}>
+          <p>{estado.texto}</p>
+          {estado.avance !== undefined && (
+            <div class="progreso" role="progressbar" aria-valuenow={Math.round(estado.avance * 100)} aria-valuemin={0} aria-valuemax={100}>
+              <div style={{ width: `${Math.round(estado.avance * 100)}%` }} />
+            </div>
+          )}
+          <p class="muted small">Todo se procesa en este equipo; la foto no se guarda ni se envía.</p>
+        </Modal>
+      ) : (
+        <Modal titulo="Foto del gafete" onCerrar={onCerrar}>
+          <p>Tome la foto del gafete de frente, completo y con buena luz. Se leerá el código de barras o, si no se puede, el nombre, el área, el puesto y el RPE impresos.</p>
+          <button class="btn primary" onClick={() => archivo.current?.click()}>
+            <Icono n="camara" /> Tomar foto
+          </button>
+        </Modal>
+      )}
+    </>
   )
 }
 
@@ -155,6 +304,7 @@ export function TarjetaTrabajador({ t, onQuitar, onEditar }: { t: Trabajador; on
 export function BuscadorTrabajador({ onElegir, autoFocus = true }: { onElegir: (t: Trabajador) => void; autoFocus?: boolean }) {
   const [texto, setTexto] = useState('')
   const [camara, setCamara] = useState(false)
+  const [gafete, setGafete] = useState(false)
   const [alta, setAlta] = useState<Partial<Trabajador> | null>(null)
   const [activo, setActivo] = useState(0)
   const ref = useRef<HTMLInputElement>(null)
@@ -212,9 +362,13 @@ export function BuscadorTrabajador({ onElegir, autoFocus = true }: { onElegir: (
             }}
           />
         </div>
-        <button class="btn" onClick={() => setCamara(true)} aria-label="Escanear con la cámara">
-          <Icono n="camara" />
-          <span class="solo-ancho">Cámara</span>
+        <button class="btn" onClick={() => setCamara(true)} aria-label="Escanear el código de barras con la cámara">
+          <Icono n="barras" />
+          <span class="solo-ancho">Código</span>
+        </button>
+        <button class="btn" onClick={() => setGafete(true)} aria-label="Leer el gafete con una foto">
+          <Icono n="gafete" />
+          <span class="solo-ancho">Gafete</span>
         </button>
       </div>
 
@@ -250,6 +404,17 @@ export function BuscadorTrabajador({ onElegir, autoFocus = true }: { onElegir: (
           onCodigo={(c) => {
             setCamara(false)
             resolver(c)
+          }}
+        />
+      )}
+      {gafete && (
+        <LectorGafete
+          onCerrar={() => setGafete(false)}
+          onElegir={(t) => {
+            setGafete(false)
+            setTexto('')
+            avisar(`Gafete leído: ${t.nombre}`)
+            onElegir(t)
           }}
         />
       )}

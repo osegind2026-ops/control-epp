@@ -20,7 +20,6 @@ function EditorMaterial({ inicial, onCerrar }: { inicial: Material | null; onCer
   const [variantes, setVariantes] = useState<Variante[]>(inicial?.variantes ?? [])
   const [stockMin, setStockMin] = useState<Record<string, number>>(inicial?.stockMin ?? { [SIN_TALLA]: 5 })
   const [activo, setActivo] = useState(inicial?.activo ?? true)
-  const [columnaExcel, setColumnaExcel] = useState(inicial?.columnaExcel ?? '')
   const [plazoDias, setPlazoDias] = useState(inicial?.plazoDias ?? 1)
   const [foto, setFoto] = useState<string | null | undefined>(undefined) // undefined = sin cambios, null = quitar
   const fotoActual = foto === undefined ? (inicial?.fotoId ? S.fotos.value.get(inicial.fotoId) : undefined) : foto ?? undefined
@@ -53,7 +52,6 @@ function EditorMaterial({ inicial, onCerrar }: { inicial: Material | null; onCer
           activo,
           orden: inicial?.orden ?? S.materiales.value.length + 1,
           fotoId: inicial?.fotoId,
-          columnaExcel: columnaExcel.trim() || undefined,
           plazoDias: tipo === 'prestamo' ? plazoDias : undefined,
         },
         foto,
@@ -244,15 +242,6 @@ function EditorMaterial({ inicial, onCerrar }: { inicial: Material | null; onCer
         )}
       </div>
 
-      <details>
-        <summary class="small muted" style={{ cursor: 'pointer' }}>
-          Opciones avanzadas
-        </summary>
-        <label class="campo" style={{ marginTop: '8px' }}>
-          Columna en el CSV del libro maestro (use {'{v}'} para la talla)
-          <input class="input" id="mat-excel" value={columnaExcel} onInput={(e) => setColumnaExcel((e.target as HTMLInputElement).value)} placeholder="Vacío = solo en MATERIALES_RESUMEN" />
-        </label>
-      </details>
     </Modal>
   )
 }

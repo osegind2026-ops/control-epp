@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { existencia } from '../domain/logica'
 import type { Trabajador } from '../domain/types'
-import { armarRespaldo, csvLibroMaestro, importarRespaldo, leerPadronCSV } from './respaldo'
+import { armarRespaldo, importarRespaldo, leerPadronCSV } from './respaldo'
 import {
   ajustarExistencia,
   anularEntrega,
@@ -109,18 +109,6 @@ describe('almacén y devoluciones', () => {
 })
 
 describe('exportación e importación', () => {
-  it('CSV del libro maestro respeta el orden de columnas de la macro', () => {
-    const csv = csvLibroMaestro(S.entregas.value).replace(/^﻿/, '').trim().split('\n')
-    const enc = csv[0].split(',')
-    expect(enc[10]).toBe('CASCO')
-    expect(enc[24]).toBe('FAJA_LUMBAR_MED')
-    const primera = csv[1].split('","')
-    expect(primera[0]).toBe('"CFE-T1-0001')
-    const valores = csv[1].split(',').slice(-20)
-    expect(valores[0]).toBe('1') // casco
-    expect(valores[5]).toBe('2') // hyflex (todas las tallas)
-  })
-
   it('combinar un respaldo no duplica registros', async () => {
     const r = await armarRespaldo()
     const total = S.movimientos.value.length

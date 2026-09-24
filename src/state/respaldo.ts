@@ -1,5 +1,4 @@
 import { db, guardarConfig, TABLAS, type NombreTabla } from '../db/db'
-import { COLUMNAS_EXCEL } from '../db/semilla'
 import { ganaEntrante } from '../domain/fusion'
 import type { Entrega, Trabajador } from '../domain/types'
 import { csvq, fechaDeTs, fechaLocal, horaLocal } from '../lib/util'
@@ -101,34 +100,7 @@ export async function importarRespaldo(r: Respaldo, modo: 'combinar' | 'reemplaz
   return resumen
 }
 
-// ---------- CSV para el libro maestro de Excel ----------
-
-/**
- * Mismo formato que espera la macro ImportarTurnoCSV: 10 columnas de datos y
- * después una columna por material en el orden de COLUMNAS_EXCEL. Las tallas se
- * suman en la columna de su material (salvo la faja, que tiene una por talla).
- * Los materiales sin columna aparecen en MATERIALES_RESUMEN.
- */
-export function csvLibroMaestro(lista: Entrega[]): string {
-  const mats = S.materialesPorId.value
-  let csv = ['FOLIO', 'FECHA', 'HORA', 'RPE', 'NOMBRE', 'AREA', 'MATERIALES_RESUMEN', 'RESGUARDO_FOLIO', 'JUSTIFICACION', 'OBSERVACIONES', ...COLUMNAS_EXCEL].join(',') + '\n'
-  const motivos = new Map(S.motivos.value.map((m) => [m.id, m.texto]))
-  for (const e of lista.filter((x) => x.estado === 'registrada')) {
-    const cols = new Map<string, number>()
-    for (const l of e.lineas) {
-      const plantilla = mats.get(l.materialId)?.columnaExcel
-      if (!plantilla) continue
-      const col = plantilla.replace('{v}', l.varianteId)
-      cols.set(col, (cols.get(col) ?? 0) + l.cantidad)
-    }
-    const resumen = e.lineas.map((l) => `${S.nombreMaterial(l.materialId, l.varianteId)}:${l.cantidad}`).join(';')
-    const folioSI = S.resguardos.value.find((r) => r.entregaId === e.id)?.folioSI ?? ''
-    const justif = [...new Set(e.lineas.filter((l) => l.motivoId).map((l) => motivos.get(l.motivoId!) ?? ''))].join(' / ')
-    const fila = [e.folio, e.fecha, e.hora, e.rpe, e.nombre, e.area, resumen, folioSI, justif, e.observaciones].map(csvq)
-    csv += [...fila, ...COLUMNAS_EXCEL.map((c) => String(cols.get(c) ?? 0))].join(',') + '\n'
-  }
-  return '﻿' + csv
-}
+// ---------- CSV ----------
 
 /** Un renglón por material entregado: el formato más cómodo para filtrar y hacer tablas dinámicas. */
 export function csvDetalle(lista: Entrega[]): string {

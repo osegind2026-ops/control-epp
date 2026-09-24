@@ -106,6 +106,17 @@ const UI: Record<string, JSX.Element> = {
   nota: <path {...trazo} d="M5 4h14v16H5zM8 9h8M8 13h8M8 17h5" />,
   editar: <path {...trazo} d="M4 20h4L20 8l-4-4L4 16zM13.5 6.5l4 4" />,
   basura: <path {...trazo} d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />,
+  barras: <path {...trazo} d="M4 5v14M7 5v14M10 5v14M14 5v14M16 5v14M20 5v14" />,
+  gafete: (
+    <g {...trazo}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <circle cx="8.5" cy="11" r="2" />
+      <path d="M5.5 16c.6-1.6 1.7-2.3 3-2.3s2.4.7 3 2.3M14 10h4M14 13h4" />
+    </g>
+  ),
+  excel: <path {...trazo} d="M5 3h10l4 4v14H5zM15 3v4h4M8 11l4 6M12 11l-4 6M14 17h2" />,
+  pdf: <path {...trazo} d="M5 3h10l4 4v14H5zM15 3v4h4M8 13h1.5a1.5 1.5 0 0 1 0 3H8v-5M13 11v5h1a2 2 0 0 0 0-5zM18 11h-2v5M16 13.5h1.5" />,
+  presentacion: <path {...trazo} d="M3 4h18M4 4v11h16V4M12 15v3M8 21l4-3 4 3M8 11l3-3 2 2 3-3" />,
 }
 
 export function Icono({ n, titulo }: { n: string; titulo?: string }) {

@@ -29,7 +29,6 @@ export interface Material {
   icono?: string // ilustración de respaldo cuando no hay foto
   orden: number
   activo: boolean
-  columnaExcel?: string // columna del CSV del libro maestro (compatibilidad)
   /** Préstamo: días para devolverlo (0 = el mismo día). */
   plazoDias?: number
   actualizado: string
@@ -87,6 +86,7 @@ export interface Trabajador {
   area: string
   puesto: string
   casillero: string
+  gafete?: string // número impreso en el gafete
   tipo: TipoTrabajador
   vigencia?: string // fecha fin de contrato (eventuales)
   tallas: Record<string, string> // materialId → varianteId usada la última vez

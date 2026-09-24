@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'preact/hooks'
 import type { Entrega } from '../domain/types'
-import { descargarArchivo, fechaLocal, normalizar, plural } from '../lib/util'
-import { csvDetalle, csvLibroMaestro, nombreArchivo } from '../state/respaldo'
+import { descargarArchivo, descargarBlob, fechaLocal, normalizar, plural } from '../lib/util'
+import { calcularReporte } from '../reportes/datos'
+import { csvDetalle, nombreArchivo } from '../state/respaldo'
 import { anularEntrega } from '../state/servicios'
 import * as S from '../state/store'
 import { avisar, FotoMaterial, intentar, Modal, SelectorMotivo, Talla, Vacio } from './comunes'
@@ -120,7 +121,23 @@ function DetalleEntrega({ e, onCerrar }: { e: Entrega; onCerrar: () => void }) {
   )
 }
 
-function compartirHoy() {
+const fuentesActuales = () => ({
+  entregas: S.entregas.value,
+  movimientos: S.movimientos.value,
+  resguardos: S.resguardos.value,
+  materiales: S.materiales.value,
+  motivos: S.motivos.value,
+  ubicaciones: S.ubicaciones.value,
+  personal: S.personal.value,
+})
+
+async function excelDe(desde: string, hasta: string): Promise<void> {
+  const { generarExcel } = await import('../reportes/excel')
+  const d = calcularReporte(fuentesActuales(), desde, hasta)
+  descargarBlob(`Entrega de EPP ${d.titulo.replace(/[·/\\:]/g, '-')}.xlsx`, await generarExcel(d, fuentesActuales()))
+}
+
+async function compartirHoy() {
   const hoy = fechaLocal()
   const lista = S.entregas.value.filter((e) => e.fecha === hoy && e.estado === 'registrada')
   const piezas = new Map<string, number>()
@@ -130,8 +147,8 @@ function compartirHoy() {
     `*CFE Laguna Verde · Reporte de EPP*\n📅 ${hoy} · Equipo ${S.dispositivo.value?.codigo}\n` +
     `👥 Personas atendidas: ${new Set(lista.map((e) => e.rpe)).size}\n📦 Entregas: ${lista.length}\n\n` +
     top.map(([id, n]) => `• ${S.nombreMaterial(id)}: ${n}`).join('\n') +
-    `\n\n_Se adjunta el CSV para el libro maestro._`
-  descargarArchivo(nombreArchivo('CFE_EPP_LibroMaestro', 'csv'), csvLibroMaestro(lista), 'text/csv;charset=utf-8')
+    `\n\n_Se adjunta el Excel con el detalle del día._`
+  await intentar(() => excelDe(hoy, hoy))
   window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank')
 }
 
@@ -155,10 +172,10 @@ export function PantallaHistorial() {
       .reverse()
   }, [S.entregas.value, q, desde, hasta, estado])
 
-  const exportar = (tipo: 'maestro' | 'detalle') => {
+  const exportar = async (tipo: 'excel' | 'detalle') => {
     const orden = [...lista].reverse()
     if (!orden.length) return avisar('No hay entregas con este filtro.')
-    if (tipo === 'maestro') descargarArchivo(nombreArchivo('CFE_EPP_LibroMaestro', 'csv'), csvLibroMaestro(orden), 'text/csv;charset=utf-8')
+    if (tipo === 'excel') await intentar(() => excelDe(desde || orden[0].fecha, hasta || orden[orden.length - 1].fecha))
     else descargarArchivo(nombreArchivo('CFE_EPP_Detalle', 'csv'), csvDetalle(orden), 'text/csv;charset=utf-8')
   }
 
@@ -167,8 +184,8 @@ export function PantallaHistorial() {
       <div class="spread">
         <h1>Historial de entregas</h1>
         <div class="row">
-          <button class="btn" onClick={() => exportar('maestro')} title="Formato de la macro ImportarTurnoCSV">
-            <Icono n="descarga" /> CSV libro maestro
+          <button class="btn" onClick={() => exportar('excel')}>
+            <Icono n="excel" /> Excel
           </button>
           <button class="btn" onClick={() => exportar('detalle')}>
             <Icono n="descarga" /> CSV detalle

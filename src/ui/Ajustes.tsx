@@ -7,6 +7,7 @@ import * as S from '../state/store'
 import { avisar, confirmar, intentar, Modal } from './comunes'
 import { Icono } from './iconos'
 import { TarjetaNube } from './Nube'
+import { PlantillaReportes } from './PlantillaReportes'
 import { nube } from '../state/nube'
 
 function Equipo() {
@@ -295,6 +296,7 @@ export function PantallaAjustes() {
       <Equipo />
       <Usuarios />
       <Ubicaciones />
+      <PlantillaReportes />
       <p class="muted small">Control EPP v2.1 · {nube.value ? 'Sincronizado con Google Sheets' : 'Los datos se guardan solo en este navegador'}.</p>
     </div>
   )

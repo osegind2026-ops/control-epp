@@ -5,12 +5,13 @@ import { importarPadron, leerPadronCSV } from '../state/respaldo'
 import * as S from '../state/store'
 import { avisar, intentar, Vacio } from './comunes'
 import { Icono } from './iconos'
-import { FormTrabajador } from './Trabajador'
+import { FormTrabajador, LectorGafete } from './Trabajador'
 
 export function PantallaPersonal() {
   const [q, setQ] = useState('')
   const [filtro, setFiltro] = useState<'todos' | 'eventual' | 'planta' | 'vencidos' | 'inactivos'>('todos')
   const [editar, setEditar] = useState<Partial<Trabajador> | null>(null)
+  const [gafete, setGafete] = useState(false)
   const hoy = fechaLocal()
 
   const lista = useMemo(() => {
@@ -52,6 +53,9 @@ export function PantallaPersonal() {
         <div class="row">
           <button class="btn primary" onClick={() => setEditar({ tipo: 'eventual' })}>
             <Icono n="mas1" /> Alta de trabajador
+          </button>
+          <button class="btn" onClick={() => setGafete(true)}>
+            <Icono n="gafete" /> Leer gafete
           </button>
           <label class="btn" style={{ cursor: 'pointer' }}>
             <Icono n="subir" /> Importar padrón CSV
@@ -127,6 +131,15 @@ export function PantallaPersonal() {
       )}
       {lista.length > 400 && <p class="muted small">Se muestran 400 de {lista.length}. Use el buscador.</p>}
       {editar && <FormTrabajador inicial={editar} onCerrar={() => setEditar(null)} onListo={() => setEditar(null)} />}
+      {gafete && (
+        <LectorGafete
+          onCerrar={() => setGafete(false)}
+          onElegir={(t) => {
+            setGafete(false)
+            setEditar(t)
+          }}
+        />
+      )}
     </div>
   )
 }

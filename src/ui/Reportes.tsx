@@ -1,19 +1,103 @@
-import { useMemo, useState } from 'preact/hooks'
-import { csvq, descargarArchivo, fechaLocal } from '../lib/util'
-import { nombreArchivo } from '../state/respaldo'
+import { createPortal } from 'preact/compat'
+import { useEffect, useMemo, useState } from 'preact/hooks'
+import { descargarBlob, fechaLocal } from '../lib/util'
+import { calcularReporte, type DatosReporte, type Fuentes } from '../reportes/datos'
+import { cargarPlantilla, type Plantilla } from '../reportes/plantilla'
+import { ReporteImprimible } from '../reportes/ReporteImprimible'
 import * as S from '../state/store'
-import { FotoMaterial, Vacio } from './comunes'
+import { avisar, FotoMaterial, intentar, Vacio } from './comunes'
 import { Icono } from './iconos'
 import { listaAreas } from './Trabajador'
 
-type Rango = 'hoy' | '7d' | 'mes' | 'todo'
+type Rango = 'hoy' | 'ayer' | 'semana' | 'semanaAnt' | 'mes' | 'todo'
 
 function rango(r: Rango): [string, string] {
   const hoy = new Date()
-  if (r === 'hoy') return [fechaLocal(hoy), fechaLocal(hoy)]
-  if (r === '7d') return [fechaLocal(new Date(Date.now() - 6 * 86400000)), fechaLocal(hoy)]
-  if (r === 'mes') return [fechaLocal(new Date(hoy.getFullYear(), hoy.getMonth(), 1)), fechaLocal(hoy)]
+  const dia = (n: number) => fechaLocal(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + n))
+  const lunes = -((hoy.getDay() + 6) % 7)
+  if (r === 'hoy') return [dia(0), dia(0)]
+  if (r === 'ayer') return [dia(-1), dia(-1)]
+  if (r === 'semana') return [dia(lunes), dia(lunes + 6)]
+  if (r === 'semanaAnt') return [dia(lunes - 7), dia(lunes - 1)]
+  if (r === 'mes') return [fechaLocal(new Date(hoy.getFullYear(), hoy.getMonth(), 1)), fechaLocal(new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0))]
   return ['', '']
+}
+
+function fuentes(): Fuentes {
+  return {
+    entregas: S.entregas.value,
+    movimientos: S.movimientos.value,
+    resguardos: S.resguardos.value,
+    materiales: S.materiales.value,
+    motivos: S.motivos.value,
+    ubicaciones: S.ubicaciones.value,
+    personal: S.personal.value,
+  }
+}
+
+/** Sin fechas («Todo») el reporte va de la primera entrega a hoy. */
+function limites(desde: string, hasta: string): [string, string] {
+  const primera = S.entregas.value.reduce((m, e) => (e.fecha < m ? e.fecha : m), fechaLocal())
+  return [desde || primera, hasta || fechaLocal()]
+}
+
+const nombreReporte = (d: DatosReporte, ext: string) => `Entrega de EPP ${d.titulo.replace(/[·/\\:]/g, '-')}.${ext}`
+
+function Exportar({ desde, hasta, area }: { desde: string; hasta: string; area: string }) {
+  const [trabajando, setTrabajando] = useState('')
+  const [vista, setVista] = useState<{ d: DatosReporte; p: Plantilla } | null>(null)
+
+  const preparar = () => {
+    const [a, b] = limites(desde, hasta)
+    return calcularReporte(fuentes(), a, b, area)
+  }
+  const ejecutar = async (tipo: 'excel' | 'pptx' | 'pdf') => {
+    setTrabajando(tipo)
+    await intentar(async () => {
+      const d = preparar()
+      if (tipo === 'excel') {
+        const { generarExcel } = await import('../reportes/excel')
+        descargarBlob(nombreReporte(d, 'xlsx'), await generarExcel(d, fuentes()))
+      } else {
+        const p = await cargarPlantilla()
+        if (tipo === 'pptx') {
+          const { generarPresentacion } = await import('../reportes/presentacion')
+          descargarBlob(nombreReporte(d, 'pptx'), await generarPresentacion(d, p))
+        } else setVista({ d, p })
+      }
+      if (tipo !== 'pdf') avisar('✓ Reporte descargado')
+    })
+    setTrabajando('')
+  }
+
+  return (
+    <>
+      <div class="row">
+        <button class="btn" disabled={!!trabajando} onClick={() => ejecutar('excel')}>
+          <Icono n="excel" /> {trabajando === 'excel' ? 'Generando…' : 'Excel'}
+        </button>
+        <button class="btn" disabled={!!trabajando} onClick={() => ejecutar('pdf')}>
+          <Icono n="pdf" /> {trabajando === 'pdf' ? 'Preparando…' : 'PDF'}
+        </button>
+        <button class="btn primary" disabled={!!trabajando} onClick={() => ejecutar('pptx')}>
+          <Icono n="presentacion" /> {trabajando === 'pptx' ? 'Generando…' : 'Presentación'}
+        </button>
+      </div>
+      {vista && <VistaPdf d={vista.d} p={vista.p} onCerrar={() => setVista(null)} />}
+    </>
+  )
+}
+
+/** El reporte se monta directo en <body> para que al imprimir solo salgan sus páginas. */
+function VistaPdf(props: { d: DatosReporte; p: Plantilla; onCerrar: () => void }) {
+  const [contenedor] = useState(() => {
+    const el = document.createElement('div')
+    el.className = 'contenedor-reporte'
+    document.body.appendChild(el)
+    return el
+  })
+  useEffect(() => () => contenedor.remove(), [])
+  return createPortal(<ReporteImprimible {...props} />, contenedor)
 }
 
 function Barra({ valor, max }: { valor: number; max: number }) {
@@ -70,37 +154,25 @@ export function PantallaReportes() {
     }
   }, [S.entregas.value, desde, hasta, area])
 
-  const exportar = () => {
-    let csv = `REPORTE DE CONSUMO EPP,${csvq((desde || 'inicio') + ' a ' + (hasta || 'hoy'))},${csvq(area || 'TODAS LAS ÁREAS')}\n\nMATERIAL,TALLA,PIEZAS\n`
-    for (const [id, m] of d.materiales) {
-      if (m.tallas.size) for (const [v, n] of m.tallas) csv += `${csvq(S.nombreMaterial(id))},${csvq(v)},${n}\n`
-      else csv += `${csvq(S.nombreMaterial(id))},,${m.total}\n`
-    }
-    csv += '\nAREA,ENTREGAS,PERSONAS,PIEZAS\n'
-    for (const [a, x] of d.areas) csv += `${csvq(a)},${x.entregas},${x.personas.size},${x.piezas}\n`
-    csv += '\nRPE,NOMBRE,AREA,ENTREGAS,PIEZAS,ULTIMA\n'
-    for (const [rpe, t] of d.trabajadores) csv += [rpe, t.nombre, t.area].map(csvq).join(',') + `,${t.entregas},${t.piezas},${t.ultima}\n`
-    csv += '\nDESPACHO,ENTREGAS,PIEZAS\n'
-    for (const [u, x] of d.usuarios) csv += `${csvq(u)},${x.entregas},${x.piezas}\n`
-    descargarArchivo(nombreArchivo('CFE_Reporte_Consumo', 'csv'), '﻿' + csv, 'text/csv;charset=utf-8')
-  }
-
   const maxMat = d.materiales[0]?.[1].total ?? 0
   const maxArea = d.areas[0]?.[1].piezas ?? 0
 
   return (
     <div class="stack">
       <div class="spread">
-        <h1>Reportes de consumo</h1>
-        <button class="btn" onClick={exportar}>
-          <Icono n="descarga" /> CSV
-        </button>
+        <h1>Reportes</h1>
+        <Exportar desde={desde} hasta={hasta} area={area} />
       </div>
+      <p class="muted small">
+        Elija el periodo y descargue el reporte ejecutivo con la plantilla institucional: Excel con el detalle, PDF para enviar o presentación de PowerPoint editable.
+      </p>
       <div class="row">
         {(
           [
             ['hoy', 'Hoy'],
-            ['7d', 'Últimos 7 días'],
+            ['ayer', 'Ayer'],
+            ['semana', 'Esta semana'],
+            ['semanaAnt', 'Semana anterior'],
             ['mes', 'Este mes'],
             ['todo', 'Todo'],
           ] as const

@@ -46,16 +46,16 @@ const minimos = (ids: string[], n: number) => Object.fromEntries(ids.map((id) =>
 type MatSemilla = Omit<Material, 'actualizado' | 'activo' | 'orden'> & { demo: Record<string, number> }
 
 const MATS: MatSemilla[] = [
-  { id: 'casco', nombre: 'Casco de Seguridad', categoriaId: 'cabeza', tipo: 'resguardo', variantes: [], stockMin: { '': 25 }, icono: 'casco', columnaExcel: 'CASCO', demo: { '': 80 } },
-  { id: 'arnes_casco', nombre: 'Arnés de Casco', categoriaId: 'cabeza', tipo: 'consumible', variantes: [], stockMin: { '': 10 }, icono: 'arnescasco', columnaExcel: 'ARNÉS_DE_CASCO', demo: { '': 30 } },
-  { id: 'barbiquejo', nombre: 'Barbiquejo', categoriaId: 'cabeza', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'barbiquejo', columnaExcel: 'BARBIQUEJO', demo: { '': 50 } },
-  { id: 'lentes_claros', nombre: 'Lentes Claros', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 30 }, icono: 'lentes', columnaExcel: 'LENTES_CLAROS', demo: { '': 150 } },
-  { id: 'lentes_oscuros', nombre: 'Lentes Oscuros', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'lentes', columnaExcel: 'LENTES_OSCUROS', demo: { '': 60 } },
-  { id: 'cubre_lentes', nombre: 'Cubre Lentes', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 10 }, icono: 'cubrelentes', columnaExcel: 'CUBRE_LENTES', demo: { '': 30 } },
-  { id: 'careta_policarbonato', nombre: 'Careta Policarbonato', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 5 }, icono: 'careta', columnaExcel: 'CARETA_POLICARBONATO', demo: { '': 15 } },
+  { id: 'casco', nombre: 'Casco de Seguridad', categoriaId: 'cabeza', tipo: 'resguardo', variantes: [], stockMin: { '': 25 }, icono: 'casco', demo: { '': 80 } },
+  { id: 'arnes_casco', nombre: 'Arnés de Casco', categoriaId: 'cabeza', tipo: 'consumible', variantes: [], stockMin: { '': 10 }, icono: 'arnescasco', demo: { '': 30 } },
+  { id: 'barbiquejo', nombre: 'Barbiquejo', categoriaId: 'cabeza', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'barbiquejo', demo: { '': 50 } },
+  { id: 'lentes_claros', nombre: 'Lentes Claros', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 30 }, icono: 'lentes', demo: { '': 150 } },
+  { id: 'lentes_oscuros', nombre: 'Lentes Oscuros', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'lentes', demo: { '': 60 } },
+  { id: 'cubre_lentes', nombre: 'Cubre Lentes', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 10 }, icono: 'cubrelentes', demo: { '': 30 } },
+  { id: 'careta_policarbonato', nombre: 'Careta Policarbonato', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 5 }, icono: 'careta', demo: { '': 15 } },
   {
     id: 'g_carnaza', nombre: 'Guante de Carnaza', categoriaId: 'manos', tipo: 'consumible',
-    variantes: tallas(['CH', 'M', 'G', 'XG']), stockMin: minimos(['CH', 'M', 'G', 'XG'], 10), icono: 'guante', columnaExcel: 'G._CARNAZA_GDE.',
+    variantes: tallas(['CH', 'M', 'G', 'XG']), stockMin: minimos(['CH', 'M', 'G', 'XG'], 10), icono: 'guante',
     demo: { CH: 20, M: 60, G: 90, XG: 30 },
   },
   {
@@ -63,26 +63,26 @@ const MATS: MatSemilla[] = [
     variantes: tallas(['6', '7', '8', '9', '10'],
       { '6': '#6B3FA0', '7': '#C62828', '8': '#F2C200', '9': '#795548', '10': '#212121' },
       { '6': '6 · morado', '7': '7 · rojo', '8': '8 · amarillo', '9': '9 · café', '10': '10 · negro' }),
-    stockMin: minimos(['6', '7', '8', '9', '10'], 5), icono: 'guante', columnaExcel: 'G._HYFLEX',
+    stockMin: minimos(['6', '7', '8', '9', '10'], 5), icono: 'guante',
     demo: { '6': 10, '7': 20, '8': 30, '9': 25, '10': 4 },
   },
   {
     id: 'g_nitrilo', nombre: 'Guante de Nitrilo', categoriaId: 'manos', tipo: 'consumible',
-    variantes: tallas(['7', '8', '9', '10']), stockMin: minimos(['7', '8', '9', '10'], 5), icono: 'guante', columnaExcel: 'G._NITRILO',
+    variantes: tallas(['7', '8', '9', '10']), stockMin: minimos(['7', '8', '9', '10'], 5), icono: 'guante',
     demo: { '7': 10, '8': 15, '9': 15, '10': 10 },
   },
-  { id: 'tapones', nombre: 'Tapones Auditivos', categoriaId: 'oidos', tipo: 'consumible', variantes: [], stockMin: { '': 50 }, icono: 'tapones', columnaExcel: 'TAPONES_AUDITIVOS', demo: { '': 300 } },
-  { id: 'm_polvo', nombre: 'Mascarilla Polvo', categoriaId: 'respiratoria', tipo: 'consumible', variantes: [], stockMin: { '': 20 }, icono: 'mascarilla', columnaExcel: 'MASCARILLA_POLVO', demo: { '': 100 } },
-  { id: 'm_gris', nombre: 'Mascarilla Gris', categoriaId: 'respiratoria', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'mascarilla', columnaExcel: 'MASCARILLA_GRIS', demo: { '': 40 } },
-  { id: 'm_negra', nombre: 'Mascarilla Negra', categoriaId: 'respiratoria', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'mascarilla', columnaExcel: 'MASCARILLA_NEGRA', demo: { '': 40 } },
-  { id: 'm_azul', nombre: 'Mascarilla Azul', categoriaId: 'respiratoria', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'mascarilla', columnaExcel: 'MASCARILLA_AZUL', demo: { '': 30 } },
+  { id: 'tapones', nombre: 'Tapones Auditivos', categoriaId: 'oidos', tipo: 'consumible', variantes: [], stockMin: { '': 50 }, icono: 'tapones', demo: { '': 300 } },
+  { id: 'm_polvo', nombre: 'Mascarilla Polvo', categoriaId: 'respiratoria', tipo: 'consumible', variantes: [], stockMin: { '': 20 }, icono: 'mascarilla', demo: { '': 100 } },
+  { id: 'm_gris', nombre: 'Mascarilla Gris', categoriaId: 'respiratoria', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'mascarilla', demo: { '': 40 } },
+  { id: 'm_negra', nombre: 'Mascarilla Negra', categoriaId: 'respiratoria', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'mascarilla', demo: { '': 40 } },
+  { id: 'm_azul', nombre: 'Mascarilla Azul', categoriaId: 'respiratoria', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'mascarilla', demo: { '': 30 } },
   {
     id: 'faja', nombre: 'Faja Lumbar', categoriaId: 'altura', tipo: 'resguardo',
-    variantes: tallas(['MED', 'GDE', 'XL']), stockMin: minimos(['MED', 'GDE', 'XL'], 5), icono: 'faja', columnaExcel: 'FAJA_LUMBAR_{v}',
+    variantes: tallas(['MED', 'GDE', 'XL']), stockMin: minimos(['MED', 'GDE', 'XL'], 5), icono: 'faja',
     demo: { MED: 20, GDE: 25, XL: 4 },
   },
-  { id: 'arnes_cuerpo', nombre: 'Arnés de Cuerpo Completo', categoriaId: 'altura', tipo: 'prestamo', plazoDias: 1, variantes: [], stockMin: { '': 5 }, icono: 'arnes', columnaExcel: 'ARNÉS_DE_CUERPO_COMPLETO', demo: { '': 15 } },
-  { id: 'linea_vida', nombre: 'Línea de Vida / Amort.', categoriaId: 'altura', tipo: 'prestamo', plazoDias: 1, variantes: [], stockMin: { '': 5 }, icono: 'linea', columnaExcel: 'LÍNEA_DE_VIDA_/_AMORT.', demo: { '': 15 } },
+  { id: 'arnes_cuerpo', nombre: 'Arnés de Cuerpo Completo', categoriaId: 'altura', tipo: 'prestamo', plazoDias: 1, variantes: [], stockMin: { '': 5 }, icono: 'arnes', demo: { '': 15 } },
+  { id: 'linea_vida', nombre: 'Línea de Vida / Amort.', categoriaId: 'altura', tipo: 'prestamo', plazoDias: 1, variantes: [], stockMin: { '': 5 }, icono: 'linea', demo: { '': 15 } },
 ]
 
 export function materialesSemilla(): Material[] {
@@ -93,14 +93,6 @@ export function materialesSemilla(): Material[] {
 export function existenciasDemo(): { materialId: string; varianteId: string; cantidad: number }[] {
   return MATS.flatMap((m) => Object.entries(m.demo).map(([varianteId, cantidad]) => ({ materialId: m.id, varianteId, cantidad })))
 }
-
-/** Orden de columnas que espera la macro ImportarTurnoCSV del libro maestro. */
-export const COLUMNAS_EXCEL = [
-  'CASCO', 'LENTES_CLAROS', 'LENTES_OSCUROS', 'CUBRE_LENTES', 'G._CARNAZA_GDE.', 'G._HYFLEX', 'G._NITRILO',
-  'TAPONES_AUDITIVOS', 'BARBIQUEJO', 'ARNÉS_DE_CASCO', 'MASCARILLA_POLVO', 'MASCARILLA_GRIS', 'MASCARILLA_NEGRA',
-  'MASCARILLA_AZUL', 'FAJA_LUMBAR_MED', 'FAJA_LUMBAR_GDE', 'FAJA_LUMBAR_XL', 'CARETA_POLICARBONATO',
-  'ARNÉS_DE_CUERPO_COMPLETO', 'LÍNEA_DE_VIDA_/_AMORT.',
-]
 
 const GUANTES_FINOS = ['INSTRUMENTACION Y CONTROL', 'MANTENIMIENTO ELÉCTRICO']
 const GUANTES_CARNAZA = ['MANTENIMIENTO ELÉCTRICO', 'MANTENIMIENTO MECÁNICO', 'APOYO CONSTRUCTIVO']
