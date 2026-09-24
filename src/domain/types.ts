@@ -1,7 +1,12 @@
 // Modelo de datos de la app. Todos los registros llevan un `id` único para poder
 // combinarse entre equipos (y, en la Fase 2, sincronizarse con Google Sheets).
 
-export type TipoMaterial = 'consumible' | 'resguardo'
+/**
+ * consumible: se entrega y no regresa (lentes, guantes, arnés de casco, barbiquejo).
+ * resguardo: queda a cargo del trabajador a largo plazo; máximo uno por trabajador (casco, faja).
+ * prestamo: equipo caro y limitado que debe devolverse pronto (arnés de cuerpo completo, línea de vida).
+ */
+export type TipoMaterial = 'consumible' | 'resguardo' | 'prestamo'
 
 export interface Variante {
   id: string // p. ej. 'G', '8', 'MED'
@@ -25,6 +30,8 @@ export interface Material {
   orden: number
   activo: boolean
   columnaExcel?: string // columna del CSV del libro maestro (compatibilidad)
+  /** Préstamo: días para devolverlo (0 = el mismo día). */
+  plazoDias?: number
   actualizado: string
 }
 
@@ -44,6 +51,8 @@ export interface KitLinea {
   cantidad: number
   /** Si se indica, la línea solo aplica a trabajadores de estas áreas. */
   areas?: string[]
+  /** Solo se agrega si el kit también entrega este material (p. ej. barbiquejo con el casco). */
+  conMaterial?: string
 }
 
 export interface Kit {
@@ -66,6 +75,12 @@ export interface Ubicacion {
 
 export type TipoTrabajador = 'planta' | 'eventual'
 
+export interface Supervisor {
+  nombre: string
+  rpe: string
+  extension: string
+}
+
 export interface Trabajador {
   rpe: string
   nombre: string
@@ -75,6 +90,7 @@ export interface Trabajador {
   tipo: TipoTrabajador
   vigencia?: string // fecha fin de contrato (eventuales)
   tallas: Record<string, string> // materialId → varianteId usada la última vez
+  supervisor?: Supervisor // último supervisor registrado en un préstamo
   activo: boolean
   alta: string
   altaPor?: string
@@ -111,7 +127,13 @@ export interface LineaEntrega {
   varianteId: string
   cantidad: number
   esResguardo: boolean
+  esPrestamo?: boolean
   motivoId?: string
+}
+
+export interface DatosPrestamo {
+  supervisor: Supervisor
+  vence: string // fecha límite de devolución (YYYY-MM-DD)
 }
 
 export interface Anulacion {
@@ -139,6 +161,7 @@ export interface Entrega {
   observaciones: string
   estado: 'registrada' | 'anulada'
   anulacion?: Anulacion
+  prestamo?: DatosPrestamo
 }
 
 export type TipoMovimiento = 'INICIAL' | 'ENTRADA' | 'SALIDA' | 'DEVOLUCION' | 'AJUSTE' | 'TRASPASO' | 'ANULACION'
@@ -183,6 +206,10 @@ export interface Resguardo {
   fechaEntrega: string
   estatus: 'ACTIVO' | 'CERRADO' | 'ANULADO'
   cierre?: CierreResguardo
+  /** undefined = resguardo (registros anteriores). */
+  tipo?: 'resguardo' | 'prestamo'
+  vence?: string
+  supervisor?: Supervisor
   /** Sube con cada cambio de estatus; decide qué versión gana al sincronizar. */
   ver?: number
 }

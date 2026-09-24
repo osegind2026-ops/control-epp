@@ -140,7 +140,7 @@ export function csvDetalle(lista: Entrega[]): string {
       csv +=
         [
           e.folio, e.fecha, e.hora, e.estado, e.rpe, e.nombre, e.area,
-          S.nombreMaterial(l.materialId), l.varianteId, l.cantidad, l.esResguardo ? 'SI' : 'NO',
+          S.nombreMaterial(l.materialId), l.varianteId, l.cantidad, l.esResguardo ? 'RESGUARDO' : l.esPrestamo ? 'PRESTAMO' : 'NO',
           l.motivoId ? motivos.get(l.motivoId) : '', e.usuarioNombre, e.equipo, ubis.get(e.ubicacionId), e.observaciones,
         ].map(csvq).join(',') + '\n'
     }

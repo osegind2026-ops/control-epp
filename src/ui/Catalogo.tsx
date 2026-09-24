@@ -21,6 +21,7 @@ function EditorMaterial({ inicial, onCerrar }: { inicial: Material | null; onCer
   const [stockMin, setStockMin] = useState<Record<string, number>>(inicial?.stockMin ?? { [SIN_TALLA]: 5 })
   const [activo, setActivo] = useState(inicial?.activo ?? true)
   const [columnaExcel, setColumnaExcel] = useState(inicial?.columnaExcel ?? '')
+  const [plazoDias, setPlazoDias] = useState(inicial?.plazoDias ?? 1)
   const [foto, setFoto] = useState<string | null | undefined>(undefined) // undefined = sin cambios, null = quitar
   const fotoActual = foto === undefined ? (inicial?.fotoId ? S.fotos.value.get(inicial.fotoId) : undefined) : foto ?? undefined
 
@@ -53,6 +54,7 @@ function EditorMaterial({ inicial, onCerrar }: { inicial: Material | null; onCer
           orden: inicial?.orden ?? S.materiales.value.length + 1,
           fotoId: inicial?.fotoId,
           columnaExcel: columnaExcel.trim() || undefined,
+          plazoDias: tipo === 'prestamo' ? plazoDias : undefined,
         },
         foto,
       )
@@ -129,9 +131,23 @@ function EditorMaterial({ inicial, onCerrar }: { inicial: Material | null; onCer
               Consumible
             </button>
             <button class="chip" aria-pressed={tipo === 'resguardo'} onClick={() => setTipo('resguardo')}>
-              Resguardo (se devuelve)
+              Resguardo (uno por trabajador)
+            </button>
+            <button class="chip" aria-pressed={tipo === 'prestamo'} onClick={() => setTipo('prestamo')}>
+              Préstamo (corto plazo)
             </button>
           </div>
+          <p class="muted small">
+            {tipo === 'consumible' && 'Se entrega y descuenta del inventario; no se devuelve.'}
+            {tipo === 'resguardo' && 'Queda a cargo del trabajador. Solo puede tener uno; para darle otro se elige un motivo de reposición y el anterior se cierra.'}
+            {tipo === 'prestamo' && 'Equipo que debe regresar pronto. Al prestarlo se piden nombre, RPE y extensión del supervisor y la fecha de devolución.'}
+          </p>
+          {tipo === 'prestamo' && (
+            <label class="campo" style={{ maxWidth: '240px' }}>
+              Días para devolverlo (0 = el mismo día)
+              <input class="input" id="mat-plazo" type="number" min={0} max={60} value={plazoDias} onInput={(e) => setPlazoDias(Math.max(0, parseInt((e.target as HTMLInputElement).value, 10) || 0))} />
+            </label>
+          )}
           <label class="check">
             <input type="checkbox" checked={activo} onChange={(e) => setActivo((e.target as HTMLInputElement).checked)} />
             Activo (aparece en el despacho)
@@ -265,10 +281,12 @@ function Materiales() {
             <h3>{c.nombre}</h3>
             <div class="mosaico">
               {deCat.map((m) => (
-                <button key={m.id} class={`tile ${m.tipo === 'resguardo' ? 'resg' : ''}`} style={{ opacity: m.activo ? 1 : 0.5 }} onClick={() => setEditar(m)}>
+                <button key={m.id} class={`tile ${m.tipo === 'resguardo' ? 'resg' : m.tipo === 'prestamo' ? 'prest' : ''}`} style={{ opacity: m.activo ? 1 : 0.5 }} onClick={() => setEditar(m)}>
                   <FotoMaterial materialId={m.id} />
                   <span class="tile-nombre">{m.nombre}</span>
                   <span class="tile-stock">{m.variantes.length ? m.variantes.filter((v) => v.activo).map((v) => v.id).join(' · ') : 'Sin tallas'}</span>
+                  {m.tipo === 'resguardo' && <span class="badge resg">Resguardo</span>}
+                  {m.tipo === 'prestamo' && <span class="badge prest">Préstamo · {m.plazoDias ?? 1} d</span>}
                   {!m.fotoId && <span class="badge warn">Sin foto</span>}
                 </button>
               ))}
@@ -379,6 +397,24 @@ function EditorKit({ inicial, onCerrar }: { inicial: Kit | null; onCerrar: () =>
               })}
             </div>
           </details>
+          <label class="campo small">
+            Agregar solo si el kit también entrega
+            <select
+              class="input"
+              id={`kit-con-${i}`}
+              value={l.conMaterial ?? ''}
+              onChange={(e) => cambiar(i, { conMaterial: (e.target as HTMLSelectElement).value || undefined })}
+            >
+              <option value="">(siempre)</option>
+              {lineas
+                .filter((x) => x.materialId !== l.materialId)
+                .map((x) => (
+                  <option key={x.materialId} value={x.materialId}>
+                    {S.nombreMaterial(x.materialId)}
+                  </option>
+                ))}
+            </select>
+          </label>
         </div>
       ))}
       <button class="btn" onClick={() => setLineas([...lineas, { materialId: S.materialesActivos.value[0]?.id ?? '', cantidad: 1 }])}>

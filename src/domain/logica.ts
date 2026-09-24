@@ -123,13 +123,16 @@ export function aplicarKit(
     const m = materiales.get(l.materialId)
     if (!m || !m.activo) continue
     if (l.areas && l.areas.length && !l.areas.some((a) => normalizar(a) === area)) continue
-    if (m.tipo === 'resguardo' && resguardosActivos.some((r) => r.materialId === l.materialId)) {
+    if (m.tipo !== 'consumible' && resguardosActivos.some((r) => r.materialId === l.materialId)) {
       omitidas.push({ materialId: l.materialId, razon: 'ya lo tiene en resguardo' })
       continue
     }
     lineas.push({ materialId: l.materialId, cantidad: l.cantidad })
   }
-  return { lineas, omitidas }
+  // Complementos (barbiquejo, arnés de casco) solo si va el material al que acompañan
+  const incluidos = new Set(lineas.map((l) => l.materialId))
+  const acompanan = new Map(kit.lineas.filter((l) => l.conMaterial).map((l) => [l.materialId, l.conMaterial!]))
+  return { lineas: lineas.filter((l) => !acompanan.has(l.materialId) || incluidos.has(acompanan.get(l.materialId)!)), omitidas }
 }
 
 // ---------------- Consumo frecuente ----------------
@@ -146,4 +149,17 @@ export function masPedidos(
   const resultado = [...ordenados]
   for (const id of respaldo) if (!resultado.includes(id)) resultado.push(id)
   return resultado.slice(0, limite)
+}
+
+// ---------------- Préstamos ----------------
+
+export function sumarDias(fecha: string, dias: number): string {
+  const d = new Date(fecha + 'T12:00:00')
+  d.setDate(d.getDate() + dias)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Préstamos activos cuya fecha límite ya pasó (o vence hoy, si se pide). */
+export function prestamosVencidos<T extends Pick<Resguardo, 'tipo' | 'estatus' | 'vence'>>(lista: T[], hoy: string, incluirHoy = false): T[] {
+  return lista.filter((r) => r.tipo === 'prestamo' && r.estatus === 'ACTIVO' && !!r.vence && (incluirHoy ? r.vence <= hoy : r.vence < hoy))
 }

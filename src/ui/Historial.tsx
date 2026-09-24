@@ -79,6 +79,7 @@ function DetalleEntrega({ e, onCerrar }: { e: Entrega; onCerrar: () => void }) {
                     <FotoMaterial materialId={l.materialId} mini />
                     {S.materialesPorId.value.get(l.materialId)?.nombre ?? l.materialId}
                     {l.esResguardo && <span class="badge resg">Resguardo</span>}
+                    {l.esPrestamo && <span class="badge prest">Préstamo</span>}
                   </div>
                 </td>
                 <td>
@@ -94,6 +95,11 @@ function DetalleEntrega({ e, onCerrar }: { e: Entrega; onCerrar: () => void }) {
       {resgs.length > 0 && (
         <p class="small">
           Resguardo <span class="mono">{resgs[0].folioSI}</span>: {resgs.map((r) => `${S.nombreMaterial(r.materialId, r.varianteId)} (${r.estatus.toLowerCase()})`).join(', ')}
+        </p>
+      )}
+      {e.prestamo && (
+        <p class="small">
+          Préstamo · devolver a más tardar el <strong>{e.prestamo.vence}</strong> · supervisor {e.prestamo.supervisor.nombre} (RPE {e.prestamo.supervisor.rpe}, ext. {e.prestamo.supervisor.extension})
         </p>
       )}
       {e.observaciones && <p class="small">Observaciones: {e.observaciones}</p>}

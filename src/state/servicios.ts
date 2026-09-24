@@ -10,6 +10,7 @@ import {
 import { existencia, formatoFolio, formatoFolioSI, siguienteFolio } from '../domain/logica'
 import type {
   Dispositivo,
+  DatosPrestamo,
   Entrega,
   LineaEntrega,
   Material,
@@ -213,20 +214,45 @@ export interface Deshacer {
   trabajadorAntes: Trabajador
 }
 
-export async function registrarEntrega(trabajador: Trabajador, lineas: LineaTicket[], observaciones: string): Promise<{ entrega: Entrega; deshacer: Deshacer }> {
+export async function registrarEntrega(
+  trabajador: Trabajador,
+  lineas: LineaTicket[],
+  observaciones: string,
+  prestamo?: DatosPrestamo,
+): Promise<{ entrega: Entrega; deshacer: Deshacer }> {
   const { sesion, equipo } = actor()
   if (!lineas.length) throw new ErrorNegocio('Agregue al menos un material.')
   const mats = S.materialesPorId.value
   const motivos = new Map(S.motivos.value.map((m) => [m.id, m]))
+  const activosTrabajador = S.resguardos.value.filter((r) => r.estatus === 'ACTIVO' && r.rpe === trabajador.rpe)
 
   const lineasEntrega: LineaEntrega[] = lineas.map((l) => {
     const m = mats.get(l.materialId)
     if (!m) throw new ErrorNegocio(`Material desconocido: ${l.materialId}`)
     if (m.variantes.some((v) => v.activo) && !l.varianteId) throw new ErrorNegocio(`Elija la talla de ${m.nombre}.`)
-    if (m.tipo === 'resguardo' && !l.motivoId) throw new ErrorNegocio(`Elija el motivo de ${m.nombre}.`)
     if (l.cantidad <= 0) throw new ErrorNegocio(`Cantidad inválida en ${m.nombre}.`)
-    return { materialId: m.id, varianteId: l.varianteId, cantidad: l.cantidad, esResguardo: m.tipo === 'resguardo', motivoId: l.motivoId }
+    if (m.tipo === 'resguardo') {
+      if (!l.motivoId) throw new ErrorNegocio(`Elija el motivo de ${m.nombre}.`)
+      if (l.cantidad > 1) throw new ErrorNegocio(`Cada trabajador tiene un solo ${m.nombre} en resguardo.`)
+      const motivo = motivos.get(l.motivoId)
+      if (activosTrabajador.some((r) => r.materialId === m.id) && !motivo?.cierraPrevio) {
+        throw new ErrorNegocio(`${trabajador.nombre} ya tiene ${m.nombre} en resguardo. Elija un motivo de reposición (desgaste, daño, extravío o cambio de talla); el anterior se cierra solo.`)
+      }
+    }
+    if (m.tipo === 'prestamo') {
+      if (activosTrabajador.some((r) => r.materialId === m.id)) throw new ErrorNegocio(`${trabajador.nombre} no ha devuelto el ${m.nombre} que tiene en préstamo.`)
+      validarPrestamo(prestamo)
+    }
+    return {
+      materialId: m.id,
+      varianteId: l.varianteId,
+      cantidad: l.cantidad,
+      esResguardo: m.tipo === 'resguardo',
+      esPrestamo: m.tipo === 'prestamo' || undefined,
+      motivoId: m.tipo === 'resguardo' ? l.motivoId : undefined,
+    }
   })
+  const hayPrestamo = lineasEntrega.some((l) => l.esPrestamo)
 
   const ahora = new Date()
   const ubicacionId = ubicacionDespachoId()
@@ -251,6 +277,7 @@ export async function registrarEntrega(trabajador: Trabajador, lineas: LineaTick
     lineas: lineasEntrega,
     observaciones: observaciones.trim(),
     estado: 'registrada',
+    prestamo: hayPrestamo ? limpiarPrestamo(prestamo!) : undefined,
   }
 
   const nota = `${trabajador.rpe} · ${trabajador.nombre}`
@@ -320,13 +347,34 @@ export async function registrarEntrega(trabajador: Trabajador, lineas: LineaTick
       cantidad: l.cantidad,
       fechaEntrega: entrega.fecha,
       estatus: 'ACTIVO',
+      tipo: 'resguardo',
     })
   }
 
-  // Recordar tallas del trabajador para la próxima vez
+  // Préstamos de corto plazo (arnés de cuerpo completo, línea de vida)
+  for (const l of lineasEntrega.filter((x) => x.esPrestamo)) {
+    nuevos.push({
+      id: nuevoId('R'),
+      entregaId: entrega.id,
+      folioSI: `PR-${ahora.getFullYear()}-${equipo.codigo}-${String(folioNum).padStart(4, '0')}`,
+      rpe: trabajador.rpe,
+      nombre: trabajador.nombre,
+      area: trabajador.area,
+      materialId: l.materialId,
+      varianteId: l.varianteId,
+      cantidad: l.cantidad,
+      fechaEntrega: entrega.fecha,
+      estatus: 'ACTIVO',
+      tipo: 'prestamo',
+      vence: entrega.prestamo!.vence,
+      supervisor: entrega.prestamo!.supervisor,
+    })
+  }
+
+  // Recordar tallas (y supervisor) del trabajador para la próxima vez
   const tallas = { ...trabajador.tallas }
   for (const l of lineasEntrega) if (l.varianteId) tallas[l.materialId] = l.varianteId
-  const trabajadorNuevo: Trabajador = { ...trabajador, tallas, actualizado: entrega.ts }
+  const trabajadorNuevo: Trabajador = { ...trabajador, tallas, supervisor: entrega.prestamo?.supervisor ?? trabajador.supervisor, actualizado: entrega.ts }
   const nuevosFolios = { ...S.folios.value, [equipo.codigo]: folioNum }
 
   await db.transaction('rw', [db.entregas, db.movimientos, db.resguardos, db.personal, db.config], async () => {
@@ -340,6 +388,21 @@ export async function registrarEntrega(trabajador: Trabajador, lineas: LineaTick
   await S.recargar('entregas', 'movimientos', 'resguardos', 'personal')
   await marcarCambio()
   return { entrega, deshacer: { entregaId: entrega.id, folioNum, cerrados, trabajadorAntes: trabajador } }
+}
+
+function limpiarPrestamo(p: DatosPrestamo): DatosPrestamo {
+  return {
+    vence: p.vence,
+    supervisor: { nombre: p.supervisor.nombre.trim().toUpperCase(), rpe: p.supervisor.rpe.trim().toUpperCase(), extension: p.supervisor.extension.trim() },
+  }
+}
+
+function validarPrestamo(p?: DatosPrestamo): void {
+  if (!p) throw new ErrorNegocio('Faltan los datos del préstamo (supervisor y fecha de devolución).')
+  if (!p.supervisor.nombre.trim() || !p.supervisor.rpe.trim() || !p.supervisor.extension.trim()) {
+    throw new ErrorNegocio('Para prestar el equipo capture nombre, RPE y extensión del supervisor.')
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(p.vence) || p.vence < fechaLocal()) throw new ErrorNegocio('La fecha de devolución debe ser hoy o posterior.')
 }
 
 /** Revierte una entrega recién registrada (botón «Deshacer»). */

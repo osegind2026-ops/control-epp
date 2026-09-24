@@ -7,7 +7,9 @@ import {
   formatoFolio,
   masPedidos,
   nivelStock,
+  prestamosVencidos,
   resolverRpe,
+  sumarDias,
   siguienteFolio,
 } from './logica'
 import type { Kit, Material, Movimiento, Trabajador } from './types'
@@ -123,6 +125,40 @@ describe('kits', () => {
     const r = aplicarKit(kit, { area: 'MANTENIMIENTO MECÁNICO' }, [{ materialId: 'casco' }], mats)
     expect(r.lineas.map((l) => l.materialId)).toEqual(['lentes', 'carnaza'])
     expect(r.omitidas).toEqual([{ materialId: 'casco', razon: 'ya lo tiene en resguardo' }])
+  })
+})
+
+describe('kits con complementos', () => {
+  const mats = new Map<string, Material>([
+    ['casco', material({ id: 'casco', tipo: 'resguardo' })],
+    ['barbiquejo', material({ id: 'barbiquejo' })],
+    ['lentes', material({ id: 'lentes' })],
+  ])
+  const kit: Kit = {
+    id: 'k', nombre: 'Ingreso', orden: 0, activo: true, actualizado: '',
+    lineas: [
+      { materialId: 'casco', cantidad: 1 },
+      { materialId: 'barbiquejo', cantidad: 1, conMaterial: 'casco' },
+      { materialId: 'lentes', cantidad: 1 },
+    ],
+  }
+  it('el barbiquejo solo va si va el casco', () => {
+    expect(aplicarKit(kit, { area: 'X' }, [], mats).lineas.map((l) => l.materialId)).toEqual(['casco', 'barbiquejo', 'lentes'])
+    expect(aplicarKit(kit, { area: 'X' }, [{ materialId: 'casco' }], mats).lineas.map((l) => l.materialId)).toEqual(['lentes'])
+  })
+})
+
+describe('préstamos vencidos', () => {
+  it('detecta los que pasaron su fecha límite', () => {
+    const lista = [
+      { id: 'a', tipo: 'prestamo' as const, estatus: 'ACTIVO' as const, vence: '2026-09-20' },
+      { id: 'b', tipo: 'prestamo' as const, estatus: 'ACTIVO' as const, vence: '2026-09-23' },
+      { id: 'c', tipo: 'prestamo' as const, estatus: 'CERRADO' as const, vence: '2026-09-01' },
+      { id: 'd', tipo: 'resguardo' as const, estatus: 'ACTIVO' as const, vence: '2026-09-01' },
+    ]
+    expect(prestamosVencidos(lista, '2026-09-23').map((r) => r.id)).toEqual(['a'])
+    expect(prestamosVencidos(lista, '2026-09-23', true).map((r) => r.id)).toEqual(['a', 'b'])
+    expect(sumarDias('2026-09-30', 1)).toBe('2026-10-01')
   })
 })
 

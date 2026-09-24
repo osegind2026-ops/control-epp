@@ -78,6 +78,8 @@ export class HojaSimulada {
 export function crearServidorSimulado() {
   const hojas = new Map<string, HojaSimulada>()
   const props = new Map<string, string>()
+  const correos: { to: string; subject: string; htmlBody: string }[] = []
+  const disparadores: string[] = []
   const libro = {
     getSheetByName: (n: string) => hojas.get(n) ?? null,
     insertSheet: (n: string) => {
@@ -114,6 +116,16 @@ export function crearServidorSimulado() {
       },
     },
     Logger: { log: () => {} },
+    Session: { getEffectiveUser: () => ({ getEmail: () => 'oficina@ejemplo.com' }) },
+    MailApp: { sendEmail: (c: { to: string; subject: string; htmlBody: string }) => void correos.push(c) },
+    ScriptApp: {
+      getProjectTriggers: () => disparadores.map((f) => ({ getHandlerFunction: () => f })),
+      deleteTrigger: (t: { getHandlerFunction: () => string }) => void disparadores.splice(disparadores.indexOf(t.getHandlerFunction()), 1),
+      newTrigger: (f: string) => {
+        const cadena = { timeBased: () => cadena, everyDays: () => cadena, atHour: () => cadena, inTimezone: () => cadena, create: () => void disparadores.push(f) }
+        return cadena
+      },
+    },
   }
   vm.createContext(contexto)
   const ruta = fileURLToPath(new URL('../../nube/Codigo.gs', import.meta.url))
@@ -121,11 +133,17 @@ export function crearServidorSimulado() {
   const g = contexto as unknown as {
     doPost: (e: unknown) => { contenido: string }
     configurar: () => string
+    enviarAvisos: () => string
+    activarAvisosDiarios: () => string
   }
   return {
     hojas,
     props,
+    correos,
+    disparadores,
     configurar: () => g.configurar(),
+    enviarAvisos: () => g.enviarAvisos(),
+    activarAvisosDiarios: () => g.activarAvisosDiarios(),
     /** Transporte para el cliente: en lugar de fetch, llama directo a doPost. */
     transporte: async (_url: string, cuerpo: unknown) => JSON.parse(g.doPost({ postData: { contents: JSON.stringify(cuerpo) } }).contenido),
   }

@@ -137,3 +137,40 @@ describe('exportación e importación', () => {
     ])
   })
 })
+
+describe('resguardo único, consumibles y préstamos', () => {
+  const supervisor = { nombre: 'SUPERVISOR DE PRUEBA', rpe: 'S0001', extension: '4455' }
+  const hoy = new Date().toISOString().slice(0, 10)
+
+  it('no permite un segundo casco sin motivo de reposición y cierra el anterior al reponer', async () => {
+    await registrarEntrega(persona(), [{ materialId: 'casco', varianteId: '', cantidad: 1, motivoId: 'ent_primera' }], '')
+    await expect(registrarEntrega(persona(), [{ materialId: 'casco', varianteId: '', cantidad: 1, motivoId: 'ent_primera' }], '')).rejects.toThrow(/ya tiene Casco/)
+    await expect(registrarEntrega(persona(), [{ materialId: 'casco', varianteId: '', cantidad: 2, motivoId: 'ent_desgaste' }], '')).rejects.toThrow(/un solo/)
+    await registrarEntrega(persona(), [{ materialId: 'casco', varianteId: '', cantidad: 1, motivoId: 'ent_desgaste' }], '')
+    expect(S.resguardosActivos.value.filter((r) => r.rpe === 'T0901' && r.materialId === 'casco')).toHaveLength(1)
+  })
+
+  it('arnés de casco y barbiquejo se entregan como consumibles', async () => {
+    const antes = S.resguardosActivos.value.length
+    await registrarEntrega(persona(), [
+      { materialId: 'barbiquejo', varianteId: '', cantidad: 1 },
+      { materialId: 'arnes_casco', varianteId: '', cantidad: 2 },
+    ], '')
+    expect(S.resguardosActivos.value.length).toBe(antes)
+  })
+
+  it('el préstamo exige supervisor y fecha, y no se presta otro hasta devolverlo', async () => {
+    const linea = [{ materialId: 'arnes_cuerpo', varianteId: '', cantidad: 1 }]
+    await expect(registrarEntrega(persona(), linea, '')).rejects.toThrow(/supervisor/)
+    await expect(registrarEntrega(persona(), linea, '', { supervisor: { ...supervisor, extension: '' }, vence: hoy })).rejects.toThrow(/extensión/)
+    const { entrega } = await registrarEntrega(persona(), linea, '', { supervisor, vence: hoy })
+    const prestamo = S.resguardosActivos.value.find((r) => r.entregaId === entrega.id)!
+    expect(prestamo.tipo).toBe('prestamo')
+    expect(prestamo.folioSI).toMatch(/^PR-/)
+    expect(prestamo.supervisor?.extension).toBe('4455')
+    expect(persona().supervisor?.rpe).toBe('S0001')
+    await expect(registrarEntrega(persona(), linea, '', { supervisor, vence: hoy })).rejects.toThrow(/no ha devuelto/)
+    await devolverResguardo(prestamo.id, 'dev_bueno', '')
+    await registrarEntrega(persona(), linea, '', { supervisor, vence: hoy })
+  })
+})

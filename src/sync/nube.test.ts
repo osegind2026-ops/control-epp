@@ -126,4 +126,25 @@ describe('sincronización entre dos equipos', () => {
     expect(await suma(baseB)).toBe(await suma(db))
     expect(await baseB.movimientos.count()).toBe(await db.movimientos.count())
   })
+
+  it('los préstamos llegan a la hoja y los vencidos generan el aviso por correo', async () => {
+    const hoy = new Date().toISOString().slice(0, 10)
+    const supervisor = { nombre: 'SUPERVISOR PRUEBA', rpe: 'S0002', extension: '7788' }
+    const { entrega } = await registrarEntrega(S.personal.value.get('T0901')!, [{ materialId: 'arnes_cuerpo', varianteId: '', cantidad: 1 }], '', { supervisor, vence: hoy })
+    // Simular que la fecha límite ya pasó
+    const prestamo = (await db.resguardos.where('entregaId').equals(entrega.id).first())!
+    await db.resguardos.put({ ...prestamo, vence: '2026-01-05' })
+    cfgA.cursor = (await sincronizar(db, cfgA, servidor.transporte)).cursor
+
+    const fila = filasDe('Resguardos').find((f) => f['Tipo'] === 'PRÉSTAMO')
+    expect(fila?.['Ext. supervisor']).toBe('7788')
+    expect(servidor.enviarAvisos()).toMatch(/Aviso enviado/)
+    const correo = servidor.correos.at(-1)!
+    expect(correo.subject).toMatch(/1 préstamo vencido/)
+    expect(correo.htmlBody).toContain('SUPERVISOR PRUEBA (RPE S0002, ext. 7788)')
+    expect(correo.htmlBody).toContain('2026-01-05')
+    servidor.activarAvisosDiarios()
+    servidor.activarAvisosDiarios()
+    expect(servidor.disparadores).toEqual(['enviarAvisos'])
+  })
 })

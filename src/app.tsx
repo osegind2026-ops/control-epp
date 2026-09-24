@@ -1,7 +1,9 @@
-import { signal } from '@preact/signals'
 import { useEffect, useState } from 'preact/hooks'
-import { hace, iniciales, plural } from './lib/util'
+import { prestamosVencidos } from './domain/logica'
+import { fechaLocal, hace, iniciales, plural } from './lib/util'
 import { cerrarSesion } from './state/servicios'
+import { migrar } from './state/migraciones'
+import { pantalla, type Pantalla } from './state/navegacion'
 import { cargarNube, nube } from './state/nube'
 import * as S from './state/store'
 import { PantallaAcceso } from './ui/Acceso'
@@ -18,9 +20,6 @@ import { PantallaInventario } from './ui/Inventario'
 import { PantallaPersonal } from './ui/Personal'
 import { PantallaReportes } from './ui/Reportes'
 
-type Pantalla = 'despacho' | 'devolucion' | 'inventario' | 'historial' | 'reportes' | 'catalogo' | 'personal' | 'ajustes'
-
-export const pantalla = signal<Pantalla>('despacho')
 
 const NAV: { id: Pantalla; texto: string; icono: string }[] = [
   { id: 'despacho', texto: 'Despacho', icono: 'despacho' },
@@ -115,6 +114,7 @@ function Shell() {
   const s = S.sesion.value!
   const eq = S.dispositivo.value!
   const alerta = requiereRespaldo()
+  const vencidos = prestamosVencidos(S.resguardosActivos.value, fechaLocal()).length
   useBloqueoInactividad()
 
   return (
@@ -128,6 +128,7 @@ function Shell() {
           <button key={n.id} class="nav-item" aria-current={pantalla.value === n.id ? 'page' : undefined} onClick={() => (pantalla.value = n.id)}>
             <Icono n={n.icono} /> {n.texto}
             {n.id === 'ajustes' && alerta && <span class="punto" title="Hay cambios sin respaldar" />}
+            {n.id === 'devolucion' && vencidos > 0 && <span class="punto" title="Préstamos vencidos" />}
           </button>
         ))}
         <div class="side-pie">
@@ -171,6 +172,7 @@ function Shell() {
           <button key={n.id} aria-current={pantalla.value === n.id ? 'page' : undefined} onClick={() => (pantalla.value = n.id)}>
             <Icono n={n.icono} />
             {n.texto}
+            {n.id === 'devolucion' && vencidos > 0 && <span class="punto" />}
           </button>
         ))}
         <button aria-current={!NAV_MOVIL.includes(pantalla.value) ? 'page' : undefined} onClick={() => setMas(true)}>
@@ -186,7 +188,7 @@ function Shell() {
 
 export function App() {
   useEffect(() => {
-    S.cargarTodo().then(cargarNube)
+    S.cargarTodo().then(migrar).then(cargarNube)
   }, [])
 
   let vista

@@ -1,10 +1,11 @@
 import { signal } from '@preact/signals'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { MAS_PEDIDOS_BASE } from '../db/semilla'
-import { aplicarKit, existencia, masPedidos, nivelStock, resolverRpe, tieneTallas, variantesDe } from '../domain/logica'
-import type { Material, Trabajador } from '../domain/types'
-import { normalizar } from '../lib/util'
+import { aplicarKit, existencia, masPedidos, nivelStock, prestamosVencidos, resolverRpe, sumarDias, tieneTallas, variantesDe } from '../domain/logica'
+import type { DatosPrestamo, Material, Trabajador } from '../domain/types'
+import { fechaLocal, normalizar } from '../lib/util'
 import { deshacerEntrega, registrarEntrega, type LineaTicket } from '../state/servicios'
+import { pantalla } from '../state/navegacion'
 import * as S from '../state/store'
 import { avisar, FotoMaterial, intentar, Modal, Talla } from './comunes'
 import { Icono } from './iconos'
@@ -17,6 +18,17 @@ interface Linea extends LineaTicket {
 const ticket = signal<Linea[]>([])
 const trabajadorSel = signal<Trabajador | null>(null)
 const observaciones = signal('')
+const datosPrestamo = signal<DatosPrestamo>({ supervisor: { nombre: '', rpe: '', extension: '' }, vence: '' })
+
+function lineasPrestamo(): Linea[] {
+  return ticket.value.filter((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'prestamo')
+}
+
+/** Fecha límite sugerida: hoy + el plazo más corto de los equipos prestados. */
+function venceSugerido(): string {
+  const plazos = lineasPrestamo().map((l) => S.materialesPorId.value.get(l.materialId)?.plazoDias ?? 1)
+  return sumarDias(fechaLocal(), plazos.length ? Math.min(...plazos) : 1)
+}
 
 const claveLinea = (materialId: string, varianteId: string) => `${materialId}|${varianteId}`
 
@@ -31,7 +43,8 @@ function agregar(materialId: string, varianteId: string, cantidad = 1) {
   const clave = claveLinea(materialId, varianteId)
   const lista = [...ticket.value]
   const i = lista.findIndex((l) => l.clave === clave)
-  if (i >= 0) lista[i] = { ...lista[i], cantidad: lista[i].cantidad + cantidad }
+  const tipo = S.materialesPorId.value.get(materialId)?.tipo
+  if (i >= 0) lista[i] = { ...lista[i], cantidad: tipo === 'resguardo' ? 1 : lista[i].cantidad + cantidad }
   else lista.push({ clave, materialId, varianteId, cantidad, motivoId: motivoPorDefecto(trabajadorSel.value, materialId) })
   ticket.value = lista
 }
@@ -64,6 +77,7 @@ function agregarConTalla(m: Material, pedirTalla: (m: Material) => void) {
 
 function elegirTrabajador(t: Trabajador) {
   trabajadorSel.value = t
+  datosPrestamo.value = { supervisor: t.supervisor ?? { nombre: '', rpe: '', extension: '' }, vence: datosPrestamo.value.vence }
   // Recalcular motivos de resguardo según lo que el trabajador ya tiene
   ticket.value = ticket.value.map((l) => ({ ...l, motivoId: l.motivoId || motivoPorDefecto(t, l.materialId) }))
 }
@@ -104,7 +118,9 @@ function Renglon({ l, trabajador }: { l: Linea; trabajador: Trabajador | null })
   const otras = S.ubicacionesActivas.value.filter((u) => u.id !== ubi)
   const enOtras = disp !== null ? otras.map((u) => ({ u, n: existencia(S.existencias.value, m.id, l.varianteId, u.id) })).filter((x) => x.n > 0) : []
   const minimo = m.stockMin[l.varianteId] ?? 0
-  const previo = trabajador && m.tipo === 'resguardo' ? S.resguardosActivos.value.find((r) => r.rpe === trabajador.rpe && r.materialId === m.id) : undefined
+  const previo = trabajador && m.tipo !== 'consumible' ? S.resguardosActivos.value.find((r) => r.rpe === trabajador.rpe && r.materialId === m.id) : undefined
+  // Si ya tiene uno en resguardo, solo se permiten motivos que cierren el anterior
+  const motivosLinea = S.motivosDe('entrega').filter((mo) => !previo || mo.cierraPrevio)
 
   return (
     <div class="renglon">
@@ -129,7 +145,7 @@ function Renglon({ l, trabajador }: { l: Linea; trabajador: Trabajador | null })
             <Icono n="menos" />
           </button>
           <span aria-live="polite">{l.cantidad}</span>
-          <button onClick={() => cambiarLinea(l.clave, { cantidad: l.cantidad + 1 })} aria-label="Agregar una pieza">
+          <button onClick={() => cambiarLinea(l.clave, { cantidad: l.cantidad + 1 })} disabled={m.tipo === 'resguardo'} aria-label="Agregar una pieza">
             <Icono n="mas1" />
           </button>
         </div>
@@ -164,7 +180,7 @@ function Renglon({ l, trabajador }: { l: Linea; trabajador: Trabajador | null })
             onChange={(e) => cambiarLinea(l.clave, { motivoId: (e.target as HTMLSelectElement).value })}
           >
             <option value="">Elija el motivo…</option>
-            {S.motivosDe('entrega').map((mo) => (
+            {motivosLinea.map((mo) => (
               <option key={mo.id} value={mo.id}>
                 {mo.texto}
               </option>
@@ -172,11 +188,20 @@ function Renglon({ l, trabajador }: { l: Linea; trabajador: Trabajador | null })
           </select>
         </label>
       )}
-      {previo && (
+      {m.tipo === 'prestamo' && <span class="badge prest" style={{ justifySelf: 'start' }}>Préstamo · se devuelve</span>}
+      {previo && m.tipo === 'resguardo' && (
         <div class="aviso warn small">
           <Icono n="alerta" />
           <span>
-            Ya tiene {S.nombreMaterial(previo.materialId, previo.varianteId)} en resguardo desde {previo.fechaEntrega} ({previo.folioSI}). Elija el motivo de la reposición.
+            Ya tiene {S.nombreMaterial(previo.materialId, previo.varianteId)} en resguardo desde {previo.fechaEntrega} ({previo.folioSI}). Elija el motivo de la reposición: el anterior se cierra solo.
+          </span>
+        </div>
+      )}
+      {previo && m.tipo === 'prestamo' && (
+        <div class="aviso bad small">
+          <Icono n="alerta" />
+          <span>
+            No ha devuelto el {m.nombre} que se le prestó el {previo.fechaEntrega} ({previo.folioSI}). Registre primero la devolución.
           </span>
         </div>
       )}
@@ -196,6 +221,42 @@ function Renglon({ l, trabajador }: { l: Linea; trabajador: Trabajador | null })
   )
 }
 
+// ---------- Datos del préstamo ----------
+
+function PanelPrestamo() {
+  const dp = datosPrestamo.value
+  const cambiar = (c: Partial<DatosPrestamo['supervisor']>) => (datosPrestamo.value = { ...dp, supervisor: { ...dp.supervisor, ...c } })
+  const buscarSupervisor = (rpe: string) => {
+    const s = S.personal.value.get(rpe.trim().toUpperCase())
+    cambiar({ rpe: rpe.toUpperCase(), ...(s && !dp.supervisor.nombre ? { nombre: s.nombre } : {}) })
+  }
+  return (
+    <fieldset class="panel-prestamo">
+      <legend>Préstamo · datos del supervisor</legend>
+      <div class="row" style={{ alignItems: 'start', flexWrap: 'nowrap' }}>
+        <label class="campo" style={{ width: '96px', flex: 'none' }}>
+          RPE
+          <input class="input" id="sup-rpe" value={dp.supervisor.rpe} maxLength={8} onInput={(e) => buscarSupervisor((e.target as HTMLInputElement).value)} />
+        </label>
+        <label class="campo grow">
+          Nombre
+          <input class="input" id="sup-nombre" value={dp.supervisor.nombre} onInput={(e) => cambiar({ nombre: (e.target as HTMLInputElement).value })} />
+        </label>
+      </div>
+      <div class="row" style={{ alignItems: 'start', flexWrap: 'nowrap' }}>
+        <label class="campo" style={{ width: '96px', flex: 'none' }}>
+          Extensión
+          <input class="input" id="sup-ext" inputMode="tel" value={dp.supervisor.extension} onInput={(e) => cambiar({ extension: (e.target as HTMLInputElement).value })} />
+        </label>
+        <label class="campo grow">
+          Devolver a más tardar
+          <input class="input" id="prest-vence" type="date" min={fechaLocal()} value={dp.vence} onInput={(e) => (datosPrestamo.value = { ...dp, vence: (e.target as HTMLInputElement).value })} />
+        </label>
+      </div>
+    </fieldset>
+  )
+}
+
 // ---------- Ticket ----------
 
 function Ticket({ onEntregado }: { onEntregado: () => void }) {
@@ -212,29 +273,43 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
   }).length
   const faltaMotivo = lineas.filter((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'resguardo' && !l.motivoId).length
   const sinExistencia = lineas.filter((l) => l.varianteId !== undefined && l.cantidad > existencia(S.existencias.value, l.materialId, l.varianteId, ubi)).length
+  const hayPrestamo = lineas.some((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'prestamo')
+  const dp = datosPrestamo.value
+  const faltaPrestamo = hayPrestamo && (!dp.supervisor.nombre.trim() || !dp.supervisor.rpe.trim() || !dp.supervisor.extension.trim() || !dp.vence)
+  const prestamoPendiente = !!t && lineas.some((l) => {
+    const m = S.materialesPorId.value.get(l.materialId)
+    return m?.tipo === 'prestamo' && S.resguardosActivos.value.some((r) => r.rpe === t.rpe && r.materialId === m.id)
+  })
 
   useEffect(() => setConfirmarFalta(false), [lineas, t])
+  useEffect(() => {
+    if (hayPrestamo && !datosPrestamo.value.vence) datosPrestamo.value = { ...datosPrestamo.value, vence: venceSugerido() }
+  }, [hayPrestamo])
 
   let bloqueo = ''
   if (!t) bloqueo = 'Identifique al trabajador'
   else if (!lineas.length) bloqueo = 'Agregue materiales'
   else if (faltaTalla) bloqueo = `Falta la talla en ${faltaTalla} ${faltaTalla > 1 ? 'renglones' : 'renglón'}`
   else if (faltaMotivo) bloqueo = `Falta el motivo en ${faltaMotivo} resguardo${faltaMotivo > 1 ? 's' : ''}`
+  else if (prestamoPendiente) bloqueo = 'Tiene un préstamo sin devolver'
+  else if (faltaPrestamo) bloqueo = 'Faltan los datos del supervisor para el préstamo'
 
   const entregar = async () => {
     if (bloqueo || !t || enviando) return
     if (sinExistencia && !confirmarFalta) return setConfirmarFalta(true)
     setEnviando(true)
-    const r = await intentar(() => registrarEntrega(t, lineas, observaciones.value))
+    const r = await intentar(() => registrarEntrega(t, lineas, observaciones.value, hayPrestamo ? datosPrestamo.value : undefined))
     setEnviando(false)
     if (!r) return
     const { entrega, deshacer } = r
     const anteriorTicket = ticket.value
     const anteriorTrabajador = t
     const anteriorNota = observaciones.value
+    const anteriorPrestamo = datosPrestamo.value
     ticket.value = []
     trabajadorSel.value = null
     observaciones.value = ''
+    datosPrestamo.value = { supervisor: { nombre: '', rpe: '', extension: '' }, vence: '' }
     setNota(false)
     onEntregado()
     avisar(`✓ ${entrega.folio} · ${entrega.nombre.split(' ').slice(0, 2).join(' ')} · ${piezas} pieza${piezas > 1 ? 's' : ''}`, {
@@ -246,6 +321,7 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
           ticket.value = anteriorTicket
           trabajadorSel.value = S.personal.value.get(anteriorTrabajador.rpe) ?? anteriorTrabajador
           observaciones.value = anteriorNota
+          datosPrestamo.value = anteriorPrestamo
           avisar('Entrega deshecha')
         },
       },
@@ -272,6 +348,7 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
         )}
       </div>
       <div class="ticket-pie">
+        {hayPrestamo && <PanelPrestamo />}
         {nota || observaciones.value ? (
           <input
             class="input"
@@ -356,8 +433,8 @@ export function PantallaDespacho() {
 
   const repetir = () => {
     if (!ultimaEntrega) return
-    const consumibles = ultimaEntrega.lineas.filter((l) => !l.esResguardo)
-    if (!consumibles.length) return avisar('La última entrega solo tenía equipo de resguardo.')
+    const consumibles = ultimaEntrega.lineas.filter((l) => !l.esResguardo && !l.esPrestamo)
+    if (!consumibles.length) return avisar('La última entrega solo tenía equipo de resguardo o préstamo.')
     for (const l of consumibles) agregar(l.materialId, l.varianteId, l.cantidad)
   }
 
@@ -378,9 +455,26 @@ export function PantallaDespacho() {
   const conteoEnTicket = (id: string) => ticket.value.filter((l) => l.materialId === id).reduce((s, l) => s + l.cantidad, 0)
   const piezas = ticket.value.reduce((s, l) => s + l.cantidad, 0)
 
+  const vencidos = prestamosVencidos(S.resguardosActivos.value, fechaLocal())
+
   return (
     <div class="despacho">
       <section class="despacho-main">
+        {vencidos.length > 0 && (
+          <button class="aviso bad" style={{ border: 0, textAlign: 'left', cursor: 'pointer' }} onClick={() => (pantalla.value = 'devolucion')}>
+            <Icono n="alerta" />
+            <span>
+              <strong>
+                {vencidos.length} préstamo{vencidos.length > 1 ? 's' : ''} sin devolver a tiempo:
+              </strong>{' '}
+              {vencidos
+                .slice(0, 3)
+                .map((r) => `${S.nombreMaterial(r.materialId)} · ${r.nombre.split(' ').slice(0, 2).join(' ')}`)
+                .join('; ')}
+              {vencidos.length > 3 && '…'} Toque para ver.
+            </span>
+          </button>
+        )}
         <div class="card" style={{ padding: '12px' }}>
           {t ? (
             <TarjetaTrabajador t={t} onQuitar={() => (trabajadorSel.value = null)} onEditar={() => setEditar(true)} />
@@ -426,7 +520,7 @@ export function PantallaDespacho() {
             const nivel = Math.max(...vars.map((v) => nivelStock(existencia(S.existencias.value, m.id, v, ubi), m.stockMin[v] ?? 0)))
             const n = conteoEnTicket(m.id)
             return (
-              <button key={m.id} class={`tile ${m.tipo === 'resguardo' ? 'resg' : ''}`} onClick={() => agregarConTalla(m, setTallaDe)}>
+              <button key={m.id} class={`tile ${m.tipo === 'resguardo' ? 'resg' : m.tipo === 'prestamo' ? 'prest' : ''}`} onClick={() => agregarConTalla(m, setTallaDe)}>
                 {n > 0 && <span class="contador">{n}</span>}
                 <FotoMaterial materialId={m.id} />
                 <span class="tile-nombre">{m.nombre}</span>
@@ -435,6 +529,7 @@ export function PantallaDespacho() {
                   {total} disp.
                 </span>
                 {m.tipo === 'resguardo' && <span class="badge resg">Resguardo</span>}
+                {m.tipo === 'prestamo' && <span class="badge prest">Préstamo</span>}
               </button>
             )
           })}

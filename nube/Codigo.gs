@@ -11,7 +11,7 @@
  * No edite las pestañas a mano: los cambios se hacen desde la app.
  */
 
-var VERSION_SERVIDOR = '2.0.0'
+var VERSION_SERVIDOR = '2.1.0'
 var ZONA = 'America/Mexico_City'
 var LIMITE_FILAS = 800
 var LIMITE_CARACTERES = 3000000
@@ -80,9 +80,14 @@ var TABLAS = {
   },
   resguardos: {
     hoja: 'Resguardos',
-    cols: ['Folio SI', 'RPE', 'Nombre', 'Material', 'Talla', 'Cantidad', 'Entregado', 'Estatus', 'Cierre', 'Motivo de cierre'],
+    cols: ['Folio', 'RPE', 'Nombre', 'Material', 'Talla', 'Cantidad', 'Entregado', 'Estatus', 'Cierre', 'Motivo de cierre', 'Tipo', 'Devolver antes de', 'Supervisor', 'RPE supervisor', 'Ext. supervisor'],
     fila: function (d, ctx) {
-      return [d.folioSI, d.rpe, d.nombre, nombreMat(ctx, d.materialId), d.varianteId, d.cantidad, d.fechaEntrega, d.estatus, d.cierre ? d.cierre.fecha : '', d.cierre ? d.cierre.motivo : '']
+      var s = d.supervisor || {}
+      return [
+        d.folioSI, d.rpe, d.nombre, nombreMat(ctx, d.materialId), d.varianteId, d.cantidad, d.fechaEntrega, d.estatus,
+        d.cierre ? d.cierre.fecha : '', d.cierre ? d.cierre.motivo : '',
+        d.tipo === 'prestamo' ? 'PRÉSTAMO' : 'RESGUARDO', d.vence || '', s.nombre || '', s.rpe || '', s.extension || '',
+      ]
     },
   },
 }
@@ -143,13 +148,16 @@ function configurar() {
   Object.keys(TABLAS).forEach(function (t) { obtenerHoja(t) })
   hojaEquipos()
   var info = hojaSimple('Configuración', null)
+  var correosPrevios = info.getLastRow() >= FILA_CORREOS ? String(info.getRange(FILA_CORREOS, 2).getValues()[0][0] || '') : ''
   info.clearContents()
-  info.getRange(1, 1, 5, 2).setValues([
+  info.getRange(1, 1, 7, 2).setValues([
     ['Control EPP · servidor', VERSION_SERVIDOR],
     ['Clave de la oficina', props.getProperty('CLAVE')],
     ['Uso', 'Escriba esta clave en la app (Ajustes → Nube) para conectar cada equipo.'],
     ['Seguridad', 'No comparta esta clave fuera de la oficina. Para cambiarla, ejecute «nuevaClave».'],
     ['Configurado', Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd HH:mm')],
+    ['Correos para avisos', correosPrevios],
+    ['Avisos', 'Además de la cuenta dueña, escriba en la celda de arriba otros correos separados por coma. Active el envío diario con «activarAvisosDiarios».'],
   ])
   Logger.log('Clave de la oficina: ' + props.getProperty('CLAVE'))
   return props.getProperty('CLAVE')
@@ -166,6 +174,8 @@ function onOpen() {
     .createMenu('Control EPP')
     .addItem('Configurar / ver clave', 'configurar')
     .addItem('Recalcular existencias', 'recalcularExistencias')
+    .addItem('Enviar avisos ahora', 'enviarAvisos')
+    .addItem('Activar avisos diarios (7:00)', 'activarAvisosDiarios')
     .addToUi()
 }
 
@@ -217,6 +227,14 @@ function obtenerHoja(tabla) {
     h.getRange(1, 1, h.getMaxRows(), enc.length).setNumberFormat('@')
     h.setFrozenRows(1)
     h.hideColumns(COL_JSON + 1)
+  } else {
+    // Hoja creada por una versión anterior: agregar las columnas nuevas al final
+    var enc2 = BASE.concat(def.cols)
+    var actual = h.getRange(1, 1, 1, enc2.length).getValues()[0]
+    if (String(actual[enc2.length - 1]) !== enc2[enc2.length - 1]) {
+      h.getRange(1, 1, 1, enc2.length).setValues([enc2]).setFontWeight('bold').setBackground('#DCEFE3')
+      h.getRange(1, 1, h.getMaxRows(), enc2.length).setNumberFormat('@')
+    }
   }
   return h
 }
@@ -522,4 +540,108 @@ function recalcularExistencias() {
   h.setFrozenRows(1)
   if (filas.length) h.getRange(2, 1, filas.length, enc.length).setValues(filas)
   h.getRange(filas.length + 3, 1, 1, 2).setValues([['Actualizado', Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd HH:mm')]])
+}
+
+// ---------------------------------------------------------------------------
+// Avisos por correo (préstamos vencidos, reabastecer, eventuales)
+// ---------------------------------------------------------------------------
+
+var FILA_CORREOS = 6
+
+function correosAviso() {
+  var dueno = Session.getEffectiveUser().getEmail()
+  var h = libro().getSheetByName('Configuración')
+  var extra = h ? String(h.getRange(FILA_CORREOS, 2).getValues()[0][0] || '') : ''
+  var lista = [dueno].concat(extra.split(/[,;\s]+/)).filter(function (c) { return /@/.test(c) })
+  return lista.filter(function (c, i) { return lista.indexOf(c) === i })
+}
+
+function datosTabla(tabla) {
+  var t = leerTabla(tabla)
+  var salida = []
+  t.filas.forEach(function (f) {
+    if (f[COL_BORRADO] === 'SI') return
+    try {
+      salida.push(JSON.parse(f[COL_JSON]))
+    } catch (e) {}
+  })
+  return salida
+}
+
+/** Arma el resumen del día. Devuelve null si no hay nada que avisar. */
+function resumenAvisos() {
+  var hoy = Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd')
+  var ctx = contexto()
+  var resguardos = datosTabla('resguardos').filter(function (r) { return r.estatus === 'ACTIVO' })
+  var vencidos = resguardos
+    .filter(function (r) { return r.tipo === 'prestamo' && r.vence && r.vence < hoy })
+    .sort(function (a, b) { return a.vence < b.vence ? -1 : 1 })
+  var venceHoy = resguardos.filter(function (r) { return r.tipo === 'prestamo' && r.vence === hoy })
+
+  var personal = {}
+  datosTabla('personal').forEach(function (p) { personal[p.rpe] = p })
+  var conEquipo = {}
+  resguardos.forEach(function (r) { (conEquipo[r.rpe] = conEquipo[r.rpe] || []).push(r) })
+  var eventuales = Object.keys(conEquipo)
+    .map(function (rpe) { return personal[rpe] })
+    .filter(function (p) { return p && p.tipo === 'eventual' && p.vigencia && p.vigencia < hoy })
+
+  var mats = ctx.materiales()
+  var suma = {}
+  datosTabla('movimientos').forEach(function (m) {
+    var k = m.materialId + '|' + m.varianteId
+    suma[k] = (suma[k] || 0) + (Number(m.cantidad) || 0)
+  })
+  var reabastecer = Object.keys(suma)
+    .map(function (k) {
+      var p = k.split('|')
+      var m = mats[p[0]] || {}
+      return { nombre: (m.nombre || p[0]) + (p[1] ? ' ' + p[1] : ''), total: suma[k], minimo: (m.stockMin || {})[p[1]] || 0, activo: m.activo !== false }
+    })
+    .filter(function (x) { return x.activo && x.total <= x.minimo })
+
+  if (!vencidos.length && !venceHoy.length && !eventuales.length && !reabastecer.length) return null
+
+  function fila(celdas) { return '<tr>' + celdas.map(function (c) { return '<td style="padding:4px 8px;border-bottom:1px solid #ddd">' + c + '</td>' }).join('') + '</tr>' }
+  function tablaHtml(titulo, enc, filas) {
+    if (!filas.length) return ''
+    return '<h3 style="font-family:Arial;margin:18px 0 6px">' + titulo + '</h3><table style="border-collapse:collapse;font-family:Arial;font-size:13px">' +
+      '<tr>' + enc.map(function (e) { return '<th style="text-align:left;padding:4px 8px;background:#DCEFE3">' + e + '</th>' }).join('') + '</tr>' + filas.join('') + '</table>'
+  }
+  function sup(r) { return r.supervisor ? r.supervisor.nombre + ' (RPE ' + r.supervisor.rpe + ', ext. ' + r.supervisor.extension + ')' : 'sin datos' }
+
+  var html = '<p style="font-family:Arial">Resumen de Control EPP al ' + hoy + '.</p>' +
+    tablaHtml('Préstamos vencidos (' + vencidos.length + ')', ['Equipo', 'Trabajador', 'Prestado', 'Debía volver', 'Supervisor'],
+      vencidos.map(function (r) { return fila([nombreMat(ctx, r.materialId), r.nombre + ' · ' + r.rpe, r.fechaEntrega, '<b>' + r.vence + '</b>', sup(r)]) })) +
+    tablaHtml('Préstamos que vencen hoy (' + venceHoy.length + ')', ['Equipo', 'Trabajador', 'Supervisor'],
+      venceHoy.map(function (r) { return fila([nombreMat(ctx, r.materialId), r.nombre + ' · ' + r.rpe, sup(r)]) })) +
+    tablaHtml('Eventuales con contrato vencido y equipo pendiente (' + eventuales.length + ')', ['Trabajador', 'Vigencia', 'Equipo'],
+      eventuales.map(function (p) { return fila([p.nombre + ' · ' + p.rpe, p.vigencia, conEquipo[p.rpe].map(function (r) { return nombreMat(ctx, r.materialId) }).join(', ')]) })) +
+    tablaHtml('Materiales por reabastecer (' + reabastecer.length + ')', ['Material', 'Existencia', 'Mínimo'],
+      reabastecer.map(function (x) { return fila([x.nombre, x.total, x.minimo]) }))
+
+  var partes = []
+  if (vencidos.length) partes.push(vencidos.length + ' préstamo' + (vencidos.length > 1 ? 's' : '') + ' vencido' + (vencidos.length > 1 ? 's' : ''))
+  if (reabastecer.length) partes.push(reabastecer.length + ' por reabastecer')
+  if (eventuales.length) partes.push(eventuales.length + ' eventual' + (eventuales.length > 1 ? 'es' : '') + ' con equipo')
+  if (!partes.length) partes.push(venceHoy.length + ' préstamo' + (venceHoy.length > 1 ? 's' : '') + ' vence hoy')
+  return { asunto: 'Control EPP · ' + partes.join(' · '), html: html }
+}
+
+/** Envía el resumen por correo (lo ejecuta el disparador diario o el menú). */
+function enviarAvisos() {
+  var r = resumenAvisos()
+  if (!r) return 'Sin avisos pendientes.'
+  var destinos = correosAviso()
+  MailApp.sendEmail({ to: destinos.join(','), subject: r.asunto, htmlBody: r.html })
+  return 'Aviso enviado a ' + destinos.join(', ')
+}
+
+/** Programa el envío diario a las 7:00. Ejecutar una vez desde el editor. */
+function activarAvisosDiarios() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'enviarAvisos') ScriptApp.deleteTrigger(t)
+  })
+  ScriptApp.newTrigger('enviarAvisos').timeBased().everyDays(1).atHour(7).inTimezone(ZONA).create()
+  return 'Avisos diarios activados (7:00) para: ' + correosAviso().join(', ')
 }

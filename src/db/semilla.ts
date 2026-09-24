@@ -47,12 +47,12 @@ type MatSemilla = Omit<Material, 'actualizado' | 'activo' | 'orden'> & { demo: R
 
 const MATS: MatSemilla[] = [
   { id: 'casco', nombre: 'Casco de Seguridad', categoriaId: 'cabeza', tipo: 'resguardo', variantes: [], stockMin: { '': 25 }, icono: 'casco', columnaExcel: 'CASCO', demo: { '': 80 } },
-  { id: 'arnes_casco', nombre: 'Arnés de Casco', categoriaId: 'cabeza', tipo: 'resguardo', variantes: [], stockMin: { '': 10 }, icono: 'arnescasco', columnaExcel: 'ARNÉS_DE_CASCO', demo: { '': 30 } },
-  { id: 'barbiquejo', nombre: 'Barbiquejo', categoriaId: 'cabeza', tipo: 'resguardo', variantes: [], stockMin: { '': 15 }, icono: 'barbiquejo', columnaExcel: 'BARBIQUEJO', demo: { '': 50 } },
+  { id: 'arnes_casco', nombre: 'Arnés de Casco', categoriaId: 'cabeza', tipo: 'consumible', variantes: [], stockMin: { '': 10 }, icono: 'arnescasco', columnaExcel: 'ARNÉS_DE_CASCO', demo: { '': 30 } },
+  { id: 'barbiquejo', nombre: 'Barbiquejo', categoriaId: 'cabeza', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'barbiquejo', columnaExcel: 'BARBIQUEJO', demo: { '': 50 } },
   { id: 'lentes_claros', nombre: 'Lentes Claros', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 30 }, icono: 'lentes', columnaExcel: 'LENTES_CLAROS', demo: { '': 150 } },
   { id: 'lentes_oscuros', nombre: 'Lentes Oscuros', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'lentes', columnaExcel: 'LENTES_OSCUROS', demo: { '': 60 } },
   { id: 'cubre_lentes', nombre: 'Cubre Lentes', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 10 }, icono: 'cubrelentes', columnaExcel: 'CUBRE_LENTES', demo: { '': 30 } },
-  { id: 'careta_policarbonato', nombre: 'Careta Policarbonato', categoriaId: 'ojos', tipo: 'resguardo', variantes: [], stockMin: { '': 5 }, icono: 'careta', columnaExcel: 'CARETA_POLICARBONATO', demo: { '': 15 } },
+  { id: 'careta_policarbonato', nombre: 'Careta Policarbonato', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 5 }, icono: 'careta', columnaExcel: 'CARETA_POLICARBONATO', demo: { '': 15 } },
   {
     id: 'g_carnaza', nombre: 'Guante de Carnaza', categoriaId: 'manos', tipo: 'consumible',
     variantes: tallas(['CH', 'M', 'G', 'XG']), stockMin: minimos(['CH', 'M', 'G', 'XG'], 10), icono: 'guante', columnaExcel: 'G._CARNAZA_GDE.',
@@ -81,8 +81,8 @@ const MATS: MatSemilla[] = [
     variantes: tallas(['MED', 'GDE', 'XL']), stockMin: minimos(['MED', 'GDE', 'XL'], 5), icono: 'faja', columnaExcel: 'FAJA_LUMBAR_{v}',
     demo: { MED: 20, GDE: 25, XL: 4 },
   },
-  { id: 'arnes_cuerpo', nombre: 'Arnés de Cuerpo Completo', categoriaId: 'altura', tipo: 'resguardo', variantes: [], stockMin: { '': 5 }, icono: 'arnes', columnaExcel: 'ARNÉS_DE_CUERPO_COMPLETO', demo: { '': 15 } },
-  { id: 'linea_vida', nombre: 'Línea de Vida / Amort.', categoriaId: 'altura', tipo: 'resguardo', variantes: [], stockMin: { '': 5 }, icono: 'linea', columnaExcel: 'LÍNEA_DE_VIDA_/_AMORT.', demo: { '': 15 } },
+  { id: 'arnes_cuerpo', nombre: 'Arnés de Cuerpo Completo', categoriaId: 'altura', tipo: 'prestamo', plazoDias: 1, variantes: [], stockMin: { '': 5 }, icono: 'arnes', columnaExcel: 'ARNÉS_DE_CUERPO_COMPLETO', demo: { '': 15 } },
+  { id: 'linea_vida', nombre: 'Línea de Vida / Amort.', categoriaId: 'altura', tipo: 'prestamo', plazoDias: 1, variantes: [], stockMin: { '': 5 }, icono: 'linea', columnaExcel: 'LÍNEA_DE_VIDA_/_AMORT.', demo: { '': 15 } },
 ]
 
 export function materialesSemilla(): Material[] {
@@ -120,8 +120,8 @@ export function kitsSemilla(): Kit[] {
       descripcion: 'Casco con arnés y barbiquejo, lentes claros, tapones y guantes según el área',
       lineas: [
         { materialId: 'casco', cantidad: 1 },
-        { materialId: 'arnes_casco', cantidad: 1 },
-        { materialId: 'barbiquejo', cantidad: 1 },
+        { materialId: 'arnes_casco', cantidad: 1, conMaterial: 'casco' },
+        { materialId: 'barbiquejo', cantidad: 1, conMaterial: 'casco' },
         ...resto,
       ],
       orden: 1,
