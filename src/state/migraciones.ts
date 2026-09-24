@@ -1,6 +1,7 @@
 import { db, guardarConfig, leerConfig } from '../db/db'
 import { fechaLocal } from '../lib/util'
 import type { Kit, Material, Resguardo } from '../domain/types'
+import { materialesSemilla } from '../db/semilla'
 import * as S from './store'
 
 // Cambios de datos que acompañan a nuevas versiones de la app. Cada migración
@@ -56,7 +57,26 @@ async function v3(): Promise<void> {
   })
 }
 
-const MIGRACIONES: [number, () => Promise<void>][] = [[3, v3]]
+/**
+ * v4: la careta se entrega en dos partes: la mica de policarbonato (se cambia
+ * seguido) y la base que va sobre la cabeza (dura mucho más). Ambas son consumibles.
+ */
+async function v4(): Promise<void> {
+  const ahora = new Date().toISOString()
+  const cambios: Material[] = []
+  const mica = await db.materiales.get('careta_policarbonato')
+  if (mica && mica.nombre === 'Careta Policarbonato') cambios.push({ ...mica, nombre: 'Mica de Policarbonato para Careta', actualizado: ahora })
+  if (!(await db.materiales.get('careta_base'))) {
+    const base = materialesSemilla().find((m) => m.id === 'careta_base')!
+    cambios.push({ ...base, orden: mica ? mica.orden + 0.5 : base.orden, actualizado: ahora })
+  }
+  if (cambios.length) await db.materiales.bulkPut(cambios)
+}
+
+const MIGRACIONES: [number, () => Promise<void>][] = [
+  [3, v3],
+  [4, v4],
+]
 
 export async function migrar(): Promise<void> {
   const actual = await leerConfig<number>('versionDatos', 2)

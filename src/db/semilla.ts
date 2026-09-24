@@ -52,7 +52,8 @@ const MATS: MatSemilla[] = [
   { id: 'lentes_claros', nombre: 'Lentes Claros', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 30 }, icono: 'lentes', demo: { '': 150 } },
   { id: 'lentes_oscuros', nombre: 'Lentes Oscuros', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 15 }, icono: 'lentes', demo: { '': 60 } },
   { id: 'cubre_lentes', nombre: 'Cubre Lentes', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 10 }, icono: 'cubrelentes', demo: { '': 30 } },
-  { id: 'careta_policarbonato', nombre: 'Careta Policarbonato', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 5 }, icono: 'careta', demo: { '': 15 } },
+  { id: 'careta_policarbonato', nombre: 'Mica de Policarbonato para Careta', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 5 }, icono: 'careta', demo: { '': 15 } },
+  { id: 'careta_base', nombre: 'Base de Careta', categoriaId: 'ojos', tipo: 'consumible', variantes: [], stockMin: { '': 3 }, icono: 'careta', demo: { '': 8 } },
   {
     id: 'g_carnaza', nombre: 'Guante de Carnaza', categoriaId: 'manos', tipo: 'consumible',
     variantes: tallas(['CH', 'M', 'G', 'XG']), stockMin: minimos(['CH', 'M', 'G', 'XG'], 10), icono: 'guante',
