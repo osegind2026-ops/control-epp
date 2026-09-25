@@ -162,3 +162,15 @@ describe('resguardo único, consumibles y préstamos', () => {
     await registrarEntrega(persona(), linea, '', { supervisor, vence: hoy })
   })
 })
+
+describe('roles', () => {
+  it('el despachador no puede ajustar existencias', async () => {
+    const antes = S.sesion.value
+    S.sesion.value = { ...antes!, rol: 'despachador', esAdmin: false }
+    await expect(ajustarExistencia({ materialId: 'tapones', varianteId: '', ubicacionId: 'ubi_despacho', conteo: 1, motivoId: 'aju_conteo', nota: '' })).rejects.toThrow(/almacén/)
+    S.sesion.value = { ...antes!, rol: 'almacen', esAdmin: false }
+    await ajustarExistencia({ materialId: 'tapones', varianteId: '', ubicacionId: 'ubi_despacho', conteo: 1, motivoId: 'aju_conteo', nota: '' })
+    expect(stock('tapones')).toBe(1)
+    S.sesion.value = antes
+  })
+})

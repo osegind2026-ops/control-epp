@@ -114,6 +114,22 @@ const UI: Record<string, JSX.Element> = {
       <path d="M5.5 16c.6-1.6 1.7-2.3 3-2.3s2.4.7 3 2.3M14 10h4M14 13h4" />
     </g>
   ),
+  lector: <path {...trazo} d="M3 6h11l3 4v3h-6l-2 7H6l1-7H4zM17 8l4-2M17 11h4M17 14l4 2" />,
+  galeria: (
+    <g {...trazo}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="9" cy="10" r="2" />
+      <path d="m3 17 5-4 4 3 3-2 6 4" />
+    </g>
+  ),
+  linterna: <path {...trazo} d="M8 3h8v4l-2 3v11h-4V10L8 7zM8 7h8M12 13v2" />,
+  equipo: (
+    <g {...trazo}>
+      <rect x="6" y="2.5" width="12" height="19" rx="2.5" />
+      <rect x="8.5" y="5.5" width="7" height="5" rx="1" />
+      <path d="M9 14h.01M12 14h.01M15 14h.01M9 17h.01M12 17h.01M15 17h.01" stroke-width={2.4} />
+    </g>
+  ),
   excel: <path {...trazo} d="M5 3h10l4 4v14H5zM15 3v4h4M8 11l4 6M12 11l-4 6M14 17h2" />,
   pdf: <path {...trazo} d="M5 3h10l4 4v14H5zM15 3v4h4M8 13h1.5a1.5 1.5 0 0 1 0 3H8v-5M13 11v5h1a2 2 0 0 0 0-5zM18 11h-2v5M16 13.5h1.5" />,
   presentacion: <path {...trazo} d="M3 4h18M4 4v11h16V4M12 15v3M8 21l4-3 4 3M8 11l3-3 2 2 3-3" />,

@@ -1,4 +1,4 @@
-import type { Entrega, Resguardo } from './types'
+import type { Entrega, PrestamoEquipo, Resguardo } from './types'
 
 type Registro = { actualizado?: string }
 
@@ -15,6 +15,12 @@ export function ganaEntrante(tabla: string, actual: unknown, entrante: unknown):
     const ve = (entrante as Resguardo).ver ?? 0
     if (ve !== va) return ve > va
     return !((actual as Resguardo).estatus !== 'ACTIVO' && (entrante as Resguardo).estatus === 'ACTIVO')
+  }
+  if (tabla === 'prestamosEquipo') {
+    const va = (actual as PrestamoEquipo).ver ?? 0
+    const ve = (entrante as PrestamoEquipo).ver ?? 0
+    if (ve !== va) return ve > va
+    return !((actual as PrestamoEquipo).estatus !== 'ACTIVO' && (entrante as PrestamoEquipo).estatus === 'ACTIVO')
   }
   const a = (actual as Registro).actualizado
   const e = (entrante as Registro).actualizado

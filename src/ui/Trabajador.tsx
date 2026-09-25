@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { AREAS } from '../db/semilla'
-import { buscarTrabajadores, resolverRpe } from '../domain/logica'
+import { buscarTrabajadores, resolverRpe, rpeDeCodigo } from '../domain/logica'
 import type { Trabajador } from '../domain/types'
-import { diasEntre, fechaLocal, hace, iniciales, normalizar } from '../lib/util'
+import { diasEntre, fechaLocal, hace, iniciales, normalizar, tecladoFisico } from '../lib/util'
 import { guardarTrabajador } from '../state/servicios'
 import * as S from '../state/store'
 import { avisar, intentar, Modal } from './comunes'
-import { Escaner } from './Escaner'
+import { CamaraEnVivo, LectorTeclado } from './Camara'
 import { Icono } from './iconos'
 
 export function listaAreas(): string[] {
@@ -40,10 +40,6 @@ export function FormTrabajador(props: {
   const [area, setArea] = useState(i.area ?? '')
   const [areaLibre, setAreaLibre] = useState(!!i.area && !areas.includes(i.area))
   const [puesto, setPuesto] = useState(i.puesto ?? 'OPERADOR / TÉCNICO')
-  const [casillero, setCasillero] = useState(i.casillero ?? '')
-  const [gafete, setGafete] = useState(i.gafete ?? '')
-  const [tipo, setTipo] = useState<Trabajador['tipo']>(i.tipo ?? 'eventual')
-  const [vigencia, setVigencia] = useState(i.vigencia ?? '')
   const [activo, setActivo] = useState(i.activo ?? true)
 
   const guardar = async () => {
@@ -53,10 +49,11 @@ export function FormTrabajador(props: {
         nombre,
         area: area.trim().toUpperCase() || 'SIN ÁREA',
         puesto: puesto.trim().toUpperCase(),
-        casillero,
-        gafete: gafete.trim() || undefined,
-        tipo,
-        vigencia: vigencia || undefined,
+        // Datos que ya no se capturan: se conservan si el registro los tenía
+        casillero: i.casillero ?? '',
+        gafete: i.gafete,
+        tipo: i.tipo ?? 'eventual',
+        vigencia: i.vigencia,
         activo,
       }),
     )
@@ -85,18 +82,10 @@ export function FormTrabajador(props: {
           <span>{props.aviso}</span>
         </div>
       )}
-      <div class="row" role="group" aria-label="Tipo de trabajador">
-        <button class="chip" aria-pressed={tipo === 'eventual'} onClick={() => setTipo('eventual')}>
-          Eventual
-        </button>
-        <button class="chip" aria-pressed={tipo === 'planta'} onClick={() => setTipo('planta')}>
-          Planta
-        </button>
-      </div>
       <div class="row" style={{ alignItems: 'start' }}>
         <label class="campo" style={{ width: '120px' }}>
           RPE
-          <input class="input mono" id="tr-rpe" value={rpe} maxLength={8} disabled={existente} onInput={(e) => setRpe((e.target as HTMLInputElement).value.toUpperCase().replace(/\s/g, ''))} />
+          <input class="input mono" id="tr-rpe" value={rpe} maxLength={5} autoCapitalize="characters" disabled={existente} onInput={(e) => setRpe(rpeDeCodigo((e.target as HTMLInputElement).value))} />
         </label>
         <label class="campo grow">
           Nombre completo
@@ -144,20 +133,6 @@ export function FormTrabajador(props: {
           ))}
         </datalist>
       </label>
-      <div class="row" style={{ alignItems: 'start' }}>
-        <label class="campo grow">
-          No. de gafete
-          <input class="input mono" id="tr-gafete" inputMode="numeric" value={gafete} onInput={(e) => setGafete((e.target as HTMLInputElement).value)} />
-        </label>
-        <label class="campo grow">
-          Casillero
-          <input class="input" id="tr-casillero" value={casillero} onInput={(e) => setCasillero((e.target as HTMLInputElement).value)} />
-        </label>
-      </div>
-      <label class="campo">
-        {tipo === 'eventual' ? 'Vigencia del contrato o del gafete (opcional)' : 'Vigencia del gafete (opcional)'}
-        <input class="input" id="tr-vigencia" type="date" value={vigencia} onInput={(e) => setVigencia((e.target as HTMLInputElement).value)} />
-      </label>
       {existente && (
         <label class="check">
           <input type="checkbox" checked={activo} onChange={(e) => setActivo((e.target as HTMLInputElement).checked)} />
@@ -169,38 +144,40 @@ export function FormTrabajador(props: {
 }
 
 /**
- * Toma una foto del gafete y la interpreta. Si el RPE ya está en el padrón elige
- * al trabajador; si no, abre el alta con los datos leídos para confirmarlos.
+ * Lee el gafete con la cámara dentro de la app. Mientras se apunta busca el código de
+ * barras; si no lo encuentra (gafetes con fondo oscuro), «Tomar foto» lee el texto
+ * impreso. Si el RPE ya está en el padrón elige al trabajador; si no, abre el alta con
+ * los datos leídos para confirmarlos.
  */
 export function LectorGafete({ onElegir, onCerrar }: { onElegir: (t: Trabajador) => void; onCerrar: () => void }) {
   const [estado, setEstado] = useState<{ texto: string; avance?: number } | null>(null)
   const [alta, setAlta] = useState<{ datos: Partial<Trabajador>; vista: string; aviso: string } | null>(null)
-  const archivo = useRef<HTMLInputElement>(null)
+  const cuadros = useRef(0)
+  const existe = (x: string) => S.personal.value.has(x)
 
-  useEffect(() => {
-    archivo.current?.click()
-  }, [])
+  /** Código leído (de la cámara o de la foto): los primeros 5 caracteres son el RPE. */
+  const porCodigo = (codigo: string, vista = '') => {
+    const rpe = resolverRpe(codigo, existe)
+    const t = S.personal.value.get(rpe)
+    if (t) return onElegir(t)
+    setEstado(null)
+    setAlta({ datos: { rpe }, vista, aviso: `El RPE ${rpe} no está en el padrón. Complete sus datos para darlo de alta.` })
+  }
 
-  const procesar = async (f: File) => {
+  const procesar = async (f: Blob) => {
     setEstado({ texto: 'Buscando código de barras…' })
     try {
       const { leerGafete } = await import('../lib/lectorGafete')
       const { interpretarGafete, rpeMasVotado, rpeParecido } = await import('../lib/gafete')
       const r = await leerGafete(f, (texto, avance) => setEstado({ texto, avance }))
       if (import.meta.env.DEV) (window as unknown as { __gafete: unknown }).__gafete = r
-      const existe = (x: string) => S.personal.value.has(x)
-      // 1) Código de barras: es la fuente más confiable. Trae el RPE y un dígito verificador al final.
-      const limpio = r.codigo.toUpperCase().replace(/[^A-Z0-9]/g, '')
-      const rpeCodigo = limpio.length === 6 ? limpio.slice(0, 5) : limpio.length === 5 ? limpio : ''
-      if (limpio) {
-        const t = S.personal.value.get(resolverRpe(limpio, existe))
-        if (t) return onElegir(t)
-      }
+      // 1) Código de barras: es la fuente más confiable
+      const rpeCodigo = r.codigo ? rpeDeCodigo(r.codigo) : ''
+      if (rpeCodigo && existe(rpeCodigo)) return onElegir(S.personal.value.get(rpeCodigo)!)
       // 2) Texto impreso
       const d = interpretarGafete(r.texto, listaAreas())
       const z = interpretarGafete(r.zona, [])
       d.rpe = rpeCodigo || rpeMasVotado(r.zona) || z.rpe || d.rpe
-      d.numero = z.numero || d.numero
       let rpe = d.rpe ? resolverRpe(d.rpe, existe) : ''
       if (rpe && !existe(rpe)) rpe = rpeParecido(rpe, S.personal.value.keys()) || rpe
       const porRpe = rpe ? S.personal.value.get(rpe) : undefined
@@ -209,7 +186,7 @@ export function LectorGafete({ onElegir, onCerrar }: { onElegir: (t: Trabajador)
       if (porNombre.length === 1) return onElegir(porNombre[0])
       setEstado(null)
       setAlta({
-        datos: { rpe, nombre: d.nombre, area: d.area, puesto: d.puesto || undefined, gafete: d.numero, vigencia: d.vigencia || undefined },
+        datos: { rpe: rpeDeCodigo(rpe), nombre: d.nombre, area: d.area, puesto: d.puesto || undefined },
         vista: r.vistaPrevia,
         aviso: d.nombre || d.rpe
           ? 'Datos leídos del gafete: revíselos antes de guardar (la cámara puede confundir letras como O y 0).'
@@ -218,46 +195,42 @@ export function LectorGafete({ onElegir, onCerrar }: { onElegir: (t: Trabajador)
     } catch (e) {
       setEstado(null)
       avisar(`No se pudo leer la foto: ${(e as Error).message}`, { tipo: 'bad', ms: 6000 })
-      onCerrar()
     }
   }
 
   if (alta) {
-    return <FormTrabajador inicial={alta.datos} vistaPrevia={alta.vista} aviso={alta.aviso} onCerrar={onCerrar} onListo={onElegir} />
+    return <FormTrabajador inicial={alta.datos} vistaPrevia={alta.vista || undefined} aviso={alta.aviso} onCerrar={onCerrar} onListo={onElegir} />
+  }
+  if (estado) {
+    return (
+      <Modal titulo="Leyendo gafete" onCerrar={onCerrar}>
+        <p>{estado.texto}</p>
+        {estado.avance !== undefined && (
+          <div class="progreso" role="progressbar" aria-valuenow={Math.round(estado.avance * 100)} aria-valuemin={0} aria-valuemax={100}>
+            <div style={{ width: `${Math.round(estado.avance * 100)}%` }} />
+          </div>
+        )}
+        <p class="muted small">Todo se procesa en este equipo; la foto no se guarda ni se envía.</p>
+      </Modal>
+    )
   }
   return (
-    <>
-      <input
-        ref={archivo}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        hidden
-        onChange={(e) => {
-          const f = (e.target as HTMLInputElement).files?.[0]
-          if (f) procesar(f)
-          else onCerrar()
-        }}
-      />
-      {estado ? (
-        <Modal titulo="Leyendo gafete" onCerrar={onCerrar}>
-          <p>{estado.texto}</p>
-          {estado.avance !== undefined && (
-            <div class="progreso" role="progressbar" aria-valuenow={Math.round(estado.avance * 100)} aria-valuemin={0} aria-valuemax={100}>
-              <div style={{ width: `${Math.round(estado.avance * 100)}%` }} />
-            </div>
-          )}
-          <p class="muted small">Todo se procesa en este equipo; la foto no se guarda ni se envía.</p>
-        </Modal>
-      ) : (
-        <Modal titulo="Foto del gafete" onCerrar={onCerrar}>
-          <p>Tome la foto del gafete de frente, completo y con buena luz. Se leerá el código de barras o, si no se puede, el nombre, el área, el puesto y el RPE impresos.</p>
-          <button class="btn primary" onClick={() => archivo.current?.click()}>
-            <Icono n="camara" /> Tomar foto
-          </button>
-        </Modal>
-      )}
-    </>
+    <CamaraEnVivo
+      titulo="Leer gafete"
+      ayuda={
+        <>
+          Encuadre el gafete completo, de frente y con buena luz. Si el código de barras se alcanza a leer, el trabajador se elige solo; si no, toque <strong>Tomar foto</strong> para leer el nombre, el área y el RPE impresos.
+        </>
+      }
+      buscarCodigo={async (c) => {
+        const { codigoEnCuadro } = await import('../lib/lectorGafete')
+        return codigoEnCuadro(c, cuadros.current++)
+      }}
+      onCodigo={(c) => porCodigo(c)}
+      onFoto={procesar}
+      onCerrar={onCerrar}
+      guia={1.58}
+    />
   )
 }
 
@@ -303,7 +276,7 @@ export function TarjetaTrabajador({ t, onQuitar, onEditar }: { t: Trabajador; on
  */
 export function BuscadorTrabajador({ onElegir, autoFocus = true }: { onElegir: (t: Trabajador) => void; autoFocus?: boolean }) {
   const [texto, setTexto] = useState('')
-  const [camara, setCamara] = useState(false)
+  const [escaner, setEscaner] = useState(false)
   const [gafete, setGafete] = useState(false)
   const [alta, setAlta] = useState<Partial<Trabajador> | null>(null)
   const [activo, setActivo] = useState(0)
@@ -312,7 +285,7 @@ export function BuscadorTrabajador({ onElegir, autoFocus = true }: { onElegir: (
   const resultados = useMemo(() => buscarTrabajadores(lista, texto), [lista, texto])
 
   useEffect(() => {
-    if (autoFocus) ref.current?.focus()
+    if (autoFocus && tecladoFisico()) ref.current?.focus()
   }, [])
 
   const recientes = useMemo(() => {
@@ -348,7 +321,7 @@ export function BuscadorTrabajador({ onElegir, autoFocus = true }: { onElegir: (
             ref={ref}
             id="buscar-trabajador"
             class="input"
-            placeholder="Escanee la credencial o escriba RPE o nombre"
+            placeholder="RPE, nombre o escanee el gafete"
             autoComplete="off"
             value={texto}
             onInput={(e) => {
@@ -362,13 +335,13 @@ export function BuscadorTrabajador({ onElegir, autoFocus = true }: { onElegir: (
             }}
           />
         </div>
-        <button class="btn" onClick={() => setCamara(true)} aria-label="Escanear el código de barras con la cámara">
-          <Icono n="barras" />
-          <span class="solo-ancho">Código</span>
-        </button>
-        <button class="btn" onClick={() => setGafete(true)} aria-label="Leer el gafete con una foto">
+        <button class="btn" onClick={() => setGafete(true)} aria-label="Leer el gafete con la cámara" title="Leer el gafete con la cámara">
           <Icono n="gafete" />
           <span class="solo-ancho">Gafete</span>
+        </button>
+        <button class="btn" onClick={() => setEscaner(true)} aria-label="Usar un escáner de código de barras USB o Bluetooth" title="Escáner USB o Bluetooth">
+          <Icono n="lector" />
+          <span class="solo-ancho">Escáner</span>
         </button>
       </div>
 
@@ -381,7 +354,7 @@ export function BuscadorTrabajador({ onElegir, autoFocus = true }: { onElegir: (
               <span class="muted small">{t.area}</span>
             </button>
           ))}
-          <button class="alta" onClick={() => setAlta(/^[A-Z0-9]{4,6}$/i.test(texto.trim()) ? { rpe: texto.trim().toUpperCase() } : { nombre: texto.trim().toUpperCase() })}>
+          <button class="alta" onClick={() => setAlta(/^[A-Z0-9]{4,6}$/i.test(texto.trim()) ? { rpe: rpeDeCodigo(texto) } : { nombre: texto.trim().toUpperCase() })}>
             <Icono n="mas1" /> Dar de alta a un trabajador nuevo o eventual
           </button>
         </div>
@@ -398,11 +371,11 @@ export function BuscadorTrabajador({ onElegir, autoFocus = true }: { onElegir: (
         </div>
       )}
 
-      {camara && (
-        <Escaner
-          onCerrar={() => setCamara(false)}
+      {escaner && (
+        <LectorTeclado
+          onCerrar={() => setEscaner(false)}
           onCodigo={(c) => {
-            setCamara(false)
+            setEscaner(false)
             resolver(c)
           }}
         />

@@ -1,9 +1,10 @@
 import { signal } from '@preact/signals'
 import type { ComponentChildren } from 'preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import * as S from '../state/store'
 import { ErrorNegocio } from '../state/servicios'
 import { IlustracionMaterial, Icono } from './iconos'
+import { tecladoFisico } from '../lib/util'
 
 // ---------- Avisos flotantes ----------
 
@@ -65,8 +66,9 @@ export function Modal(props: { titulo: string; onCerrar: () => void; ancho?: boo
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const previo = document.activeElement as HTMLElement | null
-    const primero = ref.current?.querySelector<HTMLElement>('input, select, textarea, button:not(.cerrar-modal)')
-    primero?.focus()
+    // En el celular se enfoca un botón, no un campo, para no abrir el teclado sin que se pida
+    const selector = tecladoFisico() ? 'input, select, textarea, button:not(.cerrar-modal)' : 'button:not(.cerrar-modal)'
+    ref.current?.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true })
     const tecla = (e: KeyboardEvent) => {
       if (e.key === 'Escape') props.onCerrar()
     }
@@ -140,10 +142,11 @@ export function Confirmacion() {
 
 export function FotoMaterial({ materialId, mini }: { materialId: string; mini?: boolean }) {
   const m = S.materialesPorId.value.get(materialId)
-  const src = m?.fotoId ? S.fotos.value.get(m.fotoId) : undefined
+  const src = S.fotoDe(m)
+  const [fallo, setFallo] = useState('')
   return (
     <span class={`foto ${mini ? 'mini' : ''}`}>
-      {src ? <img src={src} alt="" loading="lazy" /> : <IlustracionMaterial icono={m?.icono} />}
+      {src && fallo !== src ? <img src={src} alt="" loading="lazy" onError={() => setFallo(src)} /> : <IlustracionMaterial icono={m?.icono} />}
     </span>
   )
 }

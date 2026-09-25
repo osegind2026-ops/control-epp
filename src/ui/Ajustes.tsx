@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
-import type { Ubicacion, Usuario } from '../domain/types'
+import type { Rol, Ubicacion, Usuario } from '../domain/types'
+import { nombreRol, rolDe, ROLES } from '../state/permisos'
 import { descargarArchivo, hace, plural } from '../lib/util'
 import { armarRespaldo, importarRespaldo, leerRespaldo, marcarRespaldado, nombreArchivo, type Respaldo } from '../state/respaldo'
 import { guardarBloqueo, guardarDispositivo, guardarRegistro, guardarUsuario, nuevoId } from '../state/servicios'
@@ -57,12 +58,12 @@ function Equipo() {
 function EditorUsuario({ u, onCerrar }: { u: Usuario | null; onCerrar: () => void }) {
   const [nombre, setNombre] = useState(u?.nombre ?? '')
   const [pin, setPin] = useState('')
-  const [esAdmin, setEsAdmin] = useState(u?.esAdmin ?? false)
+  const [rol, setRol] = useState<Rol>(u ? rolDe(u) : 'despachador')
   const [activo, setActivo] = useState(u?.activo ?? true)
   const guardar = async () => {
     if (!nombre.trim()) return avisar('Escriba el nombre.', { tipo: 'bad' })
     const ok = await intentar(async () => {
-      await guardarUsuario({ id: u?.id, nombre, esAdmin, activo, pin: pin || undefined })
+      await guardarUsuario({ id: u?.id, nombre, rol, activo, pin: pin || undefined })
       return true
     })
     if (ok) {
@@ -93,10 +94,19 @@ function EditorUsuario({ u, onCerrar }: { u: Usuario | null; onCerrar: () => voi
         {u ? 'Nuevo PIN (déjelo vacío para conservar el actual)' : 'PIN (4 a 6 números)'}
         <input class="input" id="u-pin" type="password" inputMode="numeric" maxLength={6} value={pin} onInput={(e) => setPin((e.target as HTMLInputElement).value.replace(/\D/g, ''))} />
       </label>
-      <label class="check">
-        <input type="checkbox" checked={esAdmin} onChange={(e) => setEsAdmin((e.target as HTMLInputElement).checked)} />
-        Administrador (usuarios y motivos autorizados)
-      </label>
+      <fieldset class="stack" style={{ gap: '6px', border: 0, padding: 0, margin: 0 }}>
+        <legend class="small" style={{ marginBottom: '4px' }}>Rol</legend>
+        {ROLES.map((r) => (
+          <label key={r.id} class="check" style={{ alignItems: 'flex-start' }}>
+            <input type="radio" name="u-rol" checked={rol === r.id} onChange={() => setRol(r.id)} />
+            <span>
+              <strong>{r.nombre}</strong>
+              <br />
+              <span class="muted small">{r.ayuda}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
       {u && (
         <label class="check">
           <input type="checkbox" checked={activo} onChange={(e) => setActivo((e.target as HTMLInputElement).checked)} />
@@ -120,11 +130,11 @@ function Usuarios() {
           </button>
         )}
       </div>
-      <p class="muted small">Todos pueden despachar, recibir devoluciones, ajustar inventario y anular con un motivo autorizado. Cada registro guarda quién lo hizo.</p>
+      <p class="muted small">Todos pueden despachar, recibir devoluciones, prestar equipos y anular con un motivo autorizado. Las entradas, traspasos, ajustes y conteos son del encargado de almacén o del administrador. Cada registro guarda quién lo hizo.</p>
       {S.usuarios.value.map((u) => (
         <div key={u.id} class="row" style={{ opacity: u.activo ? 1 : 0.5 }}>
           <span class="grow">
-            <strong>{u.nombre}</strong> {u.esAdmin && <span class="badge ok">Admin</span>} {!u.activo && <span class="badge">Inactivo</span>}
+            <strong>{u.nombre}</strong> <span class={`badge ${rolDe(u) === 'admin' ? 'ok' : rolDe(u) === 'almacen' ? 'warn' : ''}`}>{nombreRol(rolDe(u))}</span> {!u.activo && <span class="badge">Inactivo</span>}
           </span>
           {admin && (
             <button class="btn sm" onClick={() => setEditar(u)}>

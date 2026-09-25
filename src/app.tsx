@@ -12,6 +12,7 @@ import { PantallaCatalogo } from './ui/Catalogo'
 import { Confirmacion, Toasts } from './ui/comunes'
 import { PantallaDespacho } from './ui/Despacho'
 import { PantallaDevolucion } from './ui/Devolucion'
+import { equiposVencidos, PantallaEquipos } from './ui/Equipos'
 import { PantallaHistorial } from './ui/Historial'
 import { Icono } from './ui/iconos'
 import { PantallaInicio } from './ui/Inicio'
@@ -24,6 +25,7 @@ import { PantallaReportes } from './ui/Reportes'
 const NAV: { id: Pantalla; texto: string; icono: string }[] = [
   { id: 'despacho', texto: 'Despacho', icono: 'despacho' },
   { id: 'devolucion', texto: 'Devolución', icono: 'devolucion' },
+  { id: 'equipos', texto: 'Equipos', icono: 'equipo' },
   { id: 'inventario', texto: 'Inventario', icono: 'inventario' },
   { id: 'historial', texto: 'Historial', icono: 'historial' },
   { id: 'reportes', texto: 'Reportes', icono: 'reportes' },
@@ -66,6 +68,8 @@ function Contenido() {
       return <PantallaDespacho />
     case 'devolucion':
       return <PantallaDevolucion />
+    case 'equipos':
+      return <PantallaEquipos />
     case 'inventario':
       return <PantallaInventario />
     case 'historial':
@@ -98,6 +102,7 @@ function MenuMas({ onCerrar }: { onCerrar: () => void }) {
             >
               <Icono n={n.icono} /> {n.texto}
               {n.id === 'ajustes' && requiereRespaldo() && <span class="punto" />}
+              {n.id === 'equipos' && equiposVencidos() > 0 && <span class="punto" />}
             </button>
           ))}
           <button class="nav-item" onClick={() => (cerrarSesion(), onCerrar())}>
@@ -115,6 +120,7 @@ function Shell() {
   const eq = S.dispositivo.value!
   const alerta = requiereRespaldo()
   const vencidos = prestamosVencidos(S.resguardosActivos.value, fechaLocal()).length
+  const eqVencidos = equiposVencidos()
   useBloqueoInactividad()
 
   return (
@@ -129,6 +135,7 @@ function Shell() {
             <Icono n={n.icono} /> {n.texto}
             {n.id === 'ajustes' && alerta && <span class="punto" title="Hay cambios sin respaldar" />}
             {n.id === 'devolucion' && vencidos > 0 && <span class="punto" title="Préstamos vencidos" />}
+            {n.id === 'equipos' && eqVencidos > 0 && <span class="punto" title="Equipos sin devolver" />}
           </button>
         ))}
         <div class="side-pie">
@@ -178,7 +185,7 @@ function Shell() {
         <button aria-current={!NAV_MOVIL.includes(pantalla.value) ? 'page' : undefined} onClick={() => setMas(true)}>
           <Icono n="mas" />
           Más
-          {alerta && <span class="punto" />}
+          {(alerta || eqVencidos > 0) && <span class="punto" />}
         </button>
       </nav>
       {mas && <MenuMas onCerrar={() => setMas(false)} />}

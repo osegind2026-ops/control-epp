@@ -106,6 +106,39 @@ export async function codigoEnFoto(c: HTMLCanvasElement): Promise<string> {
   return ''
 }
 
+/** Copia en grises con el contraste estirado: ayuda con gafetes de fondo oscuro. */
+function realzar(c: HTMLCanvasElement): HTMLCanvasElement {
+  const r = document.createElement('canvas')
+  r.width = c.width
+  r.height = c.height
+  const ctx = r.getContext('2d', { willReadFrequently: true })!
+  ctx.drawImage(c, 0, 0)
+  const d = ctx.getImageData(0, 0, r.width, r.height)
+  const hist = new Uint32Array(256)
+  const gris = new Uint8ClampedArray(d.data.length / 4)
+  for (let i = 0, j = 0; i < d.data.length; i += 4, j++) {
+    gris[j] = 0.299 * d.data[i] + 0.587 * d.data[i + 1] + 0.114 * d.data[i + 2]
+    hist[gris[j]]++
+  }
+  const total = gris.length
+  let bajo = 0
+  let alto = 255
+  for (let acum = 0; bajo < 255 && (acum += hist[bajo]) < total * 0.02; ) bajo++
+  for (let acum = 0; alto > 0 && (acum += hist[alto]) < total * 0.02; ) alto--
+  const rango = Math.max(1, alto - bajo)
+  for (let i = 0, j = 0; i < d.data.length; i += 4, j++) {
+    const v = ((gris[j] - bajo) * 255) / rango
+    d.data[i] = d.data[i + 1] = d.data[i + 2] = v
+  }
+  ctx.putImageData(d, 0, 0)
+  return r
+}
+
+/** Para la cámara en vivo: alterna el cuadro tal cual y con el contraste realzado. */
+export async function codigoEnCuadro(c: HTMLCanvasElement, intento: number): Promise<string> {
+  return codigoEnFoto(intento % 2 ? realzar(c) : c)
+}
+
 export interface LecturaGafete {
   texto: string
   /** Texto de la zona del número y el RPE (se lee aparte, con más precisión). */
@@ -117,7 +150,8 @@ export interface LecturaGafete {
 export async function leerGafete(archivo: Blob, progreso: Progreso): Promise<LecturaGafete> {
   const { original, procesada: lienzo } = await prepararImagen(archivo)
   const vistaPrevia = original.toDataURL('image/jpeg', 0.6)
-  const codigo = (await codigoEnFoto(original).catch(() => '')) || (await codigoEnFoto(lienzo).catch(() => ''))
+  const codigo =
+    (await codigoEnFoto(original).catch(() => '')) || (await codigoEnFoto(realzar(original)).catch(() => '')) || (await codigoEnFoto(lienzo).catch(() => ''))
 
   const lector = await obtenerLector(progreso)
   const { PSM } = await import('tesseract.js')

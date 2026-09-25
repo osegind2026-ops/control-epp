@@ -446,6 +446,8 @@ tr.clic:hover td { background: var(--sunk); }
     border-top: 1px solid var(--rule);
     box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.08);
   }
+  /* Deja libre el espacio de la barra del ticket para que el último renglón del catálogo se vea completo */
+  .despacho { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
   .ticket-movil { padding: 10px; gap: 6px; }
   .ticket-movil .ticket { border: 0; max-height: none; }
 }
@@ -585,3 +587,40 @@ details > summary { list-style: revert; }
 .plantilla-vista { display: grid; place-items: center; height: 90px; border: 1px solid var(--rule); border-radius: 8px; background: repeating-conic-gradient(#e6e6e6 0% 25%, #f7f7f7 0% 50%) 50% / 14px 14px; overflow: hidden; }
 .plantilla-vista img { max-width: 90%; max-height: 80px; object-fit: contain; }
 .plantilla-vista.fondo img { max-width: 100%; max-height: 100%; width: 100%; height: 100%; object-fit: cover; }
+
+/* ---------- Conteo rápido ---------- */
+.chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.conteo-chips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.conteo-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.conteo-card { display: grid; gap: 6px; padding: 12px; }
+.conteo-fila { display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'talla sistema' 'captura captura'; gap: 6px 10px; align-items: center; padding: 8px; border-radius: 8px; background: var(--sunk); }
+.conteo-fila.igual { background: var(--accent-soft); }
+.conteo-fila.difiere { background: var(--warn-soft, var(--resg-soft)); }
+.conteo-talla { grid-area: talla; font-weight: 600; }
+.conteo-sistema { grid-area: sistema; display: inline-flex; gap: 6px; align-items: center; }
+.conteo-captura { grid-area: captura; display: grid; grid-template-columns: 48px 1fr 48px 48px; gap: 6px; }
+.conteo-captura .btn { min-height: 48px; padding: 0; font: 700 22px/1 var(--display); }
+.conteo-captura .input { min-height: 48px; text-align: center; font: 700 22px/1 var(--display); font-variant-numeric: tabular-nums; }
+.conteo-barra { position: sticky; bottom: 0; z-index: 5; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.08); }
+@media (max-width: 899px) {
+  .conteo-lista { grid-template-columns: 1fr; }
+  .conteo-barra { bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* ---------- Cámara y escáner ---------- */
+.camara { position: relative; background: #000; border-radius: 10px; overflow: hidden; display: grid; place-items: center; min-height: 220px; }
+.camara video { width: 100%; max-height: 60vh; display: block; object-fit: cover; }
+.camara-guia { position: absolute; width: 84%; max-height: 80%; border: 3px solid #4cc283; border-radius: 12px; box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.35); pointer-events: none; }
+.camara-espera { position: absolute; color: #fff; font-weight: 600; }
+.camara-linterna { position: absolute; top: 8px; right: 8px; }
+.camara-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.camara-acciones > * { flex: 1 1 160px; }
+.lector-espera { display: grid; justify-items: center; gap: 6px; padding: 18px 12px; border: 2px dashed var(--accent); border-radius: 12px; background: var(--accent-soft); text-align: center; }
+.lector-espera svg { width: 44px; height: 44px; color: var(--accent); }
+
+/* ---------- Equipos a resguardo ---------- */
+.equipos-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
+.prestamo-vencido { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
+.kpi.bad { border-color: var(--bad); }
+@media (max-width: 560px) { .equipos-lista { grid-template-columns: 1fr; } }
+.avatar svg { width: 26px; height: 26px; }

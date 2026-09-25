@@ -140,7 +140,19 @@ export function plural(n: number, uno: string, varios: string): string {
   return `${n} ${n === 1 ? uno : varios}`
 }
 
+const TIPOS_ARCHIVO: Record<string, string> = {
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pdf: 'application/pdf',
+  csv: 'text/csv;charset=utf-8',
+  json: 'application/json',
+}
+
 export function descargarBlob(nombre: string, blob: Blob): void {
+  // PowerPoint y Excel son archivos ZIP por dentro: sin el tipo correcto, algunos
+  // celulares los guardan como .zip en lugar de .pptx o .xlsx
+  const tipo = TIPOS_ARCHIVO[nombre.split('.').pop()?.toLowerCase() ?? '']
+  if (tipo && blob.type !== tipo) blob = new Blob([blob], { type: tipo })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -149,4 +161,31 @@ export function descargarBlob(nombre: string, blob: Blob): void {
   a.click()
   a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 5000)
+}
+
+/**
+ * true en equipos con mouse y teclado. En celulares y tabletas no se enfoca un campo
+ * al abrir una pantalla, para que el teclado no tape el contenido.
+ */
+export function tecladoFisico(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches
+}
+
+/**
+ * En el celular abre el menú «Compartir» con el archivo (para abrirlo en PowerPoint o
+ * Excel, guardarlo o enviarlo); en la computadora lo descarga.
+ */
+export async function entregarArchivo(nombre: string, blob: Blob): Promise<void> {
+  const tipo = TIPOS_ARCHIVO[nombre.split('.').pop()?.toLowerCase() ?? ''] ?? blob.type
+  const archivo = new File([blob], nombre, { type: tipo })
+  const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean }
+  if (!tecladoFisico() && nav.canShare?.({ files: [archivo] })) {
+    try {
+      await nav.share({ files: [archivo], title: nombre })
+      return
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') return
+    }
+  }
+  descargarBlob(nombre, archivo)
 }

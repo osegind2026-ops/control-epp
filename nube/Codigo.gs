@@ -11,7 +11,7 @@
  * No edite las pestañas a mano: los cambios se hacen desde la app.
  */
 
-var VERSION_SERVIDOR = '2.1.0'
+var VERSION_SERVIDOR = '2.2.0'
 var ZONA = 'America/Mexico_City'
 var LIMITE_FILAS = 800
 var LIMITE_CARACTERES = 3000000
@@ -55,7 +55,7 @@ var TABLAS = {
     cols: ['RPE', 'Nombre', 'Área', 'Puesto', 'Casillero', 'Tipo', 'Vigencia', 'Activo'],
     fila: function (d) { return [d.rpe, d.nombre, d.area, d.puesto, d.casillero, d.tipo, d.vigencia || '', d.activo ? 'SI' : 'NO'] },
   },
-  usuarios: { hoja: 'Usuarios', cols: ['Nombre', 'Administrador', 'Activo'], fila: function (d) { return [d.nombre, d.esAdmin ? 'SI' : '', d.activo ? 'SI' : 'NO'] } },
+  usuarios: { hoja: 'Usuarios', cols: ['Nombre', 'Administrador', 'Activo', 'Rol'], fila: function (d) { return [d.nombre, d.esAdmin ? 'SI' : '', d.activo ? 'SI' : 'NO', ROLES[d.rol || (d.esAdmin ? 'admin' : 'despachador')] || ''] } },
   motivos: { hoja: 'Motivos', cols: ['Tipo', 'Texto', 'Activo'], fila: function (d) { return [d.tipo, d.texto, d.activo ? 'SI' : 'NO'] } },
   entregas: {
     hoja: 'Entregas',
@@ -91,6 +91,31 @@ var TABLAS = {
     },
   },
 }
+
+TABLAS.equipos = {
+  hoja: 'Equipos a resguardo',
+  cols: ['Código', 'Equipo', 'Marca', 'Modelo', 'Serie', 'Accesorios', 'Lleva bitácora', 'Próxima calibración', 'Estado', 'Activo'],
+  fila: function (d) {
+    return [d.codigo, d.nombre, d.marca, d.modelo, d.serie, (d.accesorios || []).join(' · '), d.llevaBitacora ? 'SI' : 'NO', d.calibracion || '', ESTADOS_EQUIPO[d.estado] || d.estado, d.activo ? 'SI' : 'NO']
+  },
+}
+TABLAS.prestamosEquipo = {
+  hoja: 'Bitácora equipos',
+  cols: ['Folio', 'Código', 'Equipo', 'Salida', 'Recibió RPE', 'Recibió', 'Área', 'Contacto', 'Uso / lugar', 'Entregó', 'Devolver antes de', 'Accesorios', 'Bitácora', 'Estatus', 'Regreso', 'Devolvió', 'Revisó', 'Condición', 'Faltantes', 'Comentarios'],
+  fila: function (d) {
+    var r = d.regreso || {}
+    var faltan = d.regreso ? (d.accesorios || []).filter(function (a) { return (r.accesorios || []).indexOf(a) < 0 }) : []
+    return [
+      d.folio, d.equipoCodigo, d.equipoNombre, fechaTs(d.ts, 'yyyy-MM-dd HH:mm'), d.rpe, d.nombre, d.area, d.contacto, d.uso, d.usuarioNombre,
+      String(d.vence || '').replace('T', ' '), (d.accesorios || []).join(' · '), d.bitacora ? 'SI' : 'NO', d.estatus,
+      d.regreso ? fechaTs(r.ts, 'yyyy-MM-dd HH:mm') : '', d.regreso ? r.devolvioNombre + ' · ' + r.devolvioRpe : '', r.usuarioNombre || '',
+      d.regreso ? CONDICIONES[r.condicion] || r.condicion : '', faltan.join(' · '), r.comentarios || d.observaciones || '',
+    ]
+  },
+}
+var ROLES = { admin: 'Administrador', almacen: 'Encargado de almacén', despachador: 'Despachador' }
+var ESTADOS_EQUIPO = { operativo: 'Operativo', revision: 'En revisión', baja: 'Baja' }
+var CONDICIONES = { bueno: 'Buen estado', detalle: 'Con detalle', danado: 'Dañado' }
 
 var BASE = ['id', '_rev', '_borrado', '_json']
 var COL_ID = 0
@@ -311,7 +336,7 @@ function ganaEntrante(tabla, actual, entrante) {
     if (actual.estado === 'anulada' && entrante.estado !== 'anulada') return false
     return true
   }
-  if (tabla === 'resguardos') {
+  if (tabla === 'resguardos' || tabla === 'prestamosEquipo') {
     // Cada cambio de estatus sube «ver»; gana la versión más reciente.
     var va = actual.ver || 0
     var ve = entrante.ver || 0
@@ -572,6 +597,10 @@ function datosTabla(tabla) {
 function resumenAvisos() {
   var hoy = Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd')
   var ctx = contexto()
+  var ahoraLocal = Utilities.formatDate(new Date(), ZONA, "yyyy-MM-dd'T'HH:mm")
+  var prestamosEq = datosTabla('prestamosEquipo').filter(function (p) { return p.estatus === 'ACTIVO' && p.vence && p.vence < ahoraLocal })
+  var en30 = Utilities.formatDate(new Date(Date.now() + 30 * 864e5), ZONA, 'yyyy-MM-dd')
+  var calibrar = datosTabla('equipos').filter(function (e) { return e.activo !== false && e.estado !== 'baja' && e.calibracion && e.calibracion <= en30 })
   var resguardos = datosTabla('resguardos').filter(function (r) { return r.estatus === 'ACTIVO' })
   var vencidos = resguardos
     .filter(function (r) { return r.tipo === 'prestamo' && r.vence && r.vence < hoy })
@@ -600,7 +629,7 @@ function resumenAvisos() {
     })
     .filter(function (x) { return x.activo && x.total <= x.minimo })
 
-  if (!vencidos.length && !venceHoy.length && !eventuales.length && !reabastecer.length) return null
+  if (!vencidos.length && !venceHoy.length && !eventuales.length && !reabastecer.length && !prestamosEq.length && !calibrar.length) return null
 
   function fila(celdas) { return '<tr>' + celdas.map(function (c) { return '<td style="padding:4px 8px;border-bottom:1px solid #ddd">' + c + '</td>' }).join('') + '</tr>' }
   function tablaHtml(titulo, enc, filas) {
@@ -613,6 +642,10 @@ function resumenAvisos() {
   var html = '<p style="font-family:Arial">Resumen de Control EPP al ' + hoy + '.</p>' +
     tablaHtml('Préstamos vencidos (' + vencidos.length + ')', ['Equipo', 'Trabajador', 'Prestado', 'Debía volver', 'Supervisor'],
       vencidos.map(function (r) { return fila([nombreMat(ctx, r.materialId), r.nombre + ' · ' + r.rpe, r.fechaEntrega, '<b>' + r.vence + '</b>', sup(r)]) })) +
+    tablaHtml('Equipos de medición sin devolver (' + prestamosEq.length + ')', ['Equipo', 'Lo tiene', 'Contacto', 'Uso / lugar', 'Debía volver', 'Entregó'],
+      prestamosEq.map(function (p) { return fila([p.equipoCodigo + ' · ' + p.equipoNombre, p.nombre + ' · ' + p.rpe + ' (' + p.area + ')', p.contacto || '', p.uso || '', '<b>' + String(p.vence).replace('T', ' ') + '</b>', p.usuarioNombre]) })) +
+    tablaHtml('Calibraciones vencidas o próximas (' + calibrar.length + ')', ['Equipo', 'Serie', 'Calibración'],
+      calibrar.map(function (e) { return fila([e.codigo + ' · ' + e.nombre, e.serie || '', (e.calibracion < hoy ? '<b>VENCIDA</b> ' : '') + e.calibracion]) })) +
     tablaHtml('Préstamos que vencen hoy (' + venceHoy.length + ')', ['Equipo', 'Trabajador', 'Supervisor'],
       venceHoy.map(function (r) { return fila([nombreMat(ctx, r.materialId), r.nombre + ' · ' + r.rpe, sup(r)]) })) +
     tablaHtml('Eventuales con contrato vencido y equipo pendiente (' + eventuales.length + ')', ['Trabajador', 'Vigencia', 'Equipo'],
@@ -621,6 +654,8 @@ function resumenAvisos() {
       reabastecer.map(function (x) { return fila([x.nombre, x.total, x.minimo]) }))
 
   var partes = []
+  if (prestamosEq.length) partes.push(prestamosEq.length + ' equipo' + (prestamosEq.length > 1 ? 's' : '') + ' sin devolver')
+  if (calibrar.length) partes.push(calibrar.length + ' por calibrar')
   if (vencidos.length) partes.push(vencidos.length + ' préstamo' + (vencidos.length > 1 ? 's' : '') + ' vencido' + (vencidos.length > 1 ? 's' : ''))
   if (reabastecer.length) partes.push(reabastecer.length + ' por reabastecer')
   if (eventuales.length) partes.push(eventuales.length + ' eventual' + (eventuales.length > 1 ? 'es' : '') + ' con equipo')

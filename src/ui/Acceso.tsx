@@ -1,3 +1,4 @@
+import { nombreRol, rolDe } from '../state/permisos'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Usuario } from '../domain/types'
 import { iniciales } from '../lib/util'
@@ -85,7 +86,7 @@ export function PantallaAcceso() {
                 </span>
                 <span class="grow">
                   <strong>{u.nombre}</strong>
-                  {u.esAdmin && <span class="muted small"> · administrador</span>}
+                  {rolDe(u) !== 'despachador' && <span class="muted small"> · {nombreRol(rolDe(u)).toLowerCase()}</span>}
                 </span>
               </button>
             ))}

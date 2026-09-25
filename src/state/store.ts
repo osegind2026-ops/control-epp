@@ -5,10 +5,12 @@ import type {
   Categoria,
   Dispositivo,
   Entrega,
+  Equipo,
   Kit,
   Material,
   Motivo,
   Movimiento,
+  PrestamoEquipo,
   Resguardo,
   Sesion,
   Trabajador,
@@ -30,6 +32,8 @@ export const motivos = signal<Motivo[]>([])
 export const entregas = signal<Entrega[]>([])
 export const movimientos = signal<Movimiento[]>([])
 export const resguardos = signal<Resguardo[]>([])
+export const equipos = signal<Equipo[]>([])
+export const prestamosEquipo = signal<PrestamoEquipo[]>([])
 
 export const dispositivo = signal<Dispositivo | null>(null)
 export const folios = signal<Record<string, number>>({})
@@ -56,7 +60,18 @@ export const existencias = computed(() => calcularExistencias(movimientos.value)
 export const resguardosActivos = computed(() => resguardos.value.filter((r) => r.estatus === 'ACTIVO'))
 export const motivosDe = (tipo: Motivo['tipo']) =>
   motivos.value.filter((m) => m.tipo === tipo && m.activo).sort((a, b) => a.orden - b.orden)
+export const prestamosEquipoActivos = computed(() => prestamosEquipo.value.filter((p) => p.estatus === 'ACTIVO'))
 export const usuariosActivos = computed(() => usuarios.value.filter((u) => u.activo))
+
+/** Foto del material: la tomada en la oficina o, si no hay, la incluida con la app. */
+export function fotoDe(m: Pick<Material, 'fotoId' | 'imagen'> | undefined): string | undefined {
+  if (!m) return undefined
+  if (m.fotoId) {
+    const propia = fotos.value.get(m.fotoId)
+    if (propia) return propia
+  }
+  return m.imagen ? `./catalogo/${m.imagen}` : undefined
+}
 
 export function nombreMaterial(id: string, varianteId?: string): string {
   const m = materialesPorId.value.get(id)
@@ -83,6 +98,8 @@ export async function recargar(...tablas: string[]): Promise<void> {
   if (t('entregas')) tareas.push(db.entregas.orderBy('ts').toArray().then((v) => void (entregas.value = v)))
   if (t('movimientos')) tareas.push(db.movimientos.orderBy('ts').toArray().then((v) => void (movimientos.value = v)))
   if (t('resguardos')) tareas.push(db.resguardos.toArray().then((v) => void (resguardos.value = v)))
+  if (t('equipos')) tareas.push(db.equipos.toArray().then((v) => void (equipos.value = v.sort((a, b) => a.codigo.localeCompare(b.codigo)))))
+  if (t('prestamosEquipo')) tareas.push(db.prestamosEquipo.orderBy('ts').toArray().then((v) => void (prestamosEquipo.value = v)))
   if (t('config')) {
     tareas.push(
       (async () => {

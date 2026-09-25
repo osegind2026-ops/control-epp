@@ -2,11 +2,13 @@ import Dexie, { type Table } from 'dexie'
 import type {
   Categoria,
   Entrega,
+  Equipo,
   Foto,
   Kit,
   Material,
   Motivo,
   Movimiento,
+  PrestamoEquipo,
   Resguardo,
   Trabajador,
   Ubicacion,
@@ -37,6 +39,8 @@ export const TABLAS = [
   'entregas',
   'movimientos',
   'resguardos',
+  'equipos',
+  'prestamosEquipo',
 ] as const
 
 export type NombreTabla = (typeof TABLAS)[number]
@@ -64,6 +68,8 @@ export class BaseEPP extends Dexie {
   entregas!: Table<Entrega, string>
   movimientos!: Table<Movimiento, string>
   resguardos!: Table<Resguardo, string>
+  equipos!: Table<Equipo, string>
+  prestamosEquipo!: Table<PrestamoEquipo, string>
   bajas!: Table<Baja, string>
   config!: Table<ConfigFila, string>
 
@@ -98,6 +104,11 @@ export class BaseEPP extends Dexie {
       resguardos: 'id, rpe, estatus, entregaId, materialId, _mod',
       bajas: 'id, _mod',
       config: 'clave',
+    })
+    // v3: equipos a resguardo y su bitácora de préstamos
+    this.version(3).stores({
+      equipos: 'id, codigo, _mod',
+      prestamosEquipo: 'id, equipoId, rpe, estatus, ts, _mod',
     })
 
     for (const nombreTabla of [...TABLAS, 'bajas'] as const) {

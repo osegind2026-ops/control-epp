@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
         ? viteSingleFile()
         : VitePWA({
             registerType: 'autoUpdate',
-            includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'plantilla/*'],
+            includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'plantilla/*', 'catalogo/*'],
             manifest: {
               name: 'Control EPP · Laguna Verde',
               short_name: 'Control EPP',
@@ -33,7 +33,7 @@ export default defineConfig(({ mode }) => {
               ],
             },
             workbox: {
-              globPatterns: ['**/*.{js,css,html,svg,png,jpg,woff2}'],
+              globPatterns: ['**/*.{js,css,html,svg,png,jpg,woff2,webp}'],
               // El lector de gafetes (~12 MB) se descarga solo la primera vez que se usa
               globIgnores: ['ocr/**'],
               maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,

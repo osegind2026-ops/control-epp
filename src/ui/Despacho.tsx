@@ -396,7 +396,7 @@ export function PantallaDespacho() {
       const destino = e.target as HTMLElement
       if (destino.matches('input, textarea, select') || document.querySelector('.velo')) return
       const ahora = Date.now()
-      if (ahora - ultimo > 80) buffer = ''
+      if (ahora - ultimo > 100) buffer = ''
       ultimo = ahora
       if (e.key === 'Enter') {
         if (buffer.length >= 4) {

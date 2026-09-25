@@ -80,8 +80,14 @@ export function resolverRpe(entrada: string, existe: (rpe: string) => boolean): 
   const limpio = entrada.trim().toUpperCase().replace(/\s+/g, '')
   if (!limpio) return ''
   if (existe(limpio)) return limpio
-  if (limpio.length === 6 && existe(limpio.slice(0, 5))) return limpio.slice(0, 5)
+  // El código del gafete trae el RPE (5 caracteres) y al final un dígito verificador
+  if (/^[A-Z0-9]{6,}$/.test(limpio)) return limpio.slice(0, 5)
   return limpio
+}
+
+/** RPE a partir de lo escaneado o tecleado: solo letras y números, máximo 5 caracteres. */
+export function rpeDeCodigo(codigo: string): string {
+  return codigo.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5)
 }
 
 export function buscarTrabajadores(lista: Trabajador[], texto: string, limite = 8): Trabajador[] {

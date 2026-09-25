@@ -1,6 +1,6 @@
 import { createPortal } from 'preact/compat'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { descargarBlob, fechaLocal } from '../lib/util'
+import { entregarArchivo, fechaLocal } from '../lib/util'
 import { calcularReporte, type DatosReporte, type Fuentes } from '../reportes/datos'
 import { cargarPlantilla, type Plantilla } from '../reportes/plantilla'
 import { ReporteImprimible } from '../reportes/ReporteImprimible'
@@ -57,12 +57,12 @@ function Exportar({ desde, hasta, area }: { desde: string; hasta: string; area: 
       const d = preparar()
       if (tipo === 'excel') {
         const { generarExcel } = await import('../reportes/excel')
-        descargarBlob(nombreReporte(d, 'xlsx'), await generarExcel(d, fuentes()))
+        await entregarArchivo(nombreReporte(d, 'xlsx'), await generarExcel(d, fuentes()))
       } else {
         const p = await cargarPlantilla()
         if (tipo === 'pptx') {
           const { generarPresentacion } = await import('../reportes/presentacion')
-          descargarBlob(nombreReporte(d, 'pptx'), await generarPresentacion(d, p))
+          await entregarArchivo(nombreReporte(d, 'pptx'), await generarPresentacion(d, p))
         } else setVista({ d, p })
       }
       if (tipo !== 'pdf') avisar('✓ Reporte descargado')

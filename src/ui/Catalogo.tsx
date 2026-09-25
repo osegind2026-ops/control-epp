@@ -17,17 +17,20 @@ function EditorMaterial({ inicial, onCerrar }: { inicial: Material | null; onCer
   const [categoriaId, setCategoriaId] = useState(inicial?.categoriaId ?? S.categorias.value.find((c) => c.id === 'otros')?.id ?? S.categorias.value[0]?.id ?? '')
   const [tipo, setTipo] = useState<Material['tipo']>(inicial?.tipo ?? 'consumible')
   const [icono, setIcono] = useState(inicial?.icono ?? 'caja')
+  const [descripcion, setDescripcion] = useState(inicial?.descripcion ?? '')
   const [variantes, setVariantes] = useState<Variante[]>(inicial?.variantes ?? [])
   const [stockMin, setStockMin] = useState<Record<string, number>>(inicial?.stockMin ?? { [SIN_TALLA]: 5 })
   const [activo, setActivo] = useState(inicial?.activo ?? true)
   const [plazoDias, setPlazoDias] = useState(inicial?.plazoDias ?? 1)
   const [foto, setFoto] = useState<string | null | undefined>(undefined) // undefined = sin cambios, null = quitar
-  const fotoActual = foto === undefined ? (inicial?.fotoId ? S.fotos.value.get(inicial.fotoId) : undefined) : foto ?? undefined
+  const fotoPropia = foto === undefined ? (inicial?.fotoId ? S.fotos.value.get(inicial.fotoId) : undefined) : foto ?? undefined
+  const fotoActual = fotoPropia ?? (inicial?.imagen ? `./catalogo/${inicial.imagen}` : undefined)
 
   const cambiarVariante = (i: number, c: Partial<Variante>) => setVariantes(variantes.map((v, j) => (j === i ? { ...v, ...c } : v)))
 
   const elegirFoto = async (e: Event) => {
     const archivo = (e.target as HTMLInputElement).files?.[0]
+    ;(e.target as HTMLInputElement).value = ''
     if (!archivo) return
     const data = await intentar(() => comprimirFoto(archivo))
     if (data) setFoto(data)
@@ -52,6 +55,8 @@ function EditorMaterial({ inicial, onCerrar }: { inicial: Material | null; onCer
           activo,
           orden: inicial?.orden ?? S.materiales.value.length + 1,
           fotoId: inicial?.fotoId,
+          imagen: inicial?.imagen,
+          descripcion: descripcion.trim() || undefined,
           plazoDias: tipo === 'prestamo' ? plazoDias : undefined,
         },
         foto,
@@ -84,12 +89,16 @@ function EditorMaterial({ inicial, onCerrar }: { inicial: Material | null; onCer
         <div class="stack" style={{ width: '180px', gap: '8px' }}>
           <span class="foto">{fotoActual ? <img src={fotoActual} alt="" /> : <IlustracionMaterial icono={icono} />}</span>
           <label class="btn sm soft" style={{ cursor: 'pointer' }}>
-            <Icono n="camara" /> {fotoActual ? 'Cambiar foto' : 'Tomar o subir foto'}
+            <Icono n="camara" /> Tomar foto
             <input type="file" accept="image/*" capture="environment" hidden onChange={elegirFoto} />
           </label>
-          {fotoActual && (
+          <label class="btn sm soft" style={{ cursor: 'pointer' }}>
+            <Icono n="galeria" /> Galería o archivo
+            <input type="file" accept="image/*" hidden onChange={elegirFoto} />
+          </label>
+          {fotoPropia && (
             <button class="btn sm ghost" onClick={() => setFoto(null)}>
-              Quitar foto
+              {inicial?.imagen ? 'Volver a la foto original' : 'Quitar foto'}
             </button>
           )}
           {!fotoActual && (
@@ -113,6 +122,10 @@ function EditorMaterial({ inicial, onCerrar }: { inicial: Material | null; onCer
           <label class="campo">
             Nombre
             <input class="input" id="mat-nombre" value={nombre} onInput={(e) => setNombre((e.target as HTMLInputElement).value)} />
+          </label>
+          <label class="campo">
+            Descripción o ficha técnica (opcional)
+            <textarea class="input" id="mat-desc" rows={2} placeholder="No. de material SAP, norma, color, características…" value={descripcion} onInput={(e) => setDescripcion((e.target as HTMLTextAreaElement).value)} />
           </label>
           <label class="campo">
             Categoría
@@ -276,7 +289,7 @@ function Materiales() {
                   <span class="tile-stock">{m.variantes.length ? m.variantes.filter((v) => v.activo).map((v) => v.id).join(' · ') : 'Sin tallas'}</span>
                   {m.tipo === 'resguardo' && <span class="badge resg">Resguardo</span>}
                   {m.tipo === 'prestamo' && <span class="badge prest">Préstamo · {m.plazoDias ?? 1} d</span>}
-                  {!m.fotoId && <span class="badge warn">Sin foto</span>}
+                  {!m.fotoId && !m.imagen && <span class="badge warn">Sin foto</span>}
                 </button>
               ))}
             </div>

@@ -26,6 +26,10 @@ export interface Material {
   variantes: Variante[] // vacío = sin tallas
   stockMin: Record<string, number> // por variante ('' si no tiene tallas)
   fotoId?: string
+  /** Foto incluida con la app (carpeta public/catalogo) si no se ha tomado una propia. */
+  imagen?: string
+  /** Descripción o ficha técnica breve (No. de material SAP, norma, color…). */
+  descripcion?: string
   icono?: string // ilustración de respaldo cuando no hay foto
   orden: number
   activo: boolean
@@ -97,10 +101,19 @@ export interface Trabajador {
   actualizado: string
 }
 
+/**
+ * admin: todo, incluidos usuarios, catálogo y motivos.
+ * almacen: despacho, préstamos y además entradas, traspasos, ajustes y conteos.
+ * despachador: despacho, devoluciones y préstamos; consulta existencias.
+ */
+export type Rol = 'admin' | 'almacen' | 'despachador'
+
 export interface Usuario {
   id: string
   nombre: string
+  /** Se conserva por compatibilidad con equipos anteriores: true = rol admin. */
   esAdmin: boolean
+  rol?: Rol
   pinHash: string
   salt: string
   activo: boolean
@@ -224,4 +237,67 @@ export interface Sesion {
   usuarioId: string
   usuarioNombre: string
   esAdmin: boolean
+  rol: Rol
+}
+
+// ---------- Equipos a resguardo (explosímetros, higrómetros…) ----------
+
+export type EstadoEquipo = 'operativo' | 'revision' | 'baja'
+
+export interface Equipo {
+  id: string
+  codigo: string // código interno o de inventario (el que se escanea)
+  nombre: string // tipo de equipo: Explosímetro, Higrómetro…
+  marca: string
+  modelo: string
+  serie: string
+  /** Lo que sale con el equipo y se revisa al regreso. */
+  accesorios: string[]
+  llevaBitacora: boolean
+  /** Próxima calibración (YYYY-MM-DD). Sin fecha = no requiere. */
+  calibracion?: string
+  estado: EstadoEquipo
+  notas: string
+  fotoId?: string
+  activo: boolean
+  actualizado: string
+}
+
+export type CondicionRegreso = 'bueno' | 'detalle' | 'danado'
+
+export interface RegresoEquipo {
+  ts: string
+  devolvioRpe: string
+  devolvioNombre: string
+  usuarioId: string // revisó
+  usuarioNombre: string
+  condicion: CondicionRegreso
+  accesorios: string[] // los que regresaron
+  bitacora: boolean
+  comentarios: string
+}
+
+export interface PrestamoEquipo {
+  id: string
+  folio: string
+  equipoId: string
+  equipoCodigo: string
+  equipoNombre: string
+  rpe: string // recibió
+  nombre: string
+  area: string
+  contacto: string // extensión o teléfono para localizarlo
+  uso: string // trabajo o lugar donde se usará
+  ts: string // salida
+  usuarioId: string // entregó
+  usuarioNombre: string
+  equipo: string // código del dispositivo
+  vence: string // YYYY-MM-DDTHH:mm (hora local)
+  accesorios: string[]
+  bitacora: boolean
+  observaciones: string
+  estatus: 'ACTIVO' | 'DEVUELTO' | 'ANULADO'
+  regreso?: RegresoEquipo
+  ver: number
+  actualizado: string
 }

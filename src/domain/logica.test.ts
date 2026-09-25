@@ -9,6 +9,7 @@ import {
   nivelStock,
   prestamosVencidos,
   resolverRpe,
+  rpeDeCodigo,
   sumarDias,
   siguienteFolio,
 } from './logica'
@@ -79,6 +80,9 @@ describe('RPE', () => {
     expect(resolverRpe('zq9x72', (r) => existentes.has(r))).toBe('ZQ9X7')
     expect(resolverRpe(' T0901 ', (r) => existentes.has(r))).toBe('T0901')
     expect(resolverRpe('ZZ999', (r) => existentes.has(r))).toBe('ZZ999')
+    // Gafete de alguien que no está en el padrón: se toma el RPE sin el dígito verificador
+    expect(resolverRpe('QX7M84', (r) => existentes.has(r))).toBe('QX7M8')
+    expect(rpeDeCodigo(' qx7-m84 ')).toBe('QX7M8')
   })
 
   it('busca por RPE o por nombre sin importar acentos', () => {

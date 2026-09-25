@@ -13,7 +13,8 @@ describe('migración v3 (datos creados antes del cambio)', () => {
   it('reclasifica materiales, resguardos y el kit de ingreso sin tocar el casco', async () => {
     // Estado anterior: todo era «resguardo» y el kit no tenía complementos
     const viejos = materialesSemilla().map((m) => (['arnes_casco', 'barbiquejo', 'careta_policarbonato', 'arnes_cuerpo', 'linea_vida'].includes(m.id) ? { ...m, tipo: 'resguardo' as const, plazoDias: undefined } : m))
-      .filter((m) => m.id !== 'careta_base')
+      .filter((m) => !['careta_base', 'g_anticorte', 'cinturon'].includes(m.id))
+      .map(({ imagen: _i, descripcion: _d, ...m }) => m)
       .map((m) => (m.id === 'careta_policarbonato' ? { ...m, nombre: 'Careta Policarbonato' } : m))
     await db.materiales.bulkPut(viejos)
     await db.kits.bulkPut(kitsSemilla().map((k) => ({ ...k, lineas: k.lineas.map(({ conMaterial: _c, ...l }) => l) })))
@@ -34,6 +35,12 @@ describe('migración v3 (datos creados antes del cambio)', () => {
     // v4: la careta se divide en mica y base, ambas consumibles
     expect((await db.materiales.get('careta_policarbonato'))?.nombre).toBe('Mica de Policarbonato para Careta')
     expect((await db.materiales.get('careta_base'))?.tipo).toBe('consumible')
+    // v5: materiales del Anexo Técnico y fotos incluidas, sin tocar lo que ya existía
+    expect((await db.materiales.get('g_anticorte'))?.variantes.map((v) => v.id)).toEqual(['8', '9', '10'])
+    expect((await db.materiales.get('cinturon'))?.tipo).toBe('consumible')
+    expect((await db.materiales.get('casco'))?.imagen).toBe('casco.webp')
+    expect((await db.materiales.get('casco'))?.nombre).toBe('Casco de Seguridad')
+    expect((await db.categorias.get('soldadura'))?.nombre).toBe('Soldadura y cuerpo')
 
     // Correrla otra vez no cambia nada
     const antes = JSON.stringify(await db.resguardos.toArray())

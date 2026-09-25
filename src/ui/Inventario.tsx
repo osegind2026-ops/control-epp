@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'preact/hooks'
 import { ETIQUETA_NIVEL, existencia, nivelStock, tieneTallas, variantesDe } from '../domain/logica'
 import type { Material, TipoMovimiento } from '../domain/types'
-import { descargarArchivo, fechaDeTs, horaLocal } from '../lib/util'
+import { descargarArchivo, fechaDeTs, horaLocal, normalizar, plural } from '../lib/util'
 import { csvKardex, nombreArchivo } from '../state/respaldo'
 import { ajustarExistencia, ErrorNegocio, registrarEntrada, traspasar } from '../state/servicios'
 import * as S from '../state/store'
-import { avisar, FotoMaterial, intentar, Modal, SelectorMotivo, Talla, Vacio } from './comunes'
+import { puedeInventario } from '../state/permisos'
+import { avisar, confirmar, FotoMaterial, intentar, Modal, SelectorMotivo, Talla, Vacio } from './comunes'
 import { Icono } from './iconos'
 
 type TipoOp = 'entrada' | 'traspaso' | 'ajuste'
@@ -212,15 +213,19 @@ function Existencias({ abrir }: { abrir: (t: TipoOp, m?: string, v?: string) => 
       )}
 
       <div class="row">
-        <button class="btn primary" onClick={() => abrir('entrada')}>
-          <Icono n="entrada" /> Entrada
-        </button>
-        <button class="btn" onClick={() => abrir('traspaso')}>
-          <Icono n="traspaso" /> Traspaso
-        </button>
-        <button class="btn" onClick={() => abrir('ajuste')}>
-          <Icono n="ajuste" /> Ajuste
-        </button>
+        {puedeInventario() && (
+          <>
+            <button class="btn primary" onClick={() => abrir('entrada')}>
+              <Icono n="entrada" /> Entrada
+            </button>
+            <button class="btn" onClick={() => abrir('traspaso')}>
+              <Icono n="traspaso" /> Traspaso
+            </button>
+            <button class="btn" onClick={() => abrir('ajuste')}>
+              <Icono n="ajuste" /> Ajuste
+            </button>
+          </>
+        )}
         <label class="check" style={{ marginLeft: 'auto' }}>
           <input type="checkbox" checked={soloAlertas} onChange={(e) => setSoloAlertas((e.target as HTMLInputElement).checked)} />
           Solo por reabastecer
@@ -282,6 +287,7 @@ function Existencias({ abrir }: { abrir: (t: TipoOp, m?: string, v?: string) => 
                     <span class={`badge ${['ok', 'warn', 'bad', 'bad'][f.nivel]}`}>{ETIQUETA_NIVEL[f.nivel]}</span>
                   </td>
                   <td>
+                    {puedeInventario() && (
                     <div class="row" style={{ gap: '2px', flexWrap: 'nowrap' }}>
                       <button class="btn ghost sm" title="Entrada" aria-label={`Entrada de ${m.nombre}`} onClick={() => abrir('entrada', m.id, f.varianteId)}>
                         <Icono n="entrada" />
@@ -293,6 +299,7 @@ function Existencias({ abrir }: { abrir: (t: TipoOp, m?: string, v?: string) => 
                         <Icono n="ajuste" />
                       </button>
                     </div>
+                    )}
                   </td>
                 </tr>
               ))
@@ -304,18 +311,70 @@ function Existencias({ abrir }: { abrir: (t: TipoOp, m?: string, v?: string) => 
   )
 }
 
-// ---------- Conteo físico masivo ----------
+// ---------- Conteo rápido ----------
 
+const claveBorrador = (ubicacionId: string) => `conteo-borrador:${ubicacionId}`
+
+function leerBorrador(ubicacionId: string): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(claveBorrador(ubicacionId)) ?? '{}')
+  } catch {
+    return {}
+  }
+}
+
+function guardarBorrador(ubicacionId: string, conteos: Record<string, string>) {
+  try {
+    if (Object.keys(conteos).length) localStorage.setItem(claveBorrador(ubicacionId), JSON.stringify(conteos))
+    else localStorage.removeItem(claveBorrador(ubicacionId))
+  } catch {
+    /* sin almacenamiento: el conteo solo vive en pantalla */
+  }
+}
+
+/**
+ * Captura rápida de lo que hay físicamente en un almacén, pensada para el celular:
+ * tarjetas grandes, botones − / + y «igual al sistema». El avance se guarda en el
+ * equipo por si se cambia de pantalla. Solo se ajustan los renglones con diferencia.
+ */
 function Conteo() {
   const ubis = S.ubicacionesActivas.value
   const [ubicacionId, setUbicacionId] = useState(S.ubicacionDespacho.value?.id ?? '')
-  const [conteos, setConteos] = useState<Record<string, string>>({})
+  const [conteos, setConteosEstado] = useState<Record<string, string>>(() => leerBorrador(S.ubicacionDespacho.value?.id ?? ''))
   const [motivoId, setMotivoId] = useState('aju_conteo')
   const [guardando, setGuardando] = useState(false)
+  const [texto, setTexto] = useState('')
+  const [categoria, setCategoria] = useState('')
+  const [soloPendientes, setSoloPendientes] = useState(false)
+  const [revisar, setRevisar] = useState(false)
+
+  const setConteos = (c: Record<string, string>) => {
+    setConteosEstado(c)
+    guardarBorrador(ubicacionId, c)
+  }
+  const cambiarUbicacion = (id: string) => {
+    setUbicacionId(id)
+    setConteosEstado(leerBorrador(id))
+  }
+
   const filas = S.materialesActivos.value.flatMap((m) =>
     variantesDe(m).map((v) => ({ m, v, clave: `${m.id}|${v}`, sistema: existencia(S.existencias.value, m.id, v, ubicacionId) })),
   )
-  const cambios = filas.filter((f) => conteos[f.clave] !== undefined && conteos[f.clave] !== '' && parseInt(conteos[f.clave], 10) !== f.sistema)
+  const contadas = filas.filter((f) => (conteos[f.clave] ?? '') !== '')
+  const cambios = contadas.filter((f) => parseInt(conteos[f.clave], 10) !== f.sistema)
+  const buscar = normalizar(texto)
+  const visibles = S.materialesActivos.value.filter(
+    (m) =>
+      (!categoria || m.categoriaId === categoria) &&
+      (!buscar || normalizar(m.nombre).includes(buscar)) &&
+      (!soloPendientes || variantesDe(m).some((v) => (conteos[`${m.id}|${v}`] ?? '') === '')),
+  )
+
+  const poner = (clave: string, valor: string) => setConteos({ ...conteos, [clave]: valor.replace(/[^0-9]/g, '') })
+  const sumar = (clave: string, base: number, d: number) => {
+    const actual = conteos[clave] === undefined || conteos[clave] === '' ? base : parseInt(conteos[clave], 10)
+    poner(clave, String(Math.max(0, actual + d)))
+  }
 
   const aplicar = async () => {
     setGuardando(true)
@@ -325,19 +384,25 @@ function Conteo() {
       if (ok !== undefined) n++
     }
     setGuardando(false)
+    setRevisar(false)
     setConteos({})
-    avisar(`✓ ${n} ajuste${n === 1 ? '' : 's'} registrado${n === 1 ? '' : 's'}`)
+    avisar(`✓ Conteo aplicado: ${plural(n, 'ajuste', 'ajustes')}`)
   }
 
+  const descartar = async () => {
+    if (await confirmar('Descartar conteo', '¿Borrar lo capturado en este conteo?', 'Descartar', true)) setConteos({})
+  }
+
+  const ubi = ubis.find((u) => u.id === ubicacionId)
   return (
-    <div class="stack">
-      <p class="muted">
-        Capture lo que hay físicamente en un almacén. Solo se registran ajustes en los renglones donde el conteo difiere del sistema. Útil para el inventario inicial del piloto.
+    <div class="stack conteo">
+      <p class="muted small">
+        Cuente lo que hay en el almacén y escriba la cantidad, o toque <strong>✓</strong> si coincide con el sistema. El avance se guarda en este equipo; al final revise las diferencias y aplíquelas.
       </p>
       <div class="filtros">
         <label class="campo">
           Almacén
-          <select class="input" id="conteo-ubi" value={ubicacionId} onChange={(e) => (setUbicacionId((e.target as HTMLSelectElement).value), setConteos({}))}>
+          <select class="input" id="conteo-ubi" value={ubicacionId} onChange={(e) => cambiarUbicacion((e.target as HTMLSelectElement).value)}>
             {ubis.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.nombre}
@@ -345,54 +410,142 @@ function Conteo() {
             ))}
           </select>
         </label>
-        <label class="campo">
-          Motivo
-          <SelectorMotivo id="conteo-motivo" tipo="ajuste" valor={motivoId} onCambio={setMotivoId} />
+        <label class="campo grow">
+          Buscar
+          <input class="input" id="conteo-buscar" type="search" placeholder="Material…" value={texto} onInput={(e) => setTexto((e.target as HTMLInputElement).value)} />
         </label>
-        <button class="btn primary" disabled={!cambios.length || !motivoId || guardando} onClick={aplicar}>
-          Aplicar {cambios.length} ajuste{cambios.length === 1 ? '' : 's'}
-        </button>
       </div>
-      <div class="tabla-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Material</th>
-              <th>Talla</th>
-              <th class="num">Sistema</th>
-              <th class="num">Conteo físico</th>
-              <th class="num">Diferencia</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filas.map((f) => {
-              const valor = conteos[f.clave] ?? ''
-              const dif = valor === '' ? null : parseInt(valor, 10) - f.sistema
+      <div class="chips conteo-chips" role="group" aria-label="Categoría">
+        <button class="chip" aria-pressed={!categoria} onClick={() => setCategoria('')}>
+          Todo
+        </button>
+        {S.categorias.value.map((c) => (
+          <button key={c.id} class="chip" aria-pressed={categoria === c.id} onClick={() => setCategoria(categoria === c.id ? '' : c.id)}>
+            {c.nombre}
+          </button>
+        ))}
+      </div>
+      <label class="check">
+        <input type="checkbox" checked={soloPendientes} onChange={(e) => setSoloPendientes((e.target as HTMLInputElement).checked)} />
+        Mostrar solo lo que falta contar
+      </label>
+
+      <div class="conteo-lista">
+        {visibles.map((m) => (
+          <div key={m.id} class="card conteo-card">
+            <div class="material-celda">
+              <FotoMaterial materialId={m.id} mini />
+              <strong>{m.nombre}</strong>
+            </div>
+            {variantesDe(m).map((v) => {
+              const clave = `${m.id}|${v}`
+              const sistema = existencia(S.existencias.value, m.id, v, ubicacionId)
+              const valor = conteos[clave] ?? ''
+              const dif = valor === '' ? null : parseInt(valor, 10) - sistema
               return (
-                <tr key={f.clave}>
-                  <td>{f.m.nombre}</td>
-                  <td>{f.v && <Talla materialId={f.m.id} varianteId={f.v} />}</td>
-                  <td class="num">{f.sistema}</td>
-                  <td class="num">
+                <div key={clave} class={`conteo-fila ${valor !== '' ? (dif ? 'difiere' : 'igual') : ''}`}>
+                  <span class="conteo-talla">{v ? <Talla materialId={m.id} varianteId={v} /> : <span class="muted small">Piezas</span>}</span>
+                  <span class="muted small conteo-sistema">
+                    Sistema <b>{sistema}</b>
+                    {dif !== null && dif !== 0 && !isNaN(dif) && <span class={`badge ${dif > 0 ? 'ok' : 'bad'}`}>{dif > 0 ? `+${dif}` : dif}</span>}
+                  </span>
+                  <div class="conteo-captura">
+                    <button class="btn sm" aria-label="Uno menos" onClick={() => sumar(clave, sistema, -1)}>
+                      −
+                    </button>
                     <input
                       class="input"
-                      id={`conteo-${f.clave}`}
-                      type="number"
+                      id={`conteo-${clave}`}
                       inputMode="numeric"
-                      min={0}
-                      style={{ width: '100px', minHeight: '36px', padding: '4px 8px', textAlign: 'right' }}
-                      placeholder={String(f.sistema)}
+                      enterKeyHint="next"
+                      aria-label={`Conteo de ${S.nombreMaterial(m.id, v)}`}
+                      placeholder="—"
                       value={valor}
-                      onInput={(e) => setConteos({ ...conteos, [f.clave]: (e.target as HTMLInputElement).value })}
+                      onInput={(e) => poner(clave, (e.target as HTMLInputElement).value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return
+                        const campos = [...document.querySelectorAll<HTMLInputElement>('.conteo-captura input')]
+                        campos[campos.indexOf(e.target as HTMLInputElement) + 1]?.focus()
+                      }}
                     />
-                  </td>
-                  <td class={`num ${dif && dif > 0 ? 'pos' : dif && dif < 0 ? 'neg' : 'muted'}`}>{dif === null || isNaN(dif) ? '' : dif > 0 ? `+${dif}` : dif}</td>
-                </tr>
+                    <button class="btn sm" aria-label="Uno más" onClick={() => sumar(clave, sistema, 1)}>
+                      +
+                    </button>
+                    <button class={`btn sm ${valor !== '' && !dif ? 'primary' : 'ghost'}`} title="Igual al sistema" aria-label="Igual al sistema" onClick={() => poner(clave, String(sistema))}>
+                      ✓
+                    </button>
+                  </div>
+                </div>
               )
             })}
-          </tbody>
-        </table>
+          </div>
+        ))}
+        {!visibles.length && <Vacio>No hay materiales con ese filtro.</Vacio>}
       </div>
+
+      <div class="conteo-barra">
+        <span class="small grow">
+          <strong>
+            {contadas.length} de {filas.length}
+          </strong>{' '}
+          contados · {plural(cambios.length, 'diferencia', 'diferencias')}
+        </span>
+        {Object.keys(conteos).length > 0 && (
+          <button class="btn ghost sm" onClick={descartar}>
+            Descartar
+          </button>
+        )}
+        <button class="btn primary" disabled={!cambios.length} onClick={() => setRevisar(true)}>
+          Revisar y aplicar
+        </button>
+      </div>
+
+      {revisar && (
+        <Modal
+          titulo={`Ajustes del conteo · ${ubi?.nombre ?? ''}`}
+          onCerrar={() => setRevisar(false)}
+          acciones={
+            <>
+              <button class="btn" onClick={() => setRevisar(false)}>
+                Seguir contando
+              </button>
+              <button class="btn primary" disabled={!motivoId || guardando} onClick={aplicar}>
+                {guardando ? 'Aplicando…' : `Aplicar ${plural(cambios.length, 'ajuste', 'ajustes')}`}
+              </button>
+            </>
+          }
+        >
+          <label class="campo">
+            Motivo
+            <SelectorMotivo id="conteo-motivo" tipo="ajuste" valor={motivoId} onCambio={setMotivoId} />
+          </label>
+          <div class="tabla-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Material</th>
+                  <th class="num">Sistema</th>
+                  <th class="num">Conteo</th>
+                  <th class="num">Diferencia</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cambios.map((f) => {
+                  const dif = parseInt(conteos[f.clave], 10) - f.sistema
+                  return (
+                    <tr key={f.clave}>
+                      <td>{S.nombreMaterial(f.m.id, f.v)}</td>
+                      <td class="num">{f.sistema}</td>
+                      <td class="num">{conteos[f.clave]}</td>
+                      <td class={`num ${dif > 0 ? 'pos' : 'neg'}`}>{dif > 0 ? `+${dif}` : dif}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -526,7 +679,7 @@ export function PantallaInventario() {
         {(
           [
             ['existencias', 'Existencias'],
-            ['conteo', 'Conteo físico'],
+            ...(puedeInventario() ? ([['conteo', 'Conteo rápido']] as const) : []),
             ['kardex', 'Kardex'],
           ] as const
         ).map(([id, txt]) => (

@@ -16,6 +16,7 @@ import type {
   Material,
   Movimiento,
   Resguardo,
+  Rol,
   Sesion,
   TipoMovimiento,
   Trabajador,
@@ -23,6 +24,7 @@ import type {
 } from '../domain/types'
 import { fechaLocal, hashPin, horaLocal, nuevoId } from '../lib/util'
 import { avisarCambioLocal } from './nube'
+import { rolDe } from './permisos'
 import * as S from './store'
 
 export class ErrorNegocio extends Error {}
@@ -35,6 +37,11 @@ function actor(): { sesion: Sesion; equipo: Dispositivo } {
   if (!sesion) throw new ErrorNegocio('Inicie sesión con su PIN.')
   if (!equipo) throw new ErrorNegocio('Configure el equipo antes de registrar.')
   return { sesion, equipo }
+}
+
+function exigirInventario(): void {
+  const r = actor().sesion.rol
+  if (r !== 'admin' && r !== 'almacen') throw new ErrorNegocio('Solo un encargado de almacén o un administrador puede modificar las existencias.')
 }
 
 function nuevoMovimiento(
@@ -85,6 +92,7 @@ export async function inicializarSistema(datos: DatosInicio): Promise<void> {
     id: nuevoId('U'),
     nombre: datos.admin.nombre.trim(),
     esAdmin: true,
+    rol: 'admin',
     salt,
     pinHash: hashPin(datos.admin.pin, salt),
     activo: true,
@@ -124,7 +132,7 @@ export async function inicializarSistema(datos: DatosInicio): Promise<void> {
     await db.config.put({ clave: 'dispositivo', valor: equipo })
   })
   await S.recargar()
-  S.sesion.value = { usuarioId: admin.id, usuarioNombre: admin.nombre, esAdmin: true }
+  S.sesion.value = { usuarioId: admin.id, usuarioNombre: admin.nombre, esAdmin: true, rol: 'admin' }
 }
 
 export async function guardarDispositivo(codigo: string, nombre: string): Promise<void> {
@@ -147,7 +155,8 @@ export function verificarPin(usuario: Usuario, pin: string): boolean {
 
 export function iniciarSesion(usuario: Usuario, pin: string): boolean {
   if (!verificarPin(usuario, pin)) return false
-  S.sesion.value = { usuarioId: usuario.id, usuarioNombre: usuario.nombre, esAdmin: usuario.esAdmin }
+  const rol = rolDe(usuario)
+  S.sesion.value = { usuarioId: usuario.id, usuarioNombre: usuario.nombre, esAdmin: rol === 'admin', rol }
   return true
 }
 
@@ -155,7 +164,7 @@ export function cerrarSesion(): void {
   S.sesion.value = null
 }
 
-export async function guardarUsuario(datos: { id?: string; nombre: string; esAdmin: boolean; activo: boolean; pin?: string }): Promise<void> {
+export async function guardarUsuario(datos: { id?: string; nombre: string; rol: Rol; activo: boolean; pin?: string }): Promise<void> {
   const previo = datos.id ? S.usuarios.value.find((u) => u.id === datos.id) : undefined
   if (!previo && !datos.pin) throw new ErrorNegocio('Asigne un PIN al usuario nuevo.')
   if (datos.pin && !/^\d{4,6}$/.test(datos.pin)) throw new ErrorNegocio('El PIN debe tener de 4 a 6 números.')
@@ -163,7 +172,8 @@ export async function guardarUsuario(datos: { id?: string; nombre: string; esAdm
   const usuario: Usuario = {
     id: previo?.id ?? nuevoId('U'),
     nombre: datos.nombre.trim(),
-    esAdmin: datos.esAdmin,
+    esAdmin: datos.rol === 'admin',
+    rol: datos.rol,
     activo: datos.activo,
     salt,
     pinHash: datos.pin ? hashPin(datos.pin, salt) : previo!.pinHash,
@@ -517,6 +527,7 @@ export async function devolverResguardo(resguardoId: string, motivoId: string, n
 // ---------- Almacén ----------
 
 export async function registrarEntrada(p: { materialId: string; varianteId: string; ubicacionId: string; cantidad: number; motivoId: string; ref: string; nota: string }): Promise<void> {
+  exigirInventario()
   if (!(p.cantidad > 0)) throw new ErrorNegocio('La cantidad debe ser mayor a cero.')
   const motivo = S.motivos.value.find((m) => m.id === p.motivoId)
   await db.movimientos.add(
@@ -535,6 +546,7 @@ export async function registrarEntrada(p: { materialId: string; varianteId: stri
 }
 
 export async function ajustarExistencia(p: { materialId: string; varianteId: string; ubicacionId: string; conteo: number; motivoId: string; nota: string }): Promise<number> {
+  exigirInventario()
   if (!(p.conteo >= 0)) throw new ErrorNegocio('Ingrese un conteo de 0 o más.')
   const motivo = S.motivos.value.find((m) => m.id === p.motivoId)
   if (!motivo) throw new ErrorNegocio('Elija el motivo del ajuste.')
@@ -557,6 +569,7 @@ export async function ajustarExistencia(p: { materialId: string; varianteId: str
 }
 
 export async function traspasar(p: { materialId: string; varianteId: string; origenId: string; destinoId: string; cantidad: number; nota: string }): Promise<void> {
+  exigirInventario()
   if (p.origenId === p.destinoId) throw new ErrorNegocio('El origen y el destino deben ser distintos.')
   if (!(p.cantidad > 0)) throw new ErrorNegocio('La cantidad debe ser mayor a cero.')
   const disponible = existencia(S.existencias.value, p.materialId, p.varianteId, p.origenId)

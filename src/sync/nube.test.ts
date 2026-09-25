@@ -147,4 +147,41 @@ describe('sincronización entre dos equipos', () => {
     servidor.activarAvisosDiarios()
     expect(servidor.disparadores).toEqual(['enviarAvisos'])
   })
+
+  it('los equipos a resguardo y su bitácora se sincronizan y avisan si no regresan', async () => {
+    const { guardarEquipo, prestarEquipo } = await import('../state/equipos')
+    const eq = await guardarEquipo({ codigo: 'EXP-09', nombre: 'Explosímetro', marca: 'Marca', modelo: 'M', serie: 'S9', accesorios: ['Cargador'], llevaBitacora: true, estado: 'operativo', notas: '', activo: true, calibracion: '2020-02-02' })
+    // Calibración al día para poder prestarlo; la vencida se prueba en el aviso
+    await guardarEquipo({ ...eq, calibracion: '2099-01-01' })
+    const p = await prestarEquipo({ equipoId: eq.id, trabajador: S.personal.value.get('T0901')!, contacto: 'Ext. 4455', uso: 'Tanque', vence: '2099-01-01T08:00', accesorios: ['Cargador'], bitacora: true, observaciones: '' })
+    await db.prestamosEquipo.put({ ...p, vence: '2026-01-05T08:00' })
+    cfgA.cursor = (await sincronizar(db, cfgA, servidor.transporte)).cursor
+    expect(filasDe('Equipos a resguardo')[0]['Código']).toBe('EXP-09')
+    expect(filasDe('Bitácora equipos')[0]['Contacto']).toBe('Ext. 4455')
+    cfgB.cursor = (await sincronizar(baseB, cfgB, servidor.transporte)).cursor
+    expect((await baseB.prestamosEquipo.get(p.id))?.nombre).toBe('TRABAJADOR DE PRUEBA')
+    servidor.enviarAvisos()
+    const correo = servidor.correos.at(-1)!
+    expect(correo.subject).toMatch(/1 equipo sin devolver/)
+    expect(correo.htmlBody).toContain('EXP-09')
+  })
+
+  it('con un servidor sin actualizar, los equipos quedan pendientes sin trabar la sincronización', async () => {
+    const viejo: typeof servidor.transporte = async (url, cuerpo) => {
+      const c = cuerpo as { cambios?: { tabla: string }[] }
+      const conocidos = (c.cambios ?? []).filter((x) => x.tabla !== 'equipos' && x.tabla !== 'prestamosEquipo')
+      const desconocidas = [...new Set((c.cambios ?? []).filter((x) => !conocidos.includes(x)).map((x) => x.tabla))]
+      const r = (await servidor.transporte(url, { ...c, cambios: conocidos })) as { errores?: string[] }
+      return { ...r, errores: [...(r.errores ?? []), ...desconocidas.map((t) => 'Tabla desconocida: ' + t)] }
+    }
+    const { guardarEquipo } = await import('../state/equipos')
+    await guardarEquipo({ codigo: 'HIG-09', nombre: 'Higrómetro', marca: '', modelo: '', serie: '', accesorios: [], llevaBitacora: false, estado: 'operativo', notas: '', activo: true })
+    const r = await sincronizar(db, cfgA, viejo)
+    cfgA.cursor = r.cursor
+    expect(r.errores.join(' ')).toMatch(/actualizarse/)
+    expect(await db.equipos.where('_mod').above(0).count()).toBe(1)
+    // Ya con el servidor nuevo, se sube
+    cfgA.cursor = (await sincronizar(db, cfgA, servidor.transporte)).cursor
+    expect(await contarPendientes(db)).toBe(0)
+  })
 })

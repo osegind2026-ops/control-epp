@@ -292,7 +292,8 @@ export async function generarPresentacion(d: DatosReporte, p: Plantilla): Promis
     }
   }
 
-  return (await pres.write({ outputType: 'blob' })) as Blob
+  const blob = (await pres.write({ outputType: 'blob' })) as Blob
+  return new Blob([blob], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
 }
 
 export { ALTO }

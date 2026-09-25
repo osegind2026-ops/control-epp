@@ -91,13 +91,14 @@ function limpio(obj: Fila): Record<string, unknown> {
   return resto
 }
 
-async function recolectar(base: BaseEPP, maxItems = 300, maxCaracteres = 1_500_000): Promise<{ cambios: Cambio[]; marcas: Marca[] }> {
+async function recolectar(base: BaseEPP, omitir: Set<string> = new Set(), maxItems = 300, maxCaracteres = 1_500_000): Promise<{ cambios: Cambio[]; marcas: Marca[] }> {
   const cambios: Cambio[] = []
   const marcas: Marca[] = []
   let caracteres = 0
   // Primero catálogos, al final lo transaccional (así el servidor ya conoce los nombres)
   for (const tabla of TABLAS) {
     if (cambios.length >= maxItems || caracteres >= maxCaracteres) break
+    if (omitir.has(tabla)) continue
     const filas = (await base.table(tabla).where('_mod').above(0).toArray()) as Fila[]
     for (const f of filas) {
       if (cambios.length >= maxItems || caracteres >= maxCaracteres) break
@@ -110,6 +111,7 @@ async function recolectar(base: BaseEPP, maxItems = 300, maxCaracteres = 1_500_0
   }
   const bajas = await base.bajas.where('_mod').above(0).toArray()
   for (const b of bajas) {
+    if (omitir.has(b.tabla)) continue
     cambios.push({ tabla: b.tabla, id: b.registroId, borrado: true })
     marcas.push({ tabla: 'bajas', llave: b.id, mod: (b as unknown as Fila)._mod! })
   }
@@ -134,9 +136,9 @@ async function confirmarSubidos(base: BaseEPP, marcas: Marca[]): Promise<void> {
   }
 }
 
-export async function contarPendientes(base: BaseEPP): Promise<number> {
-  let n = await base.bajas.where('_mod').above(0).count()
-  for (const t of TABLAS) n += await base.table(t).where('_mod').above(0).count()
+export async function contarPendientes(base: BaseEPP, omitir: Set<string> = new Set()): Promise<number> {
+  let n = (await base.bajas.where('_mod').above(0).toArray()).filter((b) => !omitir.has(b.tabla)).length
+  for (const t of TABLAS) if (!omitir.has(t)) n += await base.table(t).where('_mod').above(0).count()
   return n
 }
 
@@ -198,19 +200,26 @@ export interface ResultadoSync {
 
 export async function sincronizar(base: BaseEPP, cfg: ConfigNube, t: Transporte, alAvanzar?: (texto: string) => void): Promise<ResultadoSync> {
   const r: ResultadoSync = { subidos: 0, bajados: 0, afectadas: new Set(), errores: [], cursor: cfg.cursor }
+  // Tablas que el servidor aún no conoce (servidor sin actualizar): quedan pendientes para después
+  const desconocidas = new Set<string>()
   for (let vuelta = 0; vuelta < 200; vuelta++) {
-    const { cambios, marcas } = await recolectar(base)
+    const { cambios, marcas } = await recolectar(base, desconocidas)
     const d = await llamar(t, cfg.url, { accion: 'sync', equipoId: cfg.equipoId, token: cfg.token, cursor: r.cursor, cambios })
-    await confirmarSubidos(base, marcas)
+    for (const e of (d.errores ?? []) as string[]) {
+      const m = /Tabla desconocida: (\w+)/.exec(e)
+      if (m) desconocidas.add(m[1])
+    }
+    await confirmarSubidos(base, marcas.filter((m) => !desconocidas.has(m.tabla === 'bajas' ? m.llave.split(':')[0] : m.tabla)))
     r.subidos += cambios.length
     const filas = (d.filas ?? []) as FilaRemota[]
     for (const a of await aplicarRemotos(base, filas)) r.afectadas.add(a)
     r.bajados += filas.length
-    r.errores.push(...((d.errores ?? []) as string[]))
+    r.errores.push(...((d.errores ?? []) as string[]).filter((e) => !/Tabla desconocida/.test(e)))
     r.cursor = Number(d.cursor)
     alAvanzar?.(`${r.subidos} enviados · ${r.bajados} recibidos`)
-    if (!d.hayMas && (await contarPendientes(base)) === 0) break
+    if (!d.hayMas && (await contarPendientes(base, desconocidas)) === 0) break
     if (!d.hayMas && !cambios.length) break
   }
+  if (desconocidas.size) r.errores.push('El servidor de Google necesita actualizarse (versión 2.2) para guardar los equipos a resguardo; mientras tanto quedan en este equipo.')
   return r
 }

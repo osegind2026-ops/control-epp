@@ -1,7 +1,7 @@
 import { db, guardarConfig, leerConfig } from '../db/db'
 import { fechaLocal } from '../lib/util'
 import type { Kit, Material, Resguardo } from '../domain/types'
-import { materialesSemilla } from '../db/semilla'
+import { CATEGORIAS, FICHAS, materialesSemilla } from '../db/semilla'
 import * as S from './store'
 
 // Cambios de datos que acompañan a nuevas versiones de la app. Cada migración
@@ -73,12 +73,48 @@ async function v4(): Promise<void> {
   if (cambios.length) await db.materiales.bulkPut(cambios)
 }
 
+/**
+ * v5: catálogo con fotos y fichas del Anexo Técnico 2026; materiales nuevos (guantes
+ * anticorte y de uso rudo, cinturón, soldadura, cintas…) y categoría de soldadura.
+ * No cambia nombres ni fotos que la oficina ya haya puesto.
+ */
+async function v5(): Promise<void> {
+  const ahora = new Date().toISOString()
+  const actuales = new Map((await db.materiales.toArray()).map((m) => [m.id, m]))
+  let orden = Math.max(0, ...[...actuales.values()].map((m) => m.orden))
+  const cambios: Material[] = []
+  for (const semilla of materialesSemilla()) {
+    const m = actuales.get(semilla.id)
+    if (!m) {
+      cambios.push({ ...semilla, orden: ++orden, actualizado: ahora })
+      continue
+    }
+    const ficha = FICHAS[m.id]
+    if (!ficha) continue
+    const agregar: Partial<Material> = {}
+    if (ficha.imagen && !m.imagen) agregar.imagen = ficha.imagen
+    if (!m.descripcion) agregar.descripcion = ficha.descripcion
+    if (Object.keys(agregar).length) cambios.push({ ...m, ...agregar, actualizado: ahora })
+  }
+  const categorias = await db.categorias.toArray()
+  const nuevasCat = CATEGORIAS.filter((c) => !categorias.some((x) => x.id === c.id))
+  const otros = categorias.find((c) => c.id === 'otros')
+  await db.transaction('rw', [db.materiales, db.categorias], async () => {
+    if (cambios.length) await db.materiales.bulkPut(cambios)
+    if (nuevasCat.length) await db.categorias.bulkPut(nuevasCat)
+    if (otros && otros.nombre === 'Otros') await db.categorias.put({ ...otros, nombre: 'Señalización y otros', orden: 8 })
+  })
+}
+
 const MIGRACIONES: [number, () => Promise<void>][] = [
   [3, v3],
   [4, v4],
+  [5, v5],
 ]
 
 export async function migrar(): Promise<void> {
+  // Equipo aún sin datos (recién instalado o uniéndose a la nube): se migra cuando ya los tenga
+  if ((await db.materiales.count()) === 0) return
   const actual = await leerConfig<number>('versionDatos', 2)
   let aplicada = actual
   for (const [version, fn] of MIGRACIONES) {

@@ -69,6 +69,10 @@ Envíe **solo la URL** (la que termina en `/exec`). No envíe la contraseña ni 
 
 - **Entregas, Detalle de entregas, Existencias, Resguardos, Movimientos, Personal…**: se llenan
   solas desde la app. Úselas para consultar, filtrar o hacer tablas dinámicas.
+- **Equipos a resguardo** y **Bitácora equipos** (servidor 2.2): catálogo de explosímetros,
+  higrómetros, etc., y cada salida y regreso con quién lo tiene, su contacto y cómo regresó.
+- El correo diario (función `activarAvisosDiarios`) avisa de préstamos vencidos, equipos que no
+  han regresado, calibraciones próximas y materiales por reabastecer.
 - **Equipos**: los celulares y PC conectados. Para quitarle el acceso a uno, cambie su columna
   «Activo» de `SI` a `NO`.
 - No edite a mano las demás pestañas: los cambios se hacen desde la app.

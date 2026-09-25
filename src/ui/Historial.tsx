@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'preact/hooks'
 import type { Entrega } from '../domain/types'
-import { descargarArchivo, descargarBlob, fechaLocal, normalizar, plural } from '../lib/util'
+import { descargarArchivo, entregarArchivo, fechaLocal, normalizar, plural } from '../lib/util'
 import { calcularReporte } from '../reportes/datos'
 import { csvDetalle, nombreArchivo } from '../state/respaldo'
 import { anularEntrega } from '../state/servicios'
@@ -134,7 +134,7 @@ const fuentesActuales = () => ({
 async function excelDe(desde: string, hasta: string): Promise<void> {
   const { generarExcel } = await import('../reportes/excel')
   const d = calcularReporte(fuentesActuales(), desde, hasta)
-  descargarBlob(`Entrega de EPP ${d.titulo.replace(/[·/\\:]/g, '-')}.xlsx`, await generarExcel(d, fuentesActuales()))
+  await entregarArchivo(`Entrega de EPP ${d.titulo.replace(/[·/\\:]/g, '-')}.xlsx`, await generarExcel(d, fuentesActuales()))
 }
 
 async function compartirHoy() {
