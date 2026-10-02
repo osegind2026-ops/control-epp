@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks'
 import { hace, plural } from '../lib/util'
-import { conectarNube, desconectarNube, errorNube, estadoNube, nube, pendientesNube, progresoNube, sincronizarAhora, unirseDesdeNube } from '../state/nube'
+import { conectarNube, desconectarNube, errorNube, esLocal, estadoNube, nube, pendientesNube, progresoNube, servidorLocal, sincronizarAhora, unirseDesdeNube } from '../state/nube'
+import { pantalla } from '../state/navegacion'
 import * as S from '../state/store'
 import { avisar, confirmar, intentar } from './comunes'
 import { Icono } from './iconos'
@@ -17,6 +18,15 @@ const TEXTO_ESTADO: Record<string, string> = {
 /** Pastilla de estado en la barra lateral y superior. Al tocarla, sincroniza. */
 export function IndicadorNube({ compacto }: { compacto?: boolean }) {
   const cfg = nube.value
+  if (!cfg && servidorLocal.value) {
+    // Abierta desde la carpeta de red pero sin conectar: que se note
+    return (
+      <button class="indicador-nube bad" onClick={() => (pantalla.value = 'ajustes')} title={errorNube.value || 'Conectar a la carpeta de red'}>
+        <span class="punto-nube" />
+        {!compacto && <span>Sin conectar a la red</span>}
+      </button>
+    )
+  }
   if (!cfg) return null
   const estado = estadoNube.value
   const clase = estado === 'al-dia' ? 'ok' : estado === 'error' ? 'bad' : estado === 'sin-red' || estado === 'pendiente' ? 'warn' : ''
@@ -30,7 +40,7 @@ export function IndicadorNube({ compacto }: { compacto?: boolean }) {
     <button
       class={`indicador-nube ${clase}`}
       onClick={() => void sincronizarAhora()}
-      title={errorNube.value || 'Sincronizar ahora con Google Sheets'}
+      title={errorNube.value || (esLocal(cfg.url) ? 'Sincronizar ahora con la carpeta de red' : 'Sincronizar ahora con Google Sheets')}
       aria-label={`Nube: ${TEXTO_ESTADO[estado]}. Sincronizar ahora`}
     >
       <span class={`punto-nube ${estado === 'sincronizando' ? 'gira' : ''}`} />
@@ -73,22 +83,43 @@ export function TarjetaNube() {
   const [clave, setClave] = useState('')
   const [trabajando, setTrabajando] = useState(false)
 
+  const local = servidorLocal.value
+  const titulo = (cfg ? esLocal(cfg.url) : !!local) ? 'Carpeta de red' : 'Nube · Google Sheets'
+
   const conectar = async () => {
     setTrabajando(true)
     const ok = await intentar(async () => {
-      await conectarNube(url, clave)
+      await conectarNube(local ? local.url : url, local ? '' : clave)
       return true
     })
     setTrabajando(false)
     if (ok) {
       setClave('')
-      avisar('✓ Equipo conectado a Google Sheets. Los datos se sincronizan solos.', { ms: 6000 })
+      avisar(local ? '✓ Equipo conectado a la carpeta de red.' : '✓ Equipo conectado a Google Sheets. Los datos se sincronizan solos.', { ms: 6000 })
     }
   }
 
   const desconectar = async () => {
     if (!(await confirmar('Desconectar de la nube', 'Este equipo dejará de sincronizarse. Los datos se quedan en el equipo y los cambios nuevos no llegarán a la hoja.', 'Desconectar', true))) return
     await desconectarNube()
+  }
+
+  if (!cfg && local) {
+    return (
+      <section class="card stack">
+        <h2>{titulo}</h2>
+        <p class="muted small">Este equipo aún no está conectado a la carpeta de red de la oficina (servidor de la PC {local.pc}).</p>
+        {errorNube.value && (
+          <div class="aviso bad small">
+            <Icono n="alerta" />
+            <span>{errorNube.value} Si el código está repetido, cámbielo en «Este equipo» y vuelva a conectar.</span>
+          </div>
+        )}
+        <button class="btn primary" style={{ justifySelf: 'start' }} disabled={trabajando} onClick={conectar}>
+          {trabajando ? progresoNube.value || 'Conectando…' : 'Conectar a la carpeta de red'}
+        </button>
+      </section>
+    )
   }
 
   if (!cfg) {
@@ -110,7 +141,7 @@ export function TarjetaNube() {
   return (
     <section class="card stack">
       <div class="spread">
-        <h2>Nube · Google Sheets</h2>
+        <h2>{titulo}</h2>
         <IndicadorNube />
       </div>
       <dl class="datos-nube">
@@ -144,10 +175,11 @@ export function TarjetaNube() {
 
 /** Alta de un equipo nuevo descargando todo de la nube (pantalla inicial). */
 export function UnirseDesdeNube({ onAtras }: { onAtras: () => void }) {
-  const [url, setUrl] = useState('')
+  const local = servidorLocal.value
+  const [url, setUrl] = useState(local?.url ?? '')
   const [clave, setClave] = useState('')
   const [codigo, setCodigo] = useState('')
-  const [nombre, setNombre] = useState('')
+  const [nombre, setNombre] = useState(local ? `PC ${local.pc}` : '')
   const [trabajando, setTrabajando] = useState(false)
   const unir = async () => {
     if (!/^[A-Z0-9]{1,4}$/.test(codigo) || !nombre.trim()) return avisar('Complete el código y el nombre de este equipo.', { tipo: 'bad' })
@@ -161,8 +193,12 @@ export function UnirseDesdeNube({ onAtras }: { onAtras: () => void }) {
   }
   return (
     <>
-      <p class="muted">Descarga de la nube el catálogo, el padrón, los usuarios y las existencias. Entre después con su usuario y PIN de siempre.</p>
-      <CamposConexion url={url} clave={clave} onUrl={setUrl} onClave={setClave} />
+      <p class="muted">
+        {local
+          ? 'Descarga de la carpeta de red el catálogo, el padrón, los usuarios y las existencias. Entre después con su usuario y PIN de siempre.'
+          : 'Descarga de la nube el catálogo, el padrón, los usuarios y las existencias. Entre después con su usuario y PIN de siempre.'}
+      </p>
+      {!local && <CamposConexion url={url} clave={clave} onUrl={setUrl} onClave={setClave} />}
       <label class="campo">
         Código de este equipo (1 a 4 letras o números, distinto a los demás)
         <input class="input" id="unir-codigo" maxLength={4} value={codigo} placeholder="Ej. JP1" onInput={(e) => setCodigo((e.target as HTMLInputElement).value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />
@@ -176,7 +212,7 @@ export function UnirseDesdeNube({ onAtras }: { onAtras: () => void }) {
         <button class="btn" onClick={onAtras}>
           Atrás
         </button>
-        <button class="btn primary grow" disabled={!url || !clave || trabajando} onClick={unir}>
+        <button class="btn primary grow" disabled={!url || (!local && !clave) || trabajando} onClick={unir}>
           {trabajando ? 'Descargando…' : 'Conectar y descargar'}
         </button>
       </div>

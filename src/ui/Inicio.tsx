@@ -4,6 +4,7 @@ import { importarRespaldo, leerPadronCSV, leerRespaldo } from '../state/respaldo
 import { guardarDispositivo, inicializarSistema } from '../state/servicios'
 import * as S from '../state/store'
 import { avisar, intentar } from './comunes'
+import { conectarLocalSiFalta, servidorLocal } from '../state/nube'
 import { UnirseDesdeNube } from './Nube'
 
 function CampoEquipo(props: { codigo: string; nombre: string; onCodigo: (v: string) => void; onNombre: (v: string) => void }) {
@@ -56,6 +57,9 @@ export function PantallaInicio() {
     if (pin !== pin2) return avisar('Los PIN no coinciden.', { tipo: 'bad' })
     setTrabajando(true)
     await intentar(() => inicializarSistema({ equipo: { codigo, nombre: equipo }, admin: { nombre: admin, pin }, demo, padron }))
+    // En la carpeta de red, el primer equipo sube de una vez todo a los datos compartidos
+    const error = await conectarLocalSiFalta()
+    if (error) avisar(`No se pudo conectar a la carpeta de red: ${error} Corríjalo en Ajustes → Este equipo y luego Ajustes → Carpeta de red.`, { tipo: 'bad', ms: 12000 })
     setTrabajando(false)
   }
 
@@ -64,6 +68,8 @@ export function PantallaInicio() {
     const usados = new Set(S.entregas.value.map((e) => e.equipo))
     if (usados.has(codigo)) return avisar(`El código ${codigo} ya lo usa otro equipo. Elija otro.`, { tipo: 'bad' })
     await intentar(() => guardarDispositivo(codigo, equipo))
+    const error = await conectarLocalSiFalta()
+    if (error) avisar(`No se pudo conectar a la carpeta de red: ${error}`, { tipo: 'bad', ms: 12000 })
   }
 
   return (
@@ -76,7 +82,32 @@ export function PantallaInicio() {
           <h1>Control EPP</h1>
         </div>
 
-        {modo === 'elegir' && (
+        {modo === 'elegir' && servidorLocal.value && (
+          <>
+            <div class="aviso info small">
+              <span>
+                Carpeta de red de la oficina · servidor en esta PC ({servidorLocal.value.pc}).{' '}
+                {servidorLocal.value.tieneDatos ? 'Ya hay datos de la oficina: únase con un código para este equipo.' : 'Todavía no hay datos: este será el primer equipo.'}
+              </span>
+            </div>
+            {servidorLocal.value.tieneDatos ? (
+              <button class="btn primary block" onClick={() => setModo('nube')}>
+                Unirme al Control EPP de la oficina
+              </button>
+            ) : (
+              <>
+                <button class="btn primary block" onClick={() => setModo('nuevo')}>
+                  Empezar el sistema de la oficina
+                </button>
+                <button class="btn ghost block" onClick={() => setModo('unir')}>
+                  Empezar con el archivo de respaldo de otro equipo
+                </button>
+              </>
+            )}
+          </>
+        )}
+
+        {modo === 'elegir' && !servidorLocal.value && (
           <>
             <p class="muted">Configuración inicial de este equipo.</p>
             <button class="btn primary block" onClick={() => setModo('nube')}>

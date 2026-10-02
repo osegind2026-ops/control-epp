@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { Modal } from './comunes'
+import { lecturaEscanerValida } from '../domain/logica'
 import { Icono } from './iconos'
 
 /**
@@ -19,12 +20,26 @@ export function CamaraEnVivo(props: {
   /** Proporción del recuadro guía (ancho / alto). */
   guia?: number
   textoFoto?: string
+  /** Sigue buscando códigos después de encontrar uno (modo de prueba). */
+  continuo?: boolean
+  /** Muestra resolución y lecturas por segundo sobre la imagen. */
+  mostrarInfo?: boolean
+  children?: ComponentChildren
 }) {
   const video = useRef<HTMLVideoElement>(null)
   const pista = useRef<MediaStreamTrack | null>(null)
   const [error, setError] = useState('')
   const [listo, setListo] = useState(false)
   const [linterna, setLinterna] = useState<boolean | null>(null)
+  const [camaras, setCamaras] = useState<MediaDeviceInfo[]>([])
+  const [camaraId, setCamaraId] = useState(() => {
+    try {
+      return localStorage.getItem('camara-preferida') ?? ''
+    } catch {
+      return ''
+    }
+  })
+  const [info, setInfo] = useState('')
 
   useEffect(() => {
     let activo = true
@@ -33,10 +48,22 @@ export function CamaraEnVivo(props: {
     ;(async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error('sin cámara')
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1440 } },
-        })
+        const tamano = { width: { ideal: 2560 }, height: { ideal: 1440 } }
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: camaraId ? { deviceId: { exact: camaraId }, ...tamano } : { facingMode: { ideal: 'environment' }, ...tamano },
+          })
+        } catch (e) {
+          if (!camaraId) throw e
+          // La cámara guardada ya no está conectada: usar la predeterminada
+          stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, ...tamano } })
+        }
+        // Con el permiso ya dado, los nombres de las cámaras están disponibles (PC con varias webcams)
+        navigator.mediaDevices
+          .enumerateDevices()
+          .then((d) => activo && setCamaras(d.filter((x) => x.kind === 'videoinput')))
+          .catch(() => {})
         if (!activo || !video.current) return stream.getTracks().forEach((t) => t.stop())
         pista.current = stream.getVideoTracks()[0]
         const capacidades = (pista.current.getCapabilities?.() ?? {}) as { torch?: boolean; focusMode?: string[] }
@@ -49,18 +76,27 @@ export function CamaraEnVivo(props: {
         setListo(true)
         if (props.buscarCodigo) {
           const lienzo = document.createElement('canvas')
+          let intentos = 0
+          const desde = Date.now()
           const buscar = async () => {
             if (!activo) return
             const v = video.current
             if (v && v.videoWidth) {
+              intentos++
+              if (props.mostrarInfo) setInfo(`${v.videoWidth}×${v.videoHeight} · ${(intentos / ((Date.now() - desde) / 1000)).toFixed(1)} análisis/s`)
               const escala = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight))
               lienzo.width = Math.round(v.videoWidth * escala)
               lienzo.height = Math.round(v.videoHeight * escala)
               lienzo.getContext('2d', { willReadFrequently: true })!.drawImage(v, 0, 0, lienzo.width, lienzo.height)
               const codigo = await props.buscarCodigo!(lienzo).catch(() => '')
               if (codigo && activo) {
-                activo = false
                 props.onCodigo?.(codigo)
+                if (!props.continuo) {
+                  activo = false
+                  return
+                }
+                // En modo de prueba se sigue leyendo, con una pausa para no repetir la misma lectura
+                temporizador = window.setTimeout(buscar, 1500)
                 return
               }
             }
@@ -77,7 +113,18 @@ export function CamaraEnVivo(props: {
       clearTimeout(temporizador)
       stream?.getTracks().forEach((t) => t.stop())
     }
-  }, [])
+  }, [camaraId])
+
+  const elegirCamara = (id: string) => {
+    try {
+      localStorage.setItem('camara-preferida', id)
+    } catch {
+      /* sin almacenamiento: solo por esta vez */
+    }
+    setListo(false)
+    setLinterna(null)
+    setCamaraId(id)
+  }
 
   const alternarLinterna = async () => {
     const nuevo = !linterna
@@ -115,12 +162,25 @@ export function CamaraEnVivo(props: {
           <video ref={video} playsInline muted autoPlay />
           <div class="camara-guia" style={{ aspectRatio: String(guia) }} />
           {!listo && <span class="camara-espera">Abriendo cámara…</span>}
+          {props.mostrarInfo && info && <span class="camara-info">{info}</span>}
           {linterna !== null && (
             <button class={`btn sm camara-linterna ${linterna ? 'primary' : ''}`} onClick={alternarLinterna} aria-pressed={linterna} aria-label="Linterna">
               <Icono n="linterna" />
             </button>
           )}
         </div>
+      )}
+      {camaras.length > 1 && (
+        <label class="campo">
+          Cámara
+          <select class="input" id="camara-elegida" value={camaraId || (pista.current?.getSettings().deviceId ?? '')} onChange={(e) => elegirCamara((e.target as HTMLSelectElement).value)}>
+            {camaras.map((c, i) => (
+              <option key={c.deviceId} value={c.deviceId}>
+                {c.label || `Cámara ${i + 1}`}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
       <p class="muted small">{props.ayuda}</p>
       <div class="camara-acciones">
@@ -141,6 +201,7 @@ export function CamaraEnVivo(props: {
           </label>
         )}
       </div>
+      {props.children}
     </Modal>
   )
 }
@@ -153,14 +214,24 @@ export function LectorTeclado({ onCodigo, onCerrar }: { onCodigo: (c: string) =>
   const campo = useRef<HTMLInputElement>(null)
   const [valor, setValor] = useState('')
   const [manual, setManual] = useState(false)
+  const [error, setError] = useState('')
+  const inicio = useRef(0)
   useEffect(() => {
     const t = window.setTimeout(() => campo.current?.focus(), 50)
     return () => clearTimeout(t)
   }, [manual])
   const enviar = () => {
     const c = valor.trim()
-    if (c) onCodigo(c)
     setValor('')
+    if (!c) return
+    // Escrito en menos de medio segundo = lo mandó el escáner: debe llegar completo
+    const delEscaner = !manual || Date.now() - inicio.current < 500
+    if (delEscaner && !lecturaEscanerValida(c)) {
+      setError(`Lectura incompleta: llegó «${c}». Vuelva a escanear. Si pasa seguido, revise la configuración del teclado del escáner.`)
+      return
+    }
+    setError('')
+    onCodigo(c)
   }
   return (
     <Modal titulo="Escáner de código de barras" onCerrar={onCerrar}>
@@ -180,7 +251,11 @@ export function LectorTeclado({ onCodigo, onCerrar }: { onCodigo: (c: string) =>
           autoCapitalize="characters"
           value={valor}
           placeholder="Esperando lectura…"
-          onInput={(e) => setValor((e.target as HTMLInputElement).value)}
+          onInput={(e) => {
+            const v = (e.target as HTMLInputElement).value
+            if (!valor) inicio.current = Date.now()
+            setValor(v)
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === 'Tab') {
               e.preventDefault()
@@ -189,6 +264,7 @@ export function LectorTeclado({ onCodigo, onCerrar }: { onCodigo: (c: string) =>
           }}
         />
       </label>
+      {error && <div class="aviso bad small">{error}</div>}
       <p class="muted small">
         El escáner debe estar configurado como teclado (HID) y terminar con Enter, que es lo normal. En el celular, primero vincule el escáner por Bluetooth.{' '}
         {!manual && (

@@ -153,11 +153,81 @@ export function verificarPin(usuario: Usuario, pin: string): boolean {
   return usuario.activo && hashPin(pin, usuario.salt) === usuario.pinHash
 }
 
+// Bloqueo temporal tras varios PIN incorrectos (por usuario, en este equipo)
+const MAX_INTENTOS = 5
+const BLOQUEO_MS = 60_000
+const fallos = new Map<string, { n: number; hasta: number }>()
+
+/** Segundos que faltan para poder volver a intentar (0 = puede intentar). */
+export function esperaPin(usuarioId: string, ahora = Date.now()): number {
+  const f = fallos.get(usuarioId)
+  return f && f.hasta > ahora ? Math.ceil((f.hasta - ahora) / 1000) : 0
+}
+
 export function iniciarSesion(usuario: Usuario, pin: string): boolean {
-  if (!verificarPin(usuario, pin)) return false
+  if (esperaPin(usuario.id)) return false
+  if (!verificarPin(usuario, pin)) {
+    // El teclado prueba desde 4 dígitos; un intento fallido completo es cuando llega a 6
+    if (pin.length === 6) {
+      const f = fallos.get(usuario.id) ?? { n: 0, hasta: 0 }
+      f.n++
+      if (f.n >= MAX_INTENTOS) {
+        f.n = 0
+        f.hasta = Date.now() + BLOQUEO_MS
+      }
+      fallos.set(usuario.id, f)
+    }
+    return false
+  }
+  fallos.delete(usuario.id)
   const rol = rolDe(usuario)
-  S.sesion.value = { usuarioId: usuario.id, usuarioNombre: usuario.nombre, esAdmin: rol === 'admin', rol }
+  S.sesion.value = { usuarioId: usuario.id, usuarioNombre: usuario.nombre, esAdmin: rol === 'admin', rol, debeCambiarPin: !!usuario.debeCambiarPin }
   return true
+}
+
+function exigirAdmin(): void {
+  if (S.sesion.value?.rol !== 'admin') throw new ErrorNegocio('Solo un administrador puede administrar usuarios.')
+}
+
+function pinAleatorio(): string {
+  const b = new Uint32Array(1)
+  crypto.getRandomValues(b)
+  return String(1000 + (b[0] % 9000))
+}
+
+/**
+ * Restablece el PIN de un usuario que lo olvidó: genera un PIN temporal de 4 números
+ * (se muestra una sola vez al administrador) y al entrar se le pide elegir uno propio.
+ */
+export async function restablecerPin(usuarioId: string): Promise<string> {
+  exigirAdmin()
+  const u = S.usuarios.value.find((x) => x.id === usuarioId)
+  if (!u) throw new ErrorNegocio('No se encontró el usuario.')
+  const pin = pinAleatorio()
+  const salt = nuevoId('S')
+  await db.usuarios.put({ ...u, salt, pinHash: hashPin(pin, salt), debeCambiarPin: true, activo: true, actualizado: new Date().toISOString() })
+  fallos.delete(usuarioId)
+  await S.recargar('usuarios')
+  await marcarCambio()
+  return pin
+}
+
+/** El propio usuario cambia su PIN (también cuando entró con un PIN temporal). */
+export async function cambiarMiPin(pinActual: string, pinNuevo: string): Promise<void> {
+  const s = S.sesion.value
+  const u = s ? S.usuarios.value.find((x) => x.id === s.usuarioId) : undefined
+  if (!s || !u) throw new ErrorNegocio('Inicie sesión con su PIN.')
+  if (!verificarPin(u, pinActual)) throw new ErrorNegocio('El PIN actual no es correcto.')
+  if (!/^\d{4,6}$/.test(pinNuevo)) throw new ErrorNegocio('El PIN nuevo debe tener de 4 a 6 números.')
+  if (pinNuevo === pinActual) throw new ErrorNegocio('Elija un PIN distinto al actual.')
+  if (/^(\d)\1+$/.test(pinNuevo) || '0123456789'.includes(pinNuevo) || '9876543210'.includes(pinNuevo)) {
+    throw new ErrorNegocio('Elija un PIN menos obvio (no use números repetidos ni seguidos).')
+  }
+  const salt = nuevoId('S')
+  await db.usuarios.put({ ...u, salt, pinHash: hashPin(pinNuevo, salt), debeCambiarPin: false, actualizado: new Date().toISOString() })
+  await S.recargar('usuarios')
+  S.sesion.value = { ...s, debeCambiarPin: false }
+  await marcarCambio()
 }
 
 export function cerrarSesion(): void {
@@ -165,6 +235,10 @@ export function cerrarSesion(): void {
 }
 
 export async function guardarUsuario(datos: { id?: string; nombre: string; rol: Rol; activo: boolean; pin?: string }): Promise<void> {
+  exigirAdmin()
+  if (!datos.nombre.trim()) throw new ErrorNegocio('Escriba el nombre del usuario.')
+  const repetido = S.usuarios.value.find((u) => u.id !== datos.id && u.nombre.trim().toUpperCase() === datos.nombre.trim().toUpperCase())
+  if (repetido) throw new ErrorNegocio(`Ya existe un usuario llamado ${repetido.nombre}.`)
   const previo = datos.id ? S.usuarios.value.find((u) => u.id === datos.id) : undefined
   if (!previo && !datos.pin) throw new ErrorNegocio('Asigne un PIN al usuario nuevo.')
   if (datos.pin && !/^\d{4,6}$/.test(datos.pin)) throw new ErrorNegocio('El PIN debe tener de 4 a 6 números.')
@@ -177,6 +251,8 @@ export async function guardarUsuario(datos: { id?: string; nombre: string; rol: 
     activo: datos.activo,
     salt,
     pinHash: datos.pin ? hashPin(datos.pin, salt) : previo!.pinHash,
+    // Un PIN puesto por el administrador es temporal (salvo el suyo propio)
+    debeCambiarPin: datos.pin ? datos.id !== S.sesion.value?.usuarioId : previo?.debeCambiarPin,
     creado: previo?.creado ?? new Date().toISOString(),
     actualizado: new Date().toISOString(),
   }

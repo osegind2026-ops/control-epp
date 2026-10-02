@@ -4,9 +4,10 @@ import { fechaLocal, hace, iniciales, plural } from './lib/util'
 import { cerrarSesion } from './state/servicios'
 import { migrar } from './state/migraciones'
 import { pantalla, type Pantalla } from './state/navegacion'
-import { cargarNube, nube } from './state/nube'
+import { cargarNube, conectarLocalSiFalta, detectarServidorLocal, nube } from './state/nube'
 import * as S from './state/store'
 import { PantallaAcceso } from './ui/Acceso'
+import { PantallaCambioPin } from './ui/Usuarios'
 import { PantallaAjustes } from './ui/Ajustes'
 import { PantallaCatalogo } from './ui/Catalogo'
 import { Confirmacion, Toasts } from './ui/comunes'
@@ -195,13 +196,14 @@ function Shell() {
 
 export function App() {
   useEffect(() => {
-    S.cargarTodo().then(migrar).then(cargarNube)
+    S.cargarTodo().then(migrar).then(detectarServidorLocal).then(cargarNube).then(conectarLocalSiFalta)
   }, [])
 
   let vista
   if (!S.cargado.value) vista = <div style={{ padding: '40px', textAlign: 'center' }} class="muted">Cargando…</div>
   else if (!S.dispositivo.value || !S.usuarios.value.length) vista = <PantallaInicio />
   else if (!S.sesion.value) vista = <PantallaAcceso />
+  else if (S.sesion.value.debeCambiarPin) vista = <PantallaCambioPin />
   else vista = <Shell />
 
   return (

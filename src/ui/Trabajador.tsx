@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { AREAS } from '../db/semilla'
-import { buscarTrabajadores, resolverRpe, rpeDeCodigo } from '../domain/logica'
+import { buscarTrabajadores, lecturaEscanerValida, resolverRpe, rpeDeCodigo } from '../domain/logica'
 import type { Trabajador } from '../domain/types'
 import { diasEntre, fechaLocal, hace, iniciales, normalizar, tecladoFisico } from '../lib/util'
 import { guardarTrabajador } from '../state/servicios'
@@ -408,3 +408,98 @@ export function BuscadorTrabajador({ onElegir, autoFocus = true }: { onElegir: (
 
 /** Días desde una fecha YYYY-MM-DD hasta hoy. */
 export const diasDesde = (fecha: string) => diasEntre(fecha, fechaLocal())
+
+interface LecturaPrueba {
+  hora: string
+  origen: 'Código' | 'Foto'
+  codigo: string
+  rpe: string
+  resultado: string
+  ok: boolean
+  segundos?: number
+}
+
+/**
+ * Herramienta de prueba (Ajustes): lee gafetes con la cámara o webcam sin despachar ni
+ * dar de alta a nadie, para saber si la cámara sirve y a qué distancia lee mejor.
+ */
+export function PruebaLectorGafete({ onCerrar }: { onCerrar: () => void }) {
+  const [lecturas, setLecturas] = useState<LecturaPrueba[]>([])
+  const [leyendo, setLeyendo] = useState('')
+  const cuadros = useRef(0)
+  const agregar = (l: Omit<LecturaPrueba, 'hora'>) => setLecturas((x) => [{ ...l, hora: new Date().toLocaleTimeString('es-MX') }, ...x].slice(0, 30))
+  const describir = (rpe: string) => {
+    const t = S.personal.value.get(rpe)
+    return t ? { resultado: `${t.nombre} · ${t.area}`, ok: true } : { resultado: 'No está en el padrón (se ofrecería el alta)', ok: false }
+  }
+
+  const porCodigo = (codigo: string) => {
+    if (!lecturaEscanerValida(codigo)) return agregar({ origen: 'Código', codigo, rpe: '', resultado: 'Lectura incompleta', ok: false })
+    const rpe = resolverRpe(codigo, (x) => S.personal.value.has(x))
+    agregar({ origen: 'Código', codigo, rpe, ...describir(rpe) })
+  }
+
+  const porFoto = async (f: Blob) => {
+    const inicio = Date.now()
+    setLeyendo('Leyendo la foto…')
+    try {
+      const { leerGafete } = await import('../lib/lectorGafete')
+      const { interpretarGafete, rpeMasVotado } = await import('../lib/gafete')
+      const r = await leerGafete(f, (texto, avance) => setLeyendo(avance !== undefined ? `${texto} ${Math.round(avance * 100)}%` : texto))
+      const segundos = Math.round((Date.now() - inicio) / 100) / 10
+      if (r.codigo) {
+        const rpe = rpeDeCodigo(r.codigo)
+        agregar({ origen: 'Foto', codigo: r.codigo, rpe, segundos, ...describir(rpe) })
+      } else {
+        const d = interpretarGafete(r.texto, listaAreas())
+        const rpe = rpeDeCodigo(rpeMasVotado(r.zona) || interpretarGafete(r.zona, []).rpe || d.rpe)
+        const base = rpe ? describir(rpe) : { resultado: 'No se leyó el RPE', ok: false }
+        agregar({ origen: 'Foto', codigo: 'sin código · texto impreso', rpe, segundos, ...base, resultado: `${base.resultado} · leído: ${[d.nombre, d.area, d.puesto].filter(Boolean).join(' / ') || 'nada'}` })
+      }
+    } catch (e) {
+      agregar({ origen: 'Foto', codigo: '', rpe: '', resultado: `Error: ${(e as Error).message}`, ok: false })
+    }
+    setLeyendo('')
+  }
+
+  const exitos = lecturas.filter((l) => l.ok).length
+  return (
+    <CamaraEnVivo
+      titulo="Probar lector de gafete"
+      continuo
+      mostrarInfo
+      ayuda={
+        <>
+          Ponga el gafete frente a la cámara a distintas distancias (15 a 40 cm). Cada vez que lea el código de barras aparece abajo. Con <strong>Tomar foto</strong> se prueba la lectura del texto impreso. No se registra nada.
+        </>
+      }
+      buscarCodigo={async (c) => {
+        const { codigoEnCuadro } = await import('../lib/lectorGafete')
+        return codigoEnCuadro(c, cuadros.current++)
+      }}
+      onCodigo={porCodigo}
+      onFoto={porFoto}
+      onCerrar={onCerrar}
+      guia={1.58}
+    >
+      {leyendo && <div class="aviso info small">{leyendo}</div>}
+      <div class="stack" style={{ gap: '6px' }}>
+        <strong class="small">
+          Lecturas: {lecturas.length} · correctas: {exitos}
+        </strong>
+        {lecturas.map((l, i) => (
+          <div key={i} class={`aviso small ${l.ok ? 'ok' : 'warn'}`} style={{ display: 'block' }}>
+            <strong>
+              {l.hora} · {l.origen}
+              {l.segundos !== undefined && ` · ${l.segundos} s`}
+            </strong>
+            <br />
+            Código: <span class="mono">{l.codigo || '—'}</span> → RPE <span class="mono">{l.rpe || '—'}</span>
+            <br />
+            {l.resultado}
+          </div>
+        ))}
+      </div>
+    </CamaraEnVivo>
+  )
+}

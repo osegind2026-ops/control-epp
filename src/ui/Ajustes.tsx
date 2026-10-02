@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'preact/hooks'
-import type { Rol, Ubicacion, Usuario } from '../domain/types'
-import { nombreRol, rolDe, ROLES } from '../state/permisos'
+import type { Ubicacion } from '../domain/types'
 import { descargarArchivo, hace, plural } from '../lib/util'
 import { armarRespaldo, importarRespaldo, leerRespaldo, marcarRespaldado, nombreArchivo, type Respaldo } from '../state/respaldo'
-import { guardarBloqueo, guardarDispositivo, guardarRegistro, guardarUsuario, nuevoId } from '../state/servicios'
+import { guardarBloqueo, guardarDispositivo, guardarRegistro, nuevoId } from '../state/servicios'
 import * as S from '../state/store'
 import { avisar, confirmar, intentar, Modal } from './comunes'
 import { Icono } from './iconos'
 import { TarjetaNube } from './Nube'
 import { PlantillaReportes } from './PlantillaReportes'
-import { nube } from '../state/nube'
+import { Intercambio } from './Intercambio'
+import { SeccionUsuarios } from './Usuarios'
+import { PruebaLectorGafete } from './Trabajador'
+import { esLocal, nube } from '../state/nube'
 
 function Equipo() {
   const eq = S.dispositivo.value!
@@ -55,96 +57,20 @@ function Equipo() {
   )
 }
 
-function EditorUsuario({ u, onCerrar }: { u: Usuario | null; onCerrar: () => void }) {
-  const [nombre, setNombre] = useState(u?.nombre ?? '')
-  const [pin, setPin] = useState('')
-  const [rol, setRol] = useState<Rol>(u ? rolDe(u) : 'despachador')
-  const [activo, setActivo] = useState(u?.activo ?? true)
-  const guardar = async () => {
-    if (!nombre.trim()) return avisar('Escriba el nombre.', { tipo: 'bad' })
-    const ok = await intentar(async () => {
-      await guardarUsuario({ id: u?.id, nombre, rol, activo, pin: pin || undefined })
-      return true
-    })
-    if (ok) {
-      avisar('✓ Usuario guardado')
-      onCerrar()
-    }
-  }
-  return (
-    <Modal
-      titulo={u ? 'Editar usuario' : 'Nuevo usuario'}
-      onCerrar={onCerrar}
-      acciones={
-        <>
-          <button class="btn" onClick={onCerrar}>
-            Cancelar
-          </button>
-          <button class="btn primary" onClick={guardar}>
-            Guardar
-          </button>
-        </>
-      }
-    >
-      <label class="campo">
-        Nombre
-        <input class="input" id="u-nombre" value={nombre} onInput={(e) => setNombre((e.target as HTMLInputElement).value)} />
-      </label>
-      <label class="campo">
-        {u ? 'Nuevo PIN (déjelo vacío para conservar el actual)' : 'PIN (4 a 6 números)'}
-        <input class="input" id="u-pin" type="password" inputMode="numeric" maxLength={6} value={pin} onInput={(e) => setPin((e.target as HTMLInputElement).value.replace(/\D/g, ''))} />
-      </label>
-      <fieldset class="stack" style={{ gap: '6px', border: 0, padding: 0, margin: 0 }}>
-        <legend class="small" style={{ marginBottom: '4px' }}>Rol</legend>
-        {ROLES.map((r) => (
-          <label key={r.id} class="check" style={{ alignItems: 'flex-start' }}>
-            <input type="radio" name="u-rol" checked={rol === r.id} onChange={() => setRol(r.id)} />
-            <span>
-              <strong>{r.nombre}</strong>
-              <br />
-              <span class="muted small">{r.ayuda}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
-      {u && (
-        <label class="check">
-          <input type="checkbox" checked={activo} onChange={(e) => setActivo((e.target as HTMLInputElement).checked)} />
-          Activo
-        </label>
-      )}
-    </Modal>
-  )
-}
-
-function Usuarios() {
-  const [editar, setEditar] = useState<Usuario | null | 'nuevo'>(null)
-  const admin = S.sesion.value?.esAdmin
+function ProbarCamara() {
+  const [abierto, setAbierto] = useState(false)
   return (
     <section class="card stack">
-      <div class="spread">
-        <h2>Usuarios</h2>
-        {admin && (
-          <button class="btn" onClick={() => setEditar('nuevo')}>
-            <Icono n="mas1" /> Nuevo usuario
-          </button>
-        )}
+      <h2>Probar lector de gafete</h2>
+      <p class="muted small">
+        Revise si la cámara o webcam de este equipo lee bien los gafetes antes de usarla en el despacho. Muestra cada lectura, la resolución de la cámara y, si hay varias cámaras, permite elegir cuál usar (la elección se recuerda en este equipo).
+      </p>
+      <div>
+        <button class="btn" onClick={() => setAbierto(true)}>
+          <Icono n="gafete" /> Abrir prueba
+        </button>
       </div>
-      <p class="muted small">Todos pueden despachar, recibir devoluciones, prestar equipos y anular con un motivo autorizado. Las entradas, traspasos, ajustes y conteos son del encargado de almacén o del administrador. Cada registro guarda quién lo hizo.</p>
-      {S.usuarios.value.map((u) => (
-        <div key={u.id} class="row" style={{ opacity: u.activo ? 1 : 0.5 }}>
-          <span class="grow">
-            <strong>{u.nombre}</strong> <span class={`badge ${rolDe(u) === 'admin' ? 'ok' : rolDe(u) === 'almacen' ? 'warn' : ''}`}>{nombreRol(rolDe(u))}</span> {!u.activo && <span class="badge">Inactivo</span>}
-          </span>
-          {admin && (
-            <button class="btn sm" onClick={() => setEditar(u)}>
-              Editar
-            </button>
-          )}
-        </div>
-      ))}
-      {!admin && <p class="muted small">Solo un administrador puede agregar o editar usuarios.</p>}
-      {editar && <EditorUsuario u={editar === 'nuevo' ? null : editar} onCerrar={() => setEditar(null)} />}
+      {abierto && <PruebaLectorGafete onCerrar={() => setAbierto(false)} />}
     </section>
   )
 }
@@ -302,12 +228,14 @@ export function PantallaAjustes() {
     <div class="stack" style={{ maxWidth: '860px' }}>
       <h1>Ajustes</h1>
       <TarjetaNube />
+      <Intercambio />
       <Respaldos />
       <Equipo />
-      <Usuarios />
+      <SeccionUsuarios />
       <Ubicaciones />
+      <ProbarCamara />
       <PlantillaReportes />
-      <p class="muted small">Control EPP v2.1 · {nube.value ? 'Sincronizado con Google Sheets' : 'Los datos se guardan solo en este navegador'}.</p>
+      <p class="muted small">Control EPP v2.1 · {nube.value ? (esLocal(nube.value.url) ? 'Sincronizado con la carpeta de red' : 'Sincronizado con Google Sheets') : 'Los datos se guardan solo en este navegador'}.</p>
     </div>
   )
 }

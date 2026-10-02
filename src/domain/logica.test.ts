@@ -10,6 +10,7 @@ import {
   prestamosVencidos,
   resolverRpe,
   rpeDeCodigo,
+  lecturaEscanerValida,
   sumarDias,
   siguienteFolio,
 } from './logica'
@@ -83,6 +84,12 @@ describe('RPE', () => {
     // Gafete de alguien que no está en el padrón: se toma el RPE sin el dígito verificador
     expect(resolverRpe('QX7M84', (r) => existentes.has(r))).toBe('QX7M8')
     expect(rpeDeCodigo(' qx7-m84 ')).toBe('QX7M8')
+  })
+
+  it('descarta lecturas del escáner incompletas o con caracteres raros', () => {
+    expect(lecturaEscanerValida('QX7M84')).toBe(true)
+    // Ejemplos reales de un escáner en modo «Alt + teclado numérico» que pierde teclas
+    for (const mala of ['•♠6P', 'GEP82', 'G♠♣2', 'G6P82', 'GE◘♣♣', 'G82']) expect(lecturaEscanerValida(mala)).toBe(false)
   })
 
   it('busca por RPE o por nombre sin importar acentos', () => {

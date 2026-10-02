@@ -114,6 +114,8 @@ export interface Usuario {
   /** Se conserva por compatibilidad con equipos anteriores: true = rol admin. */
   esAdmin: boolean
   rol?: Rol
+  /** PIN temporal puesto por un administrador: se pide cambiarlo al entrar. */
+  debeCambiarPin?: boolean
   pinHash: string
   salt: string
   activo: boolean
@@ -238,6 +240,8 @@ export interface Sesion {
   usuarioNombre: string
   esAdmin: boolean
   rol: Rol
+  /** El usuario entró con un PIN temporal y debe elegir uno propio antes de continuar. */
+  debeCambiarPin?: boolean
 }
 
 // ---------- Equipos a resguardo (explosímetros, higrómetros…) ----------

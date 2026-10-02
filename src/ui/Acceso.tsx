@@ -2,7 +2,7 @@ import { nombreRol, rolDe } from '../state/permisos'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Usuario } from '../domain/types'
 import { iniciales } from '../lib/util'
-import { iniciarSesion } from '../state/servicios'
+import { esperaPin, iniciarSesion } from '../state/servicios'
 import * as S from '../state/store'
 
 /** Teclado numérico para el PIN. Prueba en cuanto hay 4, 5 o 6 dígitos. */
@@ -66,6 +66,12 @@ export function TecladoPin({ onIntento, error }: { onIntento: (pin: string) => b
 export function PantallaAcceso() {
   const lista = S.usuariosActivos.value
   const [elegido, setElegido] = useState<Usuario | null>(lista.length === 1 ? lista[0] : null)
+  const [espera, setEspera] = useState(0)
+  useEffect(() => {
+    if (!espera) return
+    const t = window.setTimeout(() => setEspera(elegido ? esperaPin(elegido.id) : 0), 1000)
+    return () => clearTimeout(t)
+  }, [espera, elegido])
 
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: '20px' }}>
@@ -93,7 +99,20 @@ export function PantallaAcceso() {
           </div>
         ) : (
           <>
-            <TecladoPin onIntento={(pin) => iniciarSesion(elegido, pin)} />
+            {espera > 0 ? (
+              <div class="aviso bad">Demasiados PIN incorrectos. Espere {espera} segundos para volver a intentar.</div>
+            ) : (
+              <TecladoPin
+                onIntento={(pin) => {
+                  const ok = iniciarSesion(elegido, pin)
+                  if (!ok && esperaPin(elegido.id)) setEspera(esperaPin(elegido.id))
+                  return ok
+                }}
+              />
+            )}
+            <p class="muted small" style={{ textAlign: 'center' }}>
+              ¿Olvidó su PIN? Pida a un administrador que lo restablezca en Ajustes → Usuarios.
+            </p>
             {lista.length > 1 && (
               <button class="btn ghost" onClick={() => setElegido(null)}>
                 Cambiar de usuario

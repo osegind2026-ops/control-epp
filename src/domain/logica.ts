@@ -85,6 +85,16 @@ export function resolverRpe(entrada: string, existe: (rpe: string) => boolean): 
   return limpio
 }
 
+/**
+ * Revisa lo que envió un escáner (USB o Bluetooth). El código del gafete trae exactamente
+ * 6 letras o números (RPE + dígito); si llegan caracteres raros o faltan, la lectura se
+ * perdió en el camino (p. ej. el escáner está en modo «Alt + teclado numérico») y no se
+ * debe usar: podría dar de alta un RPE equivocado.
+ */
+export function lecturaEscanerValida(codigo: string): boolean {
+  return /^[A-Z0-9]{6}$/.test(codigo.trim().toUpperCase())
+}
+
 /** RPE a partir de lo escaneado o tecleado: solo letras y números, máximo 5 caracteres. */
 export function rpeDeCodigo(codigo: string): string {
   return codigo.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5)

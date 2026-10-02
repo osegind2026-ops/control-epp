@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { MAS_PEDIDOS_BASE } from '../db/semilla'
-import { aplicarKit, existencia, masPedidos, nivelStock, prestamosVencidos, resolverRpe, sumarDias, tieneTallas, variantesDe } from '../domain/logica'
+import { aplicarKit, existencia, lecturaEscanerValida, masPedidos, nivelStock, prestamosVencidos, resolverRpe, sumarDias, tieneTallas, variantesDe } from '../domain/logica'
 import type { DatosPrestamo, Material, Trabajador } from '../domain/types'
 import { fechaLocal, normalizar } from '../lib/util'
 import { deshacerEntrega, registrarEntrega, type LineaTicket } from '../state/servicios'
@@ -399,7 +399,9 @@ export function PantallaDespacho() {
       if (ahora - ultimo > 100) buffer = ''
       ultimo = ahora
       if (e.key === 'Enter') {
-        if (buffer.length >= 4) {
+        if (buffer.length >= 4 && !lecturaEscanerValida(buffer)) {
+          avisar(`Lectura incompleta del gafete («${buffer}»). Vuelva a escanear.`, { tipo: 'bad' })
+        } else if (buffer.length >= 4) {
           const rpe = resolverRpe(buffer, (r) => S.personal.value.has(r))
           const tr = S.personal.value.get(rpe)
           if (tr) elegirTrabajador(tr)
