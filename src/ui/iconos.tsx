@@ -130,6 +130,14 @@ const UI: Record<string, JSX.Element> = {
       <path d="M9 14h.01M12 14h.01M15 14h.01M9 17h.01M12 17h.01M15 17h.01" stroke-width={2.4} />
     </g>
   ),
+  qr: (
+    <g {...trazo}>
+      <rect x="3.5" y="3.5" width="6" height="6" />
+      <rect x="14.5" y="3.5" width="6" height="6" />
+      <rect x="3.5" y="14.5" width="6" height="6" />
+      <path d="M14.5 14.5h2.5v2.5h-2.5zM20.5 14.5v6h-6M17.5 20.5v-2.5" />
+    </g>
+  ),
   excel: <path {...trazo} d="M5 3h10l4 4v14H5zM15 3v4h4M8 11l4 6M12 11l-4 6M14 17h2" />,
   pdf: <path {...trazo} d="M5 3h10l4 4v14H5zM15 3v4h4M8 13h1.5a1.5 1.5 0 0 1 0 3H8v-5M13 11v5h1a2 2 0 0 0 0-5zM18 11h-2v5M16 13.5h1.5" />,
   presentacion: <path {...trazo} d="M3 4h18M4 4v11h16V4M12 15v3M8 21l4-3 4 3M8 11l3-3 2 2 3-3" />,

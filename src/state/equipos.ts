@@ -1,4 +1,5 @@
 import { db } from '../db/db'
+import { soloAlfanumerico } from '../domain/equipoQr'
 import type { CondicionRegreso, Equipo, PrestamoEquipo, Trabajador } from '../domain/types'
 import { fechaLocal, horaLocal, nuevoId } from '../lib/util'
 import { avisarCambioLocal } from './nube'
@@ -71,13 +72,18 @@ function actor() {
 
 // ---------- Catálogo ----------
 
-export async function guardarEquipo(datos: Omit<Equipo, 'id' | 'actualizado'> & { id?: string }): Promise<Equipo> {
+/**
+ * Guarda un equipo. `fotoDataUrl`: texto = foto nueva, null = quitar la foto, sin valor = no cambia.
+ */
+export async function guardarEquipo(datos: Omit<Equipo, 'id' | 'actualizado'> & { id?: string }, fotoDataUrl?: string | null): Promise<Equipo> {
   const { sesion } = actor()
   if (sesion.rol !== 'admin' && sesion.rol !== 'almacen') throw new ErrorNegocio('Solo un encargado de almacén o un administrador puede editar el catálogo de equipos.')
   const codigo = datos.codigo.trim().toUpperCase()
   if (!codigo) throw new ErrorNegocio('Escriba el código del equipo.')
   if (!datos.nombre.trim()) throw new ErrorNegocio('Escriba qué equipo es (por ejemplo, Explosímetro).')
-  const repetido = S.equipos.value.find((e) => e.codigo.toUpperCase() === codigo && e.id !== datos.id)
+  // Se compara sin guiones ni espacios: así se lee del QR con un escáner (EXP-01 = EXP01)
+  if (soloAlfanumerico(codigo).length < 2) throw new ErrorNegocio('El código debe tener al menos 2 letras o números.')
+  const repetido = S.equipos.value.find((e) => soloAlfanumerico(e.codigo) === soloAlfanumerico(codigo) && e.id !== datos.id)
   if (repetido) throw new ErrorNegocio(`El código ${codigo} ya es de otro equipo (${repetido.nombre}).`)
   const eq: Equipo = {
     ...datos,
@@ -92,8 +98,17 @@ export async function guardarEquipo(datos: Omit<Equipo, 'id' | 'actualizado'> & 
     calibracion: datos.calibracion || undefined,
     actualizado: new Date().toISOString(),
   }
-  await db.equipos.put(eq)
-  await S.recargar('equipos')
+  await db.transaction('rw', [db.equipos, db.fotos], async () => {
+    if (fotoDataUrl) {
+      eq.fotoId = eq.fotoId ?? nuevoId('F')
+      await db.fotos.put({ id: eq.fotoId, dataUrl: fotoDataUrl })
+    } else if (fotoDataUrl === null && eq.fotoId) {
+      await db.fotos.delete(eq.fotoId)
+      eq.fotoId = undefined
+    }
+    await db.equipos.put(eq)
+  })
+  await S.recargar('equipos', 'fotos')
   avisarCambioLocal()
   return eq
 }

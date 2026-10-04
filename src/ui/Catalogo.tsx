@@ -6,6 +6,7 @@ import { guardarMaterial, guardarRegistro, nuevoId } from '../state/servicios'
 import * as S from '../state/store'
 import { avisar, FotoMaterial, intentar, Modal } from './comunes'
 import { ICONOS_MATERIAL, IlustracionMaterial, Icono } from './iconos'
+import { CatalogoEquipos } from './Equipos'
 import { listaAreas } from './Trabajador'
 
 // ---------- Materiales ----------
@@ -570,7 +571,7 @@ function Categorias() {
 }
 
 export function PantallaCatalogo() {
-  const [tab, setTab] = useState<'materiales' | 'kits' | 'motivos' | 'categorias'>('materiales')
+  const [tab, setTab] = useState<'materiales' | 'equipos' | 'kits' | 'motivos' | 'categorias'>('materiales')
   return (
     <div class="stack">
       <h1>Catálogo</h1>
@@ -578,6 +579,7 @@ export function PantallaCatalogo() {
         {(
           [
             ['materiales', 'Materiales'],
+            ['equipos', 'Equipos a resguardo'],
             ['kits', 'Kits'],
             ['motivos', 'Motivos autorizados'],
             ['categorias', 'Categorías'],
@@ -589,6 +591,15 @@ export function PantallaCatalogo() {
         ))}
       </div>
       {tab === 'materiales' && <Materiales />}
+      {tab === 'equipos' && (
+        <div class="stack">
+          <p class="muted small">
+            Explosímetros, higrómetros y demás equipos que presta la oficina. Cada uno tiene su foto, sus datos y una etiqueta con código QR para pegarla en el equipo. Los préstamos se registran en
+            la sección <strong>Equipos</strong>.
+          </p>
+          <CatalogoEquipos />
+        </div>
+      )}
       {tab === 'kits' && <Kits />}
       {tab === 'motivos' && <Motivos />}
       {tab === 'categorias' && <Categorias />}

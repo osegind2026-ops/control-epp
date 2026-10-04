@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks'
+import { useMemo, useRef, useState } from 'preact/hooks'
 import type { CondicionRegreso, Equipo, PrestamoEquipo, Trabajador } from '../domain/types'
 import { entregarArchivo, fechaDeTs, fechaLocal, hace, horaLocal, normalizar, plural } from '../lib/util'
 import {
@@ -15,8 +15,12 @@ import {
   TEXTO_DISPONIBILIDAD,
   type Disponibilidad,
 } from '../state/equipos'
+import { equipoPorLectura, textoQr } from '../domain/equipoQr'
+import { dibujarEtiqueta, ETIQUETA_MM, etiquetaPng, imprimirEtiquetas } from '../lib/etiqueta'
+import { comprimirFoto } from '../lib/imagen'
 import { puedeInventario } from '../state/permisos'
 import * as S from '../state/store'
+import { CamaraEnVivo } from './Camara'
 import { avisar, intentar, Modal, Vacio } from './comunes'
 import { Icono } from './iconos'
 import { BuscadorTrabajador } from './Trabajador'
@@ -81,10 +85,22 @@ function ModalPrestar({ equipoInicial, onCerrar }: { equipoInicial?: Equipo; onC
   const [bitacora, setBitacora] = useState(equipoInicial?.llevaBitacora ?? false)
   const [observaciones, setObservaciones] = useState('')
 
+  const [camara, setCamara] = useState(false)
+  const cuadros = useRef(0)
   const elegirEquipo = (e: Equipo) => {
     setEq(e)
     setAccesorios(e.accesorios)
     setBitacora(e.llevaBitacora)
+  }
+  /** Lectura del QR (escáner o cámara): elige el equipo si está disponible. */
+  const porLectura = (texto: string): boolean => {
+    const leido = equipoPorLectura(texto, S.equipos.value)
+    if (leido && disponibles.includes(leido)) {
+      elegirEquipo(leido)
+      return true
+    }
+    if (leido) avisar(`${leido.codigo} no está disponible: ${TEXTO_DISPONIBILIDAD[disponibilidad(leido, activos)].toLowerCase()}.`, { tipo: 'bad' })
+    return !!leido
   }
   const q = normalizar(buscar)
   const lista = disponibles.filter((e) => !q || normalizar(`${e.codigo} ${e.nombre} ${e.marca} ${e.modelo} ${e.serie}`).includes(q))
@@ -133,19 +149,53 @@ function ModalPrestar({ equipoInicial, onCerrar }: { equipoInicial?: Equipo; onC
           </div>
         ) : (
           <>
+            <div class="row" style={{ flexWrap: 'nowrap' }}>
             <input
-              class="input"
+              class="input grow"
               id="eq-buscar"
-              placeholder="Código, tipo o serie (también puede escanear la etiqueta)"
+              placeholder="Código, tipo o serie, o escanee el QR de la etiqueta"
               value={buscar}
               onInput={(e) => setBuscar((e.target as HTMLInputElement).value)}
               onKeyDown={(e) => {
                 if (e.key !== 'Enter') return
-                const exacto = disponibles.find((x) => x.codigo.toUpperCase() === buscar.trim().toUpperCase())
-                if (exacto) elegirEquipo(exacto)
-                else if (lista.length === 1) elegirEquipo(lista[0])
+                // Acepta el código tecleado o la lectura del QR con un escáner
+                if (!porLectura(buscar) && lista.length === 1) elegirEquipo(lista[0])
               }}
             />
+              <button class="btn" onClick={() => setCamara(true)} aria-label="Leer el código QR con la cámara" title="Leer el QR con la cámara">
+                <Icono n="qr" />
+                <span class="solo-ancho">Cámara</span>
+              </button>
+            </div>
+            {camara && (
+              <CamaraEnVivo
+                titulo="Leer QR del equipo"
+                ayuda="Apunte la cámara al código QR de la etiqueta del equipo. Se elige solo en cuanto lo lee."
+                textoFoto="Leer de la foto"
+                guia={1}
+                buscarCodigo={async (c) => {
+                  const { codigoEnCuadro } = await import('../lib/lectorGafete')
+                  const texto = await codigoEnCuadro(c, cuadros.current++)
+                  return texto && equipoPorLectura(texto, S.equipos.value) ? texto : ''
+                }}
+                onCodigo={(texto) => {
+                  setCamara(false)
+                  porLectura(texto)
+                }}
+                onFoto={async (foto) => {
+                  const { codigoEnFoto } = await import('../lib/lectorGafete')
+                  const bmp = await createImageBitmap(foto)
+                  const lienzo = document.createElement('canvas')
+                  lienzo.width = bmp.width
+                  lienzo.height = bmp.height
+                  lienzo.getContext('2d')!.drawImage(bmp, 0, 0)
+                  const texto = await codigoEnFoto(lienzo).catch(() => '')
+                  setCamara(false)
+                  if (!texto || !porLectura(texto)) avisar('No se encontró el QR de un equipo en la foto.', { tipo: 'bad' })
+                }}
+                onCerrar={() => setCamara(false)}
+              />
+            )}
             <div class="resultados">
               {lista.slice(0, 8).map((e) => (
                 <button key={e.id} onClick={() => elegirEquipo(e)}>
@@ -340,6 +390,15 @@ function EditorEquipo({ inicial, onCerrar }: { inicial: Equipo | null; onCerrar:
   const [calibracion, setCalibracion] = useState(inicial?.calibracion ?? '')
   const [estado, setEstado] = useState<Equipo['estado']>(inicial?.estado ?? 'operativo')
   const [notas, setNotas] = useState(inicial?.notas ?? '')
+  const [foto, setFoto] = useState<string | null | undefined>(undefined) // undefined = sin cambios, null = quitar
+  const fotoActual = foto === undefined ? (inicial?.fotoId ? S.fotos.value.get(inicial.fotoId) : undefined) : foto ?? undefined
+  const elegirFoto = async (e: Event) => {
+    const archivo = (e.target as HTMLInputElement).files?.[0]
+    ;(e.target as HTMLInputElement).value = ''
+    if (!archivo) return
+    const data = await intentar(() => comprimirFoto(archivo))
+    if (data) setFoto(data)
+  }
   const tipos = useMemo(() => [...new Set(S.equipos.value.map((e) => e.nombre).concat(['Explosímetro', 'Detector multigas', 'Higrómetro', 'Termohigrómetro', 'Sonómetro', 'Luxómetro']))].sort(), [])
 
   const guardar = async () => {
@@ -358,7 +417,7 @@ function EditorEquipo({ inicial, onCerrar }: { inicial: Equipo | null; onCerrar:
         notas,
         fotoId: inicial?.fotoId,
         activo: estado !== 'baja',
-      })
+      }, foto)
       return true
     })
     if (ok) {
@@ -382,6 +441,24 @@ function EditorEquipo({ inicial, onCerrar }: { inicial: Equipo | null; onCerrar:
         </>
       }
     >
+      <div class="row" style={{ alignItems: 'center', gap: '12px' }}>
+        <span class="foto" style={{ width: '120px', flex: 'none' }}>{fotoActual ? <img src={fotoActual} alt="" /> : <Icono n="equipo" />}</span>
+        <div class="stack" style={{ gap: '6px' }}>
+          <label class="btn sm soft" style={{ cursor: 'pointer' }}>
+            <Icono n="camara" /> Tomar foto
+            <input type="file" accept="image/*" capture="environment" hidden onChange={elegirFoto} />
+          </label>
+          <label class="btn sm soft" style={{ cursor: 'pointer' }}>
+            <Icono n="galeria" /> Galería o archivo
+            <input type="file" accept="image/*" hidden onChange={elegirFoto} />
+          </label>
+          {fotoActual && (
+            <button class="btn sm ghost" onClick={() => setFoto(null)}>
+              Quitar foto
+            </button>
+          )}
+        </div>
+      </div>
       <div class="row" style={{ alignItems: 'start' }}>
         <label class="campo" style={{ width: '140px' }}>
           Código
@@ -450,7 +527,36 @@ function Calibracion({ e }: { e: Equipo }) {
   return <span class={`badge ${clase}`}>{d < 0 ? `Calibración vencida (${e.calibracion})` : `Calibración ${e.calibracion}`}</span>
 }
 
-function Catalogo({ onPrestar }: { onPrestar: (e: Equipo) => void }) {
+/** Etiqueta con QR de un equipo: vista previa, descarga e impresión. */
+function ModalEtiqueta({ e, onCerrar }: { e: Equipo; onCerrar: () => void }) {
+  const src = useMemo(() => dibujarEtiqueta(e).toDataURL('image/png'), [e])
+  return (
+    <Modal
+      titulo={`Etiqueta de ${e.codigo}`}
+      onCerrar={onCerrar}
+      acciones={
+        <>
+          <button class="btn" onClick={() => intentar(async () => entregarArchivo(`Etiqueta ${e.codigo}.png`, await etiquetaPng(e)))}>
+            <Icono n="descarga" /> Descargar
+          </button>
+          <button class="btn primary" onClick={() => imprimirEtiquetas([e])}>
+            <Icono n="pdf" /> Imprimir
+          </button>
+        </>
+      }
+    >
+      <img class="etiqueta-vista" src={src} alt={`Etiqueta con código QR del equipo ${e.codigo}`} />
+      <p class="muted small">
+        Se imprime a {ETIQUETA_MM.ancho} × {ETIQUETA_MM.alto} mm. Péguela en el equipo (de preferencia con mica o cinta transparente encima). Al prestar, escanee el QR con el lector o con la
+        cámara y el equipo se elige solo. Cualquier celular que lea el QR ve: <span class="mono">{textoQr(e)}</span>
+      </p>
+    </Modal>
+  )
+}
+
+/** Catálogo de equipos a resguardo: alta, edición, foto y etiqueta con QR. */
+export function CatalogoEquipos({ onPrestar }: { onPrestar?: (e: Equipo) => void }) {
+  const [etiqueta, setEtiqueta] = useState<Equipo | null>(null)
   const [editar, setEditar] = useState<Equipo | null | 'nuevo'>(null)
   const [texto, setTexto] = useState('')
   const [bajas, setBajas] = useState(false)
@@ -471,6 +577,11 @@ function Catalogo({ onPrestar }: { onPrestar: (e: Equipo) => void }) {
           <input type="checkbox" checked={bajas} onChange={(e) => setBajas((e.target as HTMLInputElement).checked)} />
           Ver bajas
         </label>
+        {lista.length > 0 && (
+          <button class="btn" onClick={() => imprimirEtiquetas(lista)} title="Imprime en hoja carta las etiquetas de los equipos que se muestran">
+            <Icono n="pdf" /> Imprimir etiquetas ({lista.length})
+          </button>
+        )}
       </div>
       {!S.equipos.value.length && (
         <Vacio>
@@ -484,6 +595,11 @@ function Catalogo({ onPrestar }: { onPrestar: (e: Equipo) => void }) {
           const historial = S.prestamosEquipo.value.filter((x) => x.equipoId === e.id && x.estatus !== 'ANULADO')
           return (
             <div key={e.id} class="card stack" style={{ gap: '6px' }}>
+              {e.fotoId && S.fotos.value.get(e.fotoId) && (
+                <span class="foto">
+                  <img src={S.fotos.value.get(e.fotoId)} alt="" loading="lazy" />
+                </span>
+              )}
               <div class="spread">
                 <strong class="mono">{e.codigo}</strong>
                 <span class={`badge ${COLOR_DISP[disp]}`}>{TEXTO_DISPONIBILIDAD[disp]}</span>
@@ -499,11 +615,14 @@ function Catalogo({ onPrestar }: { onPrestar: (e: Equipo) => void }) {
               {e.accesorios.length > 0 && <span class="muted small">Accesorios: {e.accesorios.join(', ')}</span>}
               <span class="muted small">{plural(historial.length, 'préstamo registrado', 'préstamos registrados')}</span>
               <div class="row" style={{ gap: '6px' }}>
-                {disp === 'disponible' && (
+                {disp === 'disponible' && onPrestar && (
                   <button class="btn sm primary" onClick={() => onPrestar(e)}>
                     Prestar
                   </button>
                 )}
+                <button class="btn sm" onClick={() => setEtiqueta(e)}>
+                  <Icono n="qr" /> Etiqueta QR
+                </button>
                 {edita && (
                   <button class="btn sm" onClick={() => setEditar(e)}>
                     <Icono n="editar" /> Editar
@@ -515,6 +634,7 @@ function Catalogo({ onPrestar }: { onPrestar: (e: Equipo) => void }) {
         })}
       </div>
       {editar && <EditorEquipo inicial={editar === 'nuevo' ? null : editar} onCerrar={() => setEditar(null)} />}
+      {etiqueta && <ModalEtiqueta e={etiqueta} onCerrar={() => setEtiqueta(null)} />}
     </div>
   )
 }
@@ -795,7 +915,7 @@ export function PantallaEquipos() {
         ))}
       </div>
       {tab === 'uso' && <EnUso onRegreso={setRegreso} />}
-      {tab === 'catalogo' && <Catalogo onPrestar={(e) => setPrestar(e)} />}
+      {tab === 'catalogo' && <CatalogoEquipos onPrestar={(e) => setPrestar(e)} />}
       {tab === 'bitacora' && <Bitacora />}
       {prestar && <ModalPrestar equipoInicial={prestar === true ? undefined : prestar} onCerrar={() => setPrestar(null)} />}
       {regreso && <ModalRegreso p={regreso} onCerrar={() => setRegreso(null)} />}

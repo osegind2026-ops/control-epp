@@ -64,4 +64,29 @@ describe('equipos a resguardo', () => {
     await expect(guardarEquipo({ codigo: 'X', nombre: 'X', marca: '', modelo: '', serie: '', accesorios: [], llevaBitacora: false, estado: 'operativo', notas: '', activo: true })).rejects.toThrow(/encargado/)
     S.sesion.value = antes
   })
+
+  it('el QR identifica al equipo aunque el escáner cambie los guiones', async () => {
+    const { equipoPorLectura, textoQr } = await import('../domain/equipoQr')
+    const exp1 = await guardarEquipo({ codigo: 'EXP-1', nombre: '3M Detector', marca: 'Marca Ñ', modelo: 'M/2', serie: 'S-9', accesorios: [], llevaBitacora: false, estado: 'operativo', notas: '', activo: true })
+    const exp13 = await guardarEquipo({ codigo: 'EXP-13', nombre: 'Explosímetro', marca: '', modelo: '', serie: '', accesorios: [], llevaBitacora: false, estado: 'operativo', notas: '', activo: true })
+    const qr = textoQr(exp1)
+    expect(qr).toBe('EXP-1 EQ 3M Detector Marca N M 2 Serie S 9 CFE Laguna Verde Seguridad Industrial')
+    const lista = S.equipos.value
+    expect(equipoPorLectura(qr, lista)?.id).toBe(exp1.id)
+    // Un lector con teclado en español escribe ' en lugar de -
+    expect(equipoPorLectura(qr.replace(/-/g, "'"), lista)?.id).toBe(exp1.id)
+    expect(equipoPorLectura(textoQr(exp13), lista)?.id).toBe(exp13.id)
+    expect(equipoPorLectura('exp 13', lista)?.id).toBe(exp13.id)
+    expect(equipoPorLectura('NADA', lista)).toBeUndefined()
+    await expect(guardarEquipo({ codigo: 'EXP 1', nombre: 'Otro', marca: '', modelo: '', serie: '', accesorios: [], llevaBitacora: false, estado: 'operativo', notas: '', activo: true })).rejects.toThrow(/ya es de otro/)
+  })
+
+  it('guarda y quita la foto del equipo', async () => {
+    const eq = S.equipos.value.find((e) => e.codigo === 'EXP-13')!
+    const conFoto = await guardarEquipo(eq, 'data:image/jpeg;base64,AAAA')
+    expect(S.fotos.value.get(conFoto.fotoId!)).toBe('data:image/jpeg;base64,AAAA')
+    const sinFoto = await guardarEquipo(conFoto, null)
+    expect(sinFoto.fotoId).toBeUndefined()
+    expect(S.fotos.value.size).toBe(0)
+  })
 })

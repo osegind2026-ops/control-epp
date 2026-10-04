@@ -22,6 +22,7 @@
     "dexie": "^4.4.6",
     "pptxgenjs": "^4.0.1",
     "preact": "^10.29.8",
+    "qrcode-generator": "^2.0.4",
     "tesseract.js": "^7.0.0",
     "write-excel-file": "^4.1.1"
   },

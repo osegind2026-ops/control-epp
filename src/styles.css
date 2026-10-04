@@ -643,3 +643,16 @@ details > summary { list-style: revert; }
 .recurrencia svg { width: 16px; height: 16px; vertical-align: -3px; }
 .recurrencia .input { min-height: 40px; background: var(--surface); }
 .rp-tabla.rp-izq td, .rp-tabla.rp-izq th { text-align: left; } .rp-tabla.rp-izq td.rp-total, .rp-tabla.rp-izq th.rp-guinda { text-align: center; }
+.etiqueta-vista { width: 100%; border: 1px solid var(--rule); border-radius: 6px; background: #fff; }
+
+/* ---------- Historial del trabajador en el despacho ---------- */
+.historial-trab { padding: 0; overflow: hidden; }
+.historial-trab.con-repetidas { border-color: var(--warn); }
+.historial-cab { display: flex; gap: 8px; align-items: center; width: 100%; border: 0; background: transparent; padding: 10px 12px; text-align: left; font: inherit; color: inherit; }
+.historial-flecha { color: var(--muted); font-size: 14px; }
+.historial-lista { display: grid; gap: 4px; padding: 0 8px 8px; }
+.historial-fila { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); padding: 8px 10px; font: inherit; color: inherit; }
+.historial-fila:hover { border-color: var(--accent); }
+.historial-fila.repetida { background: var(--warn-soft); border-color: var(--warn); }
+.historial-fecha { display: grid; flex: none; width: 92px; line-height: 1.2; }
+.mat-repetido { font-weight: 700; color: var(--warn); }

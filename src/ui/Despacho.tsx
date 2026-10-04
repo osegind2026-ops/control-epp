@@ -1,9 +1,9 @@
 import { signal } from '@preact/signals'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { MAS_PEDIDOS_BASE } from '../db/semilla'
-import { aplicarKit, entregasPrevias, existencia, lecturaEscanerValida, masPedidos, materialesRecurrentes, REGLA_RECURRENCIA, type MaterialRecurrente, nivelStock, prestamosVencidos, resolverRpe, sumarDias, tieneTallas, variantesDe } from '../domain/logica'
+import { aplicarKit, existencia, lecturaEscanerValida, masPedidos, materialesRecurrentes, REGLA_RECURRENCIA, type MaterialRecurrente, nivelStock, prestamosVencidos, resolverRpe, sumarDias, tieneTallas, variantesDe } from '../domain/logica'
 import type { DatosPrestamo, Entrega, Material, Trabajador } from '../domain/types'
-import { fechaLocal, normalizar } from '../lib/util'
+import { fechaLocal, hace, normalizar, plural } from '../lib/util'
 import { deshacerEntrega, registrarEntrega, type LineaTicket } from '../state/servicios'
 import { pantalla } from '../state/navegacion'
 import * as S from '../state/store'
@@ -39,34 +39,72 @@ let ultimoAvisoRecurrencia = ''
 const MOTIVOS_RECURRENCIA = ['Desgaste por el trabajo', 'Se dañó o rompió', 'Extravío', 'Talla incorrecta', 'Para su cuadrilla']
 
 /**
- * Bajo los datos del trabajador: las veces anteriores en que recibió lo mismo que está
- * en el ticket. Al tocar una fecha se abre el detalle de esa entrega.
+ * Bajo los datos del trabajador: lista desplegable con sus últimas entregas. Se resaltan
+ * las que incluyen el mismo material que está en el ticket (reincidencia), para detectar
+ * solicitudes repetidas. Al tocar una entrega se abre su detalle.
  */
-function EntregasAnteriores({ t }: { t: Trabajador }) {
+function HistorialTrabajador({ t }: { t: Trabajador }) {
   const [detalle, setDetalle] = useState<Entrega | null>(null)
-  const materiales = [...new Set(ticket.value.map((l) => l.materialId))]
+  const [todas, setTodas] = useState(false)
+  const enTicket = new Set(ticket.value.map((l) => l.materialId))
   const recurrentes = new Set(recurrentesDelTicket(t).map((r) => r.materialId))
-  const filas = materiales.map((id) => ({ id, previas: entregasPrevias(S.entregas.value, t.rpe, id, 6) })).filter((f) => f.previas.length)
-  if (!filas.length) return null
+  const entregas = useMemo(() => S.entregas.value.filter((e) => e.rpe === t.rpe && e.estado === 'registrada').reverse(), [S.entregas.value, t.rpe])
+  const repetidas = entregas.filter((e) => e.lineas.some((l) => enTicket.has(l.materialId)))
+  // Se abre sola cuando hay reincidencia; si no, queda plegada hasta que se toque
+  const [abierto, setAbierto] = useState<boolean | null>(null)
+  const mostrar = abierto ?? repetidas.length > 0
+  useEffect(() => {
+    setAbierto(null)
+    setTodas(false)
+  }, [t.rpe])
+  if (!entregas.length) return null
+  const visibles = todas ? entregas.slice(0, 40) : entregas.slice(0, 5)
   return (
-    <div class="card anteriores">
-      <strong class="small">Ya se le entregó antes</strong>
-      {filas.map((f) => (
-        <div key={f.id} class="anteriores-fila">
-          <span class="small">
-            {S.nombreMaterial(f.id)}
-            {recurrentes.has(f.id) && <span class="badge warn">Recurrente</span>}
+    <div class={`card historial-trab ${repetidas.length ? 'con-repetidas' : ''}`}>
+      <button class="historial-cab" aria-expanded={mostrar} onClick={() => setAbierto(!mostrar)}>
+        <span class="grow">
+          <strong>Historial de entregas</strong> <span class="muted small">· {plural(entregas.length, 'entrega', 'entregas')}</span>
+        </span>
+        {repetidas.length > 0 && (
+          <span class={`badge ${recurrentes.size ? 'bad' : 'warn'}`}>
+            {repetidas.length} con el mismo material
           </span>
-          <div class="row" style={{ gap: '4px' }}>
-            {f.previas.slice(0, 5).map((p) => (
-              <button key={p.entrega.id} class="chip" onClick={() => setDetalle(p.entrega)} title={`Ver la entrega ${p.entrega.folio}`}>
-                {fechaCorta(p.entrega.fecha)} · ×{p.cantidad}
+        )}
+        <span class="historial-flecha" aria-hidden="true">
+          {mostrar ? '▴' : '▾'}
+        </span>
+      </button>
+      {mostrar && (
+        <div class="historial-lista">
+          {visibles.map((e) => {
+            const repetida = e.lineas.some((l) => enTicket.has(l.materialId))
+            return (
+              <button key={e.id} class={`historial-fila ${repetida ? 'repetida' : ''}`} onClick={() => setDetalle(e)} title={`Ver la entrega ${e.folio}`}>
+                <span class="historial-fecha">
+                  <strong>{fechaCorta(e.fecha)}</strong>
+                  <span class="muted small">{hace(e.ts)}</span>
+                </span>
+                <span class="grow small">
+                  {e.lineas.map((l, i) => (
+                    <span key={i} class={enTicket.has(l.materialId) ? 'mat-repetido' : ''}>
+                      {i > 0 && ', '}
+                      {S.nombreMaterial(l.materialId)}
+                      {l.varianteId && ` ${l.varianteId}`} ×{l.cantidad}
+                    </span>
+                  ))}
+                  {e.recurrencia?.nota && <span class="muted"> · «{e.recurrencia.nota}»</span>}
+                </span>
+                {repetida && <span class={`badge ${e.lineas.some((l) => recurrentes.has(l.materialId)) ? 'bad' : 'warn'}`}>Mismo material</span>}
               </button>
-            ))}
-            {f.previas.length > 5 && <span class="muted small">y más…</span>}
-          </div>
+            )
+          })}
+          {entregas.length > 5 && (
+            <button class="btn ghost sm" style={{ justifySelf: 'start' }} onClick={() => setTodas(!todas)}>
+              {todas ? 'Ver solo las últimas 5' : `Ver las ${Math.min(entregas.length, 40)} entregas`}
+            </button>
+          )}
         </div>
-      ))}
+      )}
       {detalle && <DetalleEntrega e={S.entregas.value.find((x) => x.id === detalle.id) ?? detalle} onCerrar={() => setDetalle(null)} />}
     </div>
   )
@@ -593,7 +631,7 @@ export function PantallaDespacho() {
           )}
         </div>
 
-        {t && <EntregasAnteriores t={t} />}
+        {t && <HistorialTrabajador t={t} />}
 
         {t && (
           <div class="rapidos">
