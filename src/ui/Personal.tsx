@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'preact/hooks'
+import { tipoDe, TIPOS_TRABAJADOR, type TipoNormal } from '../domain/logica'
 import type { Trabajador } from '../domain/types'
-import { fechaLocal, normalizar } from '../lib/util'
+import { normalizar } from '../lib/util'
 import { importarPadron, leerPadronCSV } from '../state/respaldo'
 import * as S from '../state/store'
 import { avisar, intentar, Vacio } from './comunes'
@@ -9,10 +10,9 @@ import { FormTrabajador, LectorGafete } from './Trabajador'
 
 export function PantallaPersonal() {
   const [q, setQ] = useState('')
-  const [filtro, setFiltro] = useState<'todos' | 'eventual' | 'planta' | 'vencidos' | 'inactivos'>('todos')
+  const [filtro, setFiltro] = useState<'todos' | 'permanente' | 'temporal' | 'eventual' | 'inactivos'>('todos')
   const [editar, setEditar] = useState<Partial<Trabajador> | null>(null)
   const [gafete, setGafete] = useState(false)
-  const hoy = fechaLocal()
 
   const lista = useMemo(() => {
     const t = normalizar(q)
@@ -20,9 +20,7 @@ export function PantallaPersonal() {
       .filter((p) => {
         if (filtro === 'inactivos') return !p.activo
         if (!p.activo) return false
-        if (filtro === 'eventual' && p.tipo !== 'eventual') return false
-        if (filtro === 'planta' && p.tipo !== 'planta') return false
-        if (filtro === 'vencidos' && !(p.tipo === 'eventual' && p.vigencia && p.vigencia < hoy)) return false
+        if ((filtro === 'eventual' || filtro === 'temporal' || filtro === 'permanente') && tipoDe(p) !== filtro) return false
         return !t || normalizar(`${p.rpe} ${p.nombre} ${p.area}`).includes(t)
       })
       .sort((a, b) => a.nombre.localeCompare(b.nombre))
@@ -44,7 +42,7 @@ export function PantallaPersonal() {
     if (r) avisar(`✓ Padrón cargado: ${r.nuevos} nuevos, ${r.actualizados} actualizados`)
   }
 
-  const cuenta = (tipo: Trabajador['tipo']) => [...S.personal.value.values()].filter((p) => p.activo && p.tipo === tipo).length
+  const cuenta = (tipo: TipoNormal) => [...S.personal.value.values()].filter((p) => p.activo && tipoDe(p) === tipo).length
 
   return (
     <div class="stack">
@@ -64,7 +62,7 @@ export function PantallaPersonal() {
         </div>
       </div>
       <p class="muted small">
-        {cuenta('planta')} de planta · {cuenta('eventual')} eventuales. El CSV acepta el formato <span class="mono">rpe,nombre,area,puesto,casillero</span> o
+        {cuenta('permanente')} permanentes · {cuenta('temporal')} temporales · {cuenta('eventual')} eventuales (el tipo lo corrige un administrador o el encargado de almacén al editar al trabajador). El CSV acepta el formato <span class="mono">rpe,nombre,area,puesto,casillero</span> o
         simplemente <span class="mono">RPE,Nombre,Área</span>.
       </p>
       <div class="row">
@@ -75,9 +73,9 @@ export function PantallaPersonal() {
         {(
           [
             ['todos', 'Todos'],
-            ['planta', 'Planta'],
+            ['permanente', 'Permanentes'],
+            ['temporal', 'Temporales'],
             ['eventual', 'Eventuales'],
-            ['vencidos', 'Vigencia vencida'],
             ['inactivos', 'Inactivos'],
           ] as const
         ).map(([id, txt]) => (
@@ -103,18 +101,14 @@ export function PantallaPersonal() {
             </thead>
             <tbody>
               {lista.slice(0, 400).map((p) => {
-                const vencido = p.tipo === 'eventual' && p.vigencia && p.vigencia < hoy
+                const tipo = tipoDe(p)
                 return (
                   <tr key={p.rpe} class="clic" onClick={() => setEditar(p)}>
                     <td class="mono">{p.rpe}</td>
                     <td>{p.nombre}</td>
                     <td class="small">{p.area}</td>
                     <td>
-                      {p.tipo === 'eventual' ? (
-                        <span class={`badge ${vencido ? 'bad' : 'warn'}`}>{vencido ? `Venció ${p.vigencia}` : p.vigencia ? `Eventual · ${p.vigencia}` : 'Eventual'}</span>
-                      ) : (
-                        <span class="badge">Planta</span>
-                      )}
+                      <span class={`badge ${tipo === 'permanente' ? 'ok' : tipo === 'temporal' ? 'prest' : 'warn'}`}>{TIPOS_TRABAJADOR[tipo]}</span>
                     </td>
                     <td class="small">
                       {Object.entries(p.tallas)

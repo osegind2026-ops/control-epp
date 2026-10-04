@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { AREAS } from '../db/semilla'
-import { buscarTrabajadores, lecturaEscanerValida, resolverRpe, rpeDeCodigo } from '../domain/logica'
-import type { Trabajador } from '../domain/types'
+import { buscarTrabajadores, lecturaEscanerValida, resolverRpe, rpeDeCodigo, tipoDe, tipoPorRpe, TIPOS_TRABAJADOR, type TipoNormal } from '../domain/logica'
+import type { Entrega, Trabajador } from '../domain/types'
+import { puedeInventario } from '../state/permisos'
+import { DetalleEntrega } from './DetalleEntrega'
 import { diasEntre, fechaLocal, hace, iniciales, normalizar, tecladoFisico } from '../lib/util'
 import { guardarTrabajador } from '../state/servicios'
 import * as S from '../state/store'
@@ -41,6 +43,11 @@ export function FormTrabajador(props: {
   const [areaLibre, setAreaLibre] = useState(!!i.area && !areas.includes(i.area))
   const [puesto, setPuesto] = useState(i.puesto ?? 'OPERADOR / TÉCNICO')
   const [activo, setActivo] = useState(i.activo ?? true)
+  // Permanente / temporal / eventual: lo corrigen el administrador o el encargado de almacén
+  const puedeTipo = puedeInventario()
+  const tipoSugerido = i.tipo ? tipoDe({ tipo: i.tipo }) : tipoPorRpe(rpe)
+  const [tipoElegido, setTipoElegido] = useState<TipoNormal | null>(null)
+  const tipo = tipoElegido ?? tipoSugerido
 
   const guardar = async () => {
     const t = await intentar(() =>
@@ -52,7 +59,7 @@ export function FormTrabajador(props: {
         // Datos que ya no se capturan: se conservan si el registro los tenía
         casillero: i.casillero ?? '',
         gafete: i.gafete,
-        tipo: i.tipo ?? 'eventual',
+        tipo: tipoElegido ?? undefined,
         vigencia: i.vigencia,
         activo,
       }),
@@ -133,6 +140,24 @@ export function FormTrabajador(props: {
           ))}
         </datalist>
       </label>
+      <div class="stack" style={{ gap: '6px' }}>
+        <span class="small" style={{ fontWeight: 600, color: 'var(--muted)' }}>Tipo de trabajador</span>
+        {puedeTipo ? (
+          <div class="row" role="group" aria-label="Tipo de trabajador">
+            {(Object.keys(TIPOS_TRABAJADOR) as TipoNormal[]).map((x) => (
+              <button key={x} type="button" class="chip" aria-pressed={tipo === x} onClick={() => setTipoElegido(x)}>
+                {TIPOS_TRABAJADOR[x]}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span>
+            <span class={`badge ${tipo === 'permanente' ? 'ok' : 'warn'}`}>{TIPOS_TRABAJADOR[tipo]}</span>{' '}
+            <span class="muted small">Lo puede corregir un administrador o el encargado de almacén.</span>
+          </span>
+        )}
+        {!existente && !tipoElegido && <span class="muted small">Se asigna por el RPE: los que empiezan con 9 son permanentes; el resto, eventuales.</span>}
+      </div>
       {existente && (
         <label class="check">
           <input type="checkbox" checked={activo} onChange={(e) => setActivo((e.target as HTMLInputElement).checked)} />
@@ -238,23 +263,31 @@ export function LectorGafete({ onElegir, onCerrar }: { onElegir: (t: Trabajador)
 export function TarjetaTrabajador({ t, onQuitar, onEditar }: { t: Trabajador; onQuitar: () => void; onEditar?: () => void }) {
   const activos = S.resguardosActivos.value.filter((r) => r.rpe === t.rpe)
   const ultima = [...S.entregas.value].reverse().find((e) => e.rpe === t.rpe && e.estado === 'registrada')
-  const vencido = t.tipo === 'eventual' && t.vigencia && t.vigencia < fechaLocal()
+  const tipo = tipoDe(t)
+  const [detalle, setDetalle] = useState<Entrega | null>(null)
   return (
     <div class="trabajador">
       <span class="avatar">{iniciales(t.nombre)}</span>
       <div class="grow stack" style={{ gap: '4px' }}>
         <div class="row" style={{ gap: '6px' }}>
           <strong class="nombre">{t.nombre}</strong>
-          {t.tipo === 'eventual' && <span class={`badge ${vencido ? 'bad' : 'warn'}`}>{vencido ? 'Eventual · vigencia vencida' : 'Eventual'}</span>}
+          <span class={`badge ${tipo === 'permanente' ? 'ok' : 'warn'}`}>{TIPOS_TRABAJADOR[tipo]}</span>
         </div>
         <span class="muted small">
           <span class="mono">{t.rpe}</span> · {t.area}
           {t.casillero && ` · Casillero ${t.casillero}`}
         </span>
         <span class="muted small">
-          {ultima ? `Última entrega ${hace(ultima.ts)} (${ultima.folio})` : 'Sin entregas registradas'}
+          {ultima ? (
+            <button class="enlace" onClick={() => setDetalle(ultima)} title="Ver qué se le entregó">
+              Última entrega {hace(ultima.ts)} ({ultima.folio})
+            </button>
+          ) : (
+            'Sin entregas registradas'
+          )}
           {activos.length > 0 && ` · En resguardo: ${activos.map((r) => S.nombreMaterial(r.materialId, r.varianteId)).join(', ')}`}
         </span>
+        {detalle && <DetalleEntrega e={S.entregas.value.find((x) => x.id === detalle.id) ?? detalle} onCerrar={() => setDetalle(null)} />}
       </div>
       <div class="row" style={{ gap: '4px' }}>
         {onEditar && (

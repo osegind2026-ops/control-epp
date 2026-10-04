@@ -271,6 +271,45 @@ export function ReporteImprimible({ d, p, onCerrar }: { d: DatosReporte; p: Plan
         </Pagina>
       )}
 
+      {d.recurrentes.length > 0 && (
+        <Pagina p={p} d={d} tituloPag="Solicitantes recurrentes">
+          <table class="rp-tabla rp-izq">
+            <thead>
+              <tr>
+                <th>Solicitante</th>
+                <th>Área</th>
+                <th>Material</th>
+                <th class="rp-guinda">Veces</th>
+                <th>Piezas</th>
+                <th>Última</th>
+                <th>Comentario</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...d.recurrentes]
+                .sort((a, b) => b.veces - a.veces || b.piezas - a.piezas)
+                .slice(0, 12)
+                .map((r) => (
+                  <tr key={r.area + r.materialId + r.rpe}>
+                    <td>
+                      {titulo(r.nombre)} ({r.rpe})
+                    </td>
+                    <td>{titulo(r.area)}</td>
+                    <td>{r.material}</td>
+                    <td class="rp-total">{r.veces}</td>
+                    <td>{r.piezas}</td>
+                    <td>{r.ultima}</td>
+                    <td class={r.notas.length ? '' : 'rp-cero'}>{r.notas.join(' · ') || '—'}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+          <p class="rp-nota">
+            Personas que recibieron el mismo material en 2 o más entregas del periodo ({d.recurrentes.length} casos). El detalle por área y material está en el Excel.
+          </p>
+        </Pagina>
+      )}
+
       {d.porDia.length > 1 && (
         <Pagina p={p} d={d} tituloPag="Evolución por día">
           <div class="rp-columnas">

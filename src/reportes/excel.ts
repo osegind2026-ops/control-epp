@@ -105,12 +105,19 @@ export async function generarExcel(d: DatosReporte, f: Fuentes): Promise<Blob> {
     ]),
   ]
 
+  // Solicitantes recurrentes por área y material
+  const recurrentes: Fila[] = [
+    enc('Área', 'Material', 'RPE', 'Nombre', 'Tipo', 'Veces', 'Piezas', 'Primera', 'Última', 'Comentarios al despachar'),
+    ...d.recurrentes.map((r) => [v(r.area), v(r.material), v(r.rpe), v(r.nombre), v(r.tipo), n(r.veces), n(r.piezas), v(r.primera), v(r.ultima), { value: r.notas.join(' · '), wrap: true }]),
+  ]
+
   const ancho = (...w: number[]) => w.map((width) => ({ width }))
   const hojas = [
     { data: resumen, sheet: 'Resumen', columns: ancho(70, 14) },
     { data: material, sheet: 'Por material', columns: ancho(30, 10, 10, 14, 40), stickyRowsCount: 1 },
     { data: porArea, sheet: 'Por área', columns: ancho(34, 10, 10, 10, 10, ...columnasMat.map(() => 14)), stickyRowsCount: 1, stickyColumnsCount: 1 },
     { data: detalle, sheet: 'Entregas', columns: ancho(16, 11, 7, 9, 34, 30, 28, 7, 9, 12, 28, 20, 8, 30), stickyRowsCount: 1 },
+    { data: recurrentes, sheet: 'Solicitantes recurrentes', columns: ancho(30, 30, 9, 34, 12, 8, 8, 11, 11, 50), stickyRowsCount: 1 },
     { data: existencias, sheet: 'Existencias', columns: ancho(30, 7, ...ubis.map(() => 18), 9, 9, 11), stickyRowsCount: 1 },
     { data: resguardos, sheet: 'Resguardos y préstamos', columns: ancho(20, 11, 9, 34, 30, 28, 7, 9, 11, 16, 30, 12, 12), stickyRowsCount: 1 },
     { data: kardex, sheet: 'Movimientos', columns: ancho(11, 7, 12, 28, 7, 22, 9, 22, 28, 30, 20, 8), stickyRowsCount: 1 },

@@ -1,6 +1,7 @@
 import { db, guardarConfig, leerConfig } from '../db/db'
 import { fechaLocal } from '../lib/util'
-import type { Kit, Material, Resguardo } from '../domain/types'
+import { tipoPorRpe } from '../domain/logica'
+import type { Kit, Material, Resguardo, Trabajador } from '../domain/types'
 import { CATEGORIAS, FICHAS, materialesSemilla } from '../db/semilla'
 import * as S from './store'
 
@@ -106,10 +107,27 @@ async function v5(): Promise<void> {
   })
 }
 
+/**
+ * v6: tipo de trabajador con la regla de la oficina. Los RPE que empiezan con 9 son
+ * permanentes y el resto eventuales; no toca a quien ya se marcó como temporal ni a
+ * quien se corrigió a mano. No modifica entregas, existencias ni ningún otro dato.
+ */
+async function v6(): Promise<void> {
+  const ahora = new Date().toISOString()
+  const cambios: Trabajador[] = []
+  for (const t of await db.personal.toArray()) {
+    if (t.tipoManual || t.tipo === 'temporal') continue
+    const tipo = tipoPorRpe(t.rpe)
+    if (t.tipo !== tipo) cambios.push({ ...t, tipo, actualizado: ahora })
+  }
+  if (cambios.length) await db.personal.bulkPut(cambios)
+}
+
 const MIGRACIONES: [number, () => Promise<void>][] = [
   [3, v3],
   [4, v4],
   [5, v5],
+  [6, v6],
 ]
 
 export async function migrar(): Promise<void> {

@@ -7,7 +7,7 @@ import {
   CATEGORIAS,
   ubicacionesSemilla,
 } from '../db/semilla'
-import { existencia, formatoFolio, formatoFolioSI, siguienteFolio } from '../domain/logica'
+import { existencia, formatoFolio, formatoFolioSI, materialesRecurrentes, siguienteFolio, tipoDe, tipoPorRpe } from '../domain/logica'
 import type {
   Dispositivo,
   DatosPrestamo,
@@ -265,16 +265,30 @@ export async function guardarUsuario(datos: { id?: string; nombre: string; rol: 
 
 // ---------- Personal ----------
 
-export async function guardarTrabajador(t: Omit<Trabajador, 'actualizado' | 'alta' | 'tallas'> & Partial<Trabajador>): Promise<Trabajador> {
-  const previo = S.personal.value.get(t.rpe)
+export async function guardarTrabajador(t: Omit<Trabajador, 'actualizado' | 'alta' | 'tallas' | 'tipo'> & Partial<Trabajador>): Promise<Trabajador> {
+  const rpe = t.rpe.trim().toUpperCase()
+  const previo = S.personal.value.get(rpe)
   const ahora = new Date().toISOString()
+  // Tipo: lo corrigen el administrador o el encargado de almacén; si no, sale del RPE (9… = permanente)
+  const puedeCorregir = S.sesion.value?.rol === 'admin' || S.sesion.value?.rol === 'almacen'
+  const tipoAnterior = previo ? tipoDe(previo) : tipoPorRpe(rpe)
+  const tipoPedido = t.tipo ? tipoDe({ tipo: t.tipo }) : tipoAnterior
+  let tipo = tipoAnterior
+  let tipoManual = previo?.tipoManual
+  if (tipoPedido !== tipoAnterior) {
+    if (!puedeCorregir) throw new ErrorNegocio('Solo un administrador o el encargado de almacén puede cambiar si es permanente, temporal o eventual.')
+    tipo = tipoPedido
+    tipoManual = true
+  }
   const trabajador: Trabajador = {
     tallas: previo?.tallas ?? {},
     alta: previo?.alta ?? ahora,
     altaPor: previo?.altaPor ?? S.sesion.value?.usuarioNombre,
     ...t,
-    rpe: t.rpe.trim().toUpperCase(),
+    rpe,
     nombre: t.nombre.trim().toUpperCase(),
+    tipo,
+    tipoManual,
     actualizado: ahora,
   }
   if (!trabajador.rpe || !trabajador.nombre) throw new ErrorNegocio('RPE y nombre son obligatorios.')
@@ -305,6 +319,8 @@ export async function registrarEntrega(
   lineas: LineaTicket[],
   observaciones: string,
   prestamo?: DatosPrestamo,
+  /** Comentario cuando se entrega algo que la persona recibe de forma recurrente. */
+  notaRecurrencia = '',
 ): Promise<{ entrega: Entrega; deshacer: Deshacer }> {
   const { sesion, equipo } = actor()
   if (!lineas.length) throw new ErrorNegocio('Agregue al menos un material.')
@@ -365,6 +381,10 @@ export async function registrarEntrega(
     estado: 'registrada',
     prestamo: hayPrestamo ? limpiarPrestamo(prestamo!) : undefined,
   }
+  // Consumibles que esta persona ya recibió varias veces en los últimos días
+  const consumibles = lineasEntrega.filter((l) => !l.esResguardo && !l.esPrestamo).map((l) => l.materialId)
+  const recurrentes = materialesRecurrentes(S.entregas.value, trabajador.rpe, consumibles, entrega.fecha)
+  if (recurrentes.length) entrega.recurrencia = { materiales: recurrentes.map((r) => r.materialId), nota: notaRecurrencia.trim() }
 
   const nota = `${trabajador.rpe} · ${trabajador.nombre}`
   const movs: Movimiento[] = lineasEntrega.map((l) =>
@@ -458,9 +478,11 @@ export async function registrarEntrega(
   }
 
   // Recordar tallas (y supervisor) del trabajador para la próxima vez
-  const tallas = { ...trabajador.tallas }
+  // Se parte de la ficha guardada (no de la copia en pantalla) para no deshacer correcciones recientes
+  const ficha = S.personal.value.get(trabajador.rpe) ?? trabajador
+  const tallas = { ...ficha.tallas }
   for (const l of lineasEntrega) if (l.varianteId) tallas[l.materialId] = l.varianteId
-  const trabajadorNuevo: Trabajador = { ...trabajador, tallas, supervisor: entrega.prestamo?.supervisor ?? trabajador.supervisor, actualizado: entrega.ts }
+  const trabajadorNuevo: Trabajador = { ...ficha, tallas, supervisor: entrega.prestamo?.supervisor ?? ficha.supervisor, actualizado: entrega.ts }
   const nuevosFolios = { ...S.folios.value, [equipo.codigo]: folioNum }
 
   await db.transaction('rw', [db.entregas, db.movimientos, db.resguardos, db.personal, db.config], async () => {
@@ -473,7 +495,7 @@ export async function registrarEntrega(
   S.folios.value = nuevosFolios
   await S.recargar('entregas', 'movimientos', 'resguardos', 'personal')
   await marcarCambio()
-  return { entrega, deshacer: { entregaId: entrega.id, folioNum, cerrados, trabajadorAntes: trabajador } }
+  return { entrega, deshacer: { entregaId: entrega.id, folioNum, cerrados, trabajadorAntes: ficha } }
 }
 
 function limpiarPrestamo(p: DatosPrestamo): DatosPrestamo {

@@ -11,7 +11,7 @@
  * No edite las pestañas a mano: los cambios se hacen desde la app.
  */
 
-var VERSION_SERVIDOR = '2.2.0'
+var VERSION_SERVIDOR = '2.3.0'
 var ZONA = 'America/Mexico_City'
 var LIMITE_FILAS = 800
 var LIMITE_CARACTERES = 3000000
@@ -53,18 +53,20 @@ var TABLAS = {
     hoja: 'Personal',
     llave: 'rpe',
     cols: ['RPE', 'Nombre', 'Área', 'Puesto', 'Casillero', 'Tipo', 'Vigencia', 'Activo'],
-    fila: function (d) { return [d.rpe, d.nombre, d.area, d.puesto, d.casillero, d.tipo, d.vigencia || '', d.activo ? 'SI' : 'NO'] },
+    fila: function (d) { return [d.rpe, d.nombre, d.area, d.puesto, d.casillero, TIPOS_TRABAJADOR[d.tipo] || d.tipo, d.vigencia || '', d.activo ? 'SI' : 'NO'] },
   },
   usuarios: { hoja: 'Usuarios', cols: ['Nombre', 'Administrador', 'Activo', 'Rol'], fila: function (d) { return [d.nombre, d.esAdmin ? 'SI' : '', d.activo ? 'SI' : 'NO', ROLES[d.rol || (d.esAdmin ? 'admin' : 'despachador')] || ''] } },
   motivos: { hoja: 'Motivos', cols: ['Tipo', 'Texto', 'Activo'], fila: function (d) { return [d.tipo, d.texto, d.activo ? 'SI' : 'NO'] } },
   entregas: {
     hoja: 'Entregas',
-    cols: ['Folio', 'Fecha', 'Hora', 'RPE', 'Nombre', 'Área', 'Materiales', 'Despachó', 'Equipo', 'Estado'],
+    cols: ['Folio', 'Fecha', 'Hora', 'RPE', 'Nombre', 'Área', 'Materiales', 'Despachó', 'Equipo', 'Estado', 'Recurrente', 'Comentario'],
     fila: function (d, ctx) {
       return [
         d.folio, d.fecha, d.hora, d.rpe, d.nombre, d.area,
         (d.lineas || []).map(function (l) { return nombreMat(ctx, l.materialId) + (l.varianteId ? ' ' + l.varianteId : '') + ' ×' + l.cantidad }).join(' · '),
         d.usuarioNombre, d.equipo, d.estado === 'anulada' ? 'ANULADA' : 'OK',
+        d.recurrencia ? (d.recurrencia.materiales || []).map(function (m) { return nombreMat(ctx, m) }).join(' · ') : '',
+        d.recurrencia ? d.recurrencia.nota || '' : '',
       ]
     },
   },
@@ -113,6 +115,7 @@ TABLAS.prestamosEquipo = {
     ]
   },
 }
+var TIPOS_TRABAJADOR = { permanente: 'Permanente', planta: 'Permanente', temporal: 'Temporal', eventual: 'Eventual' }
 var ROLES = { admin: 'Administrador', almacen: 'Encargado de almacén', despachador: 'Despachador' }
 var ESTADOS_EQUIPO = { operativo: 'Operativo', revision: 'En revisión', baja: 'Baja' }
 var CONDICIONES = { bueno: 'Buen estado', detalle: 'Con detalle', danado: 'Dañado' }

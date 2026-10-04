@@ -20,8 +20,16 @@ describe('migración v3 (datos creados antes del cambio)', () => {
     await db.kits.bulkPut(kitsSemilla().map((k) => ({ ...k, lineas: k.lineas.map(({ conMaterial: _c, ...l }) => l) })))
     await db.resguardos.bulkPut([resguardo('r1', 'casco'), resguardo('r2', 'barbiquejo'), resguardo('r3', 'arnes_cuerpo')])
 
+    const persona = (rpe: string, tipo: string, extra = {}) => ({ rpe, nombre: 'P ' + rpe, area: 'A', puesto: '', casillero: '', tipo, tallas: {}, activo: true, alta: '', actualizado: '2026-01-01', ...extra })
+    await db.personal.bulkPut([persona('9AB12', 'eventual'), persona('GH345', 'planta'), persona('JK678', 'temporal'), persona('LM901', 'planta', { tipoManual: true })] as never)
+
     await migrar()
 
+    // v6: 9… = permanente, el resto eventual; respeta temporales y correcciones a mano
+    expect((await db.personal.get('9AB12'))?.tipo).toBe('permanente')
+    expect((await db.personal.get('GH345'))?.tipo).toBe('eventual')
+    expect((await db.personal.get('JK678'))?.tipo).toBe('temporal')
+    expect((await db.personal.get('LM901'))?.tipo).toBe('planta')
     expect((await db.materiales.get('barbiquejo'))?.tipo).toBe('consumible')
     expect((await db.materiales.get('arnes_cuerpo'))?.tipo).toBe('prestamo')
     expect((await db.materiales.get('casco'))?.tipo).toBe('resguardo')

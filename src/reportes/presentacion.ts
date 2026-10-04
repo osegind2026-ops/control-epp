@@ -239,6 +239,33 @@ export async function generarPresentacion(d: DatosReporte, p: Plantilla): Promis
     }
   }
 
+  // ---------- Solicitantes recurrentes ----------
+  if (d.recurrentes.length) {
+    const s = laminaContenido(pres, p, d, 'Solicitantes recurrentes')
+    const top = [...d.recurrentes].sort((a, b) => b.veces - a.veces || b.piezas - a.piezas).slice(0, 12)
+    const celdaEnc = (text: string, align: 'left' | 'center' = 'left') => ({ text, options: { bold: true, color: C.blanco, fill: { color: C.verde }, fontSize: 9.5, align } })
+    const enc: PptxGenJS.TableCell[] = [celdaEnc('SOLICITANTE'), celdaEnc('ÁREA'), celdaEnc('MATERIAL'), celdaEnc('VECES', 'center'), celdaEnc('PIEZAS', 'center'), celdaEnc('ÚLTIMA', 'center'), celdaEnc('COMENTARIO')]
+    const filas: PptxGenJS.TableRow[] = top.map((r, i) => {
+      const fill = { color: i % 2 ? 'F3F1EC' : C.blanco }
+      const o = { fontSize: 9.5, color: C.texto, fill }
+      return [
+        { text: `${titulo(r.nombre)} (${r.rpe})`, options: { ...o, bold: true } },
+        { text: titulo(r.area), options: o },
+        { text: r.material, options: o },
+        { text: String(r.veces), options: { ...o, bold: true, color: C.guinda, align: 'center' as const } },
+        { text: String(r.piezas), options: { ...o, align: 'center' as const } },
+        { text: r.ultima, options: { ...o, align: 'center' as const } },
+        { text: r.notas.join(' · ') || '—', options: { ...o, fontSize: 8.5, color: r.notas.length ? C.texto : 'B5B5B5' } },
+      ]
+    })
+    s.addTable([enc, ...filas], {
+      x: 0.5, y: 1.45, w: 12.3, colW: [3.1, 2.3, 2.3, 0.8, 0.8, 1.1, 1.9], fontFace: FUENTE, border: { type: 'solid', color: 'DDD8CE', pt: 0.5 }, valign: 'middle', rowH: 0.36, autoPage: false,
+    })
+    s.addText(`Personas que recibieron el mismo material en 2 o más entregas del periodo (${d.recurrentes.length} casos). El detalle por área y material está en el Excel.`, {
+      x: 0.5, y: 6.35, w: 12.3, h: 0.3, fontFace: FUENTE, fontSize: 10, italic: true, color: C.gris, margin: 0, isTextBox: true,
+    })
+  }
+
   // ---------- 7. Evolución diaria ----------
   if (d.porDia.length > 1) {
     const s = laminaContenido(pres, p, d, 'Evolución por día')

@@ -1,13 +1,14 @@
 import { signal } from '@preact/signals'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { MAS_PEDIDOS_BASE } from '../db/semilla'
-import { aplicarKit, existencia, lecturaEscanerValida, masPedidos, nivelStock, prestamosVencidos, resolverRpe, sumarDias, tieneTallas, variantesDe } from '../domain/logica'
-import type { DatosPrestamo, Material, Trabajador } from '../domain/types'
+import { aplicarKit, entregasPrevias, existencia, lecturaEscanerValida, masPedidos, materialesRecurrentes, REGLA_RECURRENCIA, type MaterialRecurrente, nivelStock, prestamosVencidos, resolverRpe, sumarDias, tieneTallas, variantesDe } from '../domain/logica'
+import type { DatosPrestamo, Entrega, Material, Trabajador } from '../domain/types'
 import { fechaLocal, normalizar } from '../lib/util'
 import { deshacerEntrega, registrarEntrega, type LineaTicket } from '../state/servicios'
 import { pantalla } from '../state/navegacion'
 import * as S from '../state/store'
 import { avisar, FotoMaterial, intentar, Modal, Talla } from './comunes'
+import { DetalleEntrega } from './DetalleEntrega'
 import { Icono } from './iconos'
 import { BuscadorTrabajador, FormTrabajador, TarjetaTrabajador } from './Trabajador'
 
@@ -18,7 +19,110 @@ interface Linea extends LineaTicket {
 const ticket = signal<Linea[]>([])
 const trabajadorSel = signal<Trabajador | null>(null)
 const observaciones = signal('')
+const notaRecurrencia = signal('')
 const datosPrestamo = signal<DatosPrestamo>({ supervisor: { nombre: '', rpe: '', extension: '' }, vence: '' })
+
+const fechaCorta = (fecha: string) => {
+  const [a, m, d] = fecha.split('-').map(Number)
+  const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+  return `${d} ${meses[m - 1]}${a !== new Date().getFullYear() ? ` ${a}` : ''}`
+}
+
+/** Consumibles del ticket que esta persona ya recibió de forma recurrente. */
+function recurrentesDelTicket(t: Trabajador | null): MaterialRecurrente[] {
+  if (!t) return []
+  const ids = ticket.value.filter((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'consumible').map((l) => l.materialId)
+  return materialesRecurrentes(S.entregas.value, t.rpe, ids, fechaLocal())
+}
+
+let ultimoAvisoRecurrencia = ''
+const MOTIVOS_RECURRENCIA = ['Desgaste por el trabajo', 'Se dañó o rompió', 'Extravío', 'Talla incorrecta', 'Para su cuadrilla']
+
+/**
+ * Bajo los datos del trabajador: las veces anteriores en que recibió lo mismo que está
+ * en el ticket. Al tocar una fecha se abre el detalle de esa entrega.
+ */
+function EntregasAnteriores({ t }: { t: Trabajador }) {
+  const [detalle, setDetalle] = useState<Entrega | null>(null)
+  const materiales = [...new Set(ticket.value.map((l) => l.materialId))]
+  const recurrentes = new Set(recurrentesDelTicket(t).map((r) => r.materialId))
+  const filas = materiales.map((id) => ({ id, previas: entregasPrevias(S.entregas.value, t.rpe, id, 6) })).filter((f) => f.previas.length)
+  if (!filas.length) return null
+  return (
+    <div class="card anteriores">
+      <strong class="small">Ya se le entregó antes</strong>
+      {filas.map((f) => (
+        <div key={f.id} class="anteriores-fila">
+          <span class="small">
+            {S.nombreMaterial(f.id)}
+            {recurrentes.has(f.id) && <span class="badge warn">Recurrente</span>}
+          </span>
+          <div class="row" style={{ gap: '4px' }}>
+            {f.previas.slice(0, 5).map((p) => (
+              <button key={p.entrega.id} class="chip" onClick={() => setDetalle(p.entrega)} title={`Ver la entrega ${p.entrega.folio}`}>
+                {fechaCorta(p.entrega.fecha)} · ×{p.cantidad}
+              </button>
+            ))}
+            {f.previas.length > 5 && <span class="muted small">y más…</span>}
+          </div>
+        </div>
+      ))}
+      {detalle && <DetalleEntrega e={S.entregas.value.find((x) => x.id === detalle.id) ?? detalle} onCerrar={() => setDetalle(null)} />}
+    </div>
+  )
+}
+
+/** Aviso en el ticket cuando algo se entrega de forma recurrente, con comentario para dar seguimiento. */
+function AvisoRecurrencia({ t }: { t: Trabajador | null }) {
+  const [detalle, setDetalle] = useState<Entrega | null>(null)
+  const recurrentes = recurrentesDelTicket(t)
+  const cuantos = recurrentes.length
+  useEffect(() => {
+    // El ticket se dibuja dos veces (escritorio y celular): el aviso sale una sola vez por caso
+    const clave = cuantos && t ? `${t.rpe}|${recurrentes.map((r) => r.materialId).join(',')}` : ''
+    if (clave === ultimoAvisoRecurrencia) return
+    ultimoAvisoRecurrencia = clave
+    if (cuantos && t) avisar(`${t.nombre.split(' ').slice(0, 2).join(' ')} ya recibió ${cuantos === 1 ? S.nombreMaterial(recurrentes[0].materialId) : `${cuantos} de estos materiales`} varias veces en los últimos ${REGLA_RECURRENCIA.dias} días.`, { tipo: 'bad', ms: 6000 })
+  }, [cuantos, t?.rpe])
+  if (!cuantos) return null
+  return (
+    <div class="aviso warn recurrencia">
+      <div class="stack" style={{ gap: '6px', width: '100%' }}>
+        <strong class="small">
+          <Icono n="repetir" /> Entrega recurrente (últimos {REGLA_RECURRENCIA.dias} días)
+        </strong>
+        {recurrentes.map((r) => (
+          <div key={r.materialId} class="small">
+            {S.nombreMaterial(r.materialId)}: {r.previas.length} veces ·{' '}
+            {r.previas.slice(0, 4).map((p, i) => (
+              <span key={p.entrega.id}>
+                {i > 0 && ', '}
+                <button class="enlace" onClick={() => setDetalle(p.entrega)}>
+                  {fechaCorta(p.entrega.fecha)} (×{p.cantidad})
+                </button>
+              </span>
+            ))}
+          </div>
+        ))}
+        <input
+          class="input"
+          id="nota-recurrencia"
+          placeholder="Comentario: ¿por qué lo solicita otra vez?"
+          value={notaRecurrencia.value}
+          onInput={(e) => (notaRecurrencia.value = (e.target as HTMLInputElement).value)}
+        />
+        <div class="row" style={{ gap: '4px' }}>
+          {MOTIVOS_RECURRENCIA.map((m) => (
+            <button key={m} class="chip" aria-pressed={notaRecurrencia.value === m} onClick={() => (notaRecurrencia.value = m)}>
+              {m}
+            </button>
+          ))}
+        </div>
+      </div>
+      {detalle && <DetalleEntrega e={S.entregas.value.find((x) => x.id === detalle.id) ?? detalle} onCerrar={() => setDetalle(null)} />}
+    </div>
+  )
+}
 
 function lineasPrestamo(): Linea[] {
   return ticket.value.filter((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'prestamo')
@@ -298,17 +402,19 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
     if (bloqueo || !t || enviando) return
     if (sinExistencia && !confirmarFalta) return setConfirmarFalta(true)
     setEnviando(true)
-    const r = await intentar(() => registrarEntrega(t, lineas, observaciones.value, hayPrestamo ? datosPrestamo.value : undefined))
+    const r = await intentar(() => registrarEntrega(t, lineas, observaciones.value, hayPrestamo ? datosPrestamo.value : undefined, notaRecurrencia.value))
     setEnviando(false)
     if (!r) return
     const { entrega, deshacer } = r
     const anteriorTicket = ticket.value
     const anteriorTrabajador = t
     const anteriorNota = observaciones.value
+    const anteriorRecurrencia = notaRecurrencia.value
     const anteriorPrestamo = datosPrestamo.value
     ticket.value = []
     trabajadorSel.value = null
     observaciones.value = ''
+    notaRecurrencia.value = ''
     datosPrestamo.value = { supervisor: { nombre: '', rpe: '', extension: '' }, vence: '' }
     setNota(false)
     onEntregado()
@@ -321,6 +427,7 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
           ticket.value = anteriorTicket
           trabajadorSel.value = S.personal.value.get(anteriorTrabajador.rpe) ?? anteriorTrabajador
           observaciones.value = anteriorNota
+          notaRecurrencia.value = anteriorRecurrencia
           datosPrestamo.value = anteriorPrestamo
           avisar('Entrega deshecha')
         },
@@ -349,6 +456,7 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
       </div>
       <div class="ticket-pie">
         {hayPrestamo && <PanelPrestamo />}
+        <AvisoRecurrencia t={t} />
         {nota || observaciones.value ? (
           <input
             class="input"
@@ -484,6 +592,8 @@ export function PantallaDespacho() {
             <BuscadorTrabajador onElegir={elegirTrabajador} />
           )}
         </div>
+
+        {t && <EntregasAnteriores t={t} />}
 
         {t && (
           <div class="rapidos">

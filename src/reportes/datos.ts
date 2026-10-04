@@ -1,4 +1,4 @@
-import { calcularExistencias, existencia, nivelStock, prestamosVencidos, variantesDe } from '../domain/logica'
+import { calcularExistencias, existencia, nivelStock, prestamosVencidos, tipoDe, TIPOS_TRABAJADOR, variantesDe } from '../domain/logica'
 import type { Entrega, Material, Motivo, Movimiento, Resguardo, Trabajador, Ubicacion } from '../domain/types'
 import { fechaLocal } from '../lib/util'
 
@@ -60,6 +60,54 @@ export interface AreaReporte {
   porMaterial: Record<string, number>
 }
 
+/** Persona que recibió el mismo material varias veces en el periodo (para dar seguimiento al motivo). */
+export interface SolicitanteRecurrente {
+  area: string
+  materialId: string
+  material: string
+  rpe: string
+  nombre: string
+  tipo: string
+  veces: number // entregas distintas en las que lo recibió
+  piezas: number
+  primera: string
+  ultima: string
+  /** Comentarios capturados al despachar cuando la app avisó de la recurrencia. */
+  notas: string[]
+  entregaIds: string[]
+}
+
+/**
+ * Solicitantes recurrentes por área y material: quienes recibieron un consumible en
+ * `minimo` o más entregas. Ordenado por área, material y de mayor a menor número de veces.
+ */
+export function solicitantesRecurrentes(entregas: Entrega[], materiales: Map<string, Material>, personal: Map<string, Trabajador>, minimo = 2): SolicitanteRecurrente[] {
+  const mapa = new Map<string, SolicitanteRecurrente>()
+  for (const e of entregas) {
+    if (e.estado !== 'registrada') continue
+    const porMaterial = new Map<string, number>()
+    for (const l of e.lineas) if (!l.esResguardo && !l.esPrestamo) porMaterial.set(l.materialId, (porMaterial.get(l.materialId) ?? 0) + l.cantidad)
+    for (const [materialId, cantidad] of porMaterial) {
+      const k = `${e.area}|${materialId}|${e.rpe}`
+      const p = personal.get(e.rpe)
+      const x = mapa.get(k) ?? {
+        area: e.area, materialId, material: materiales.get(materialId)?.nombre ?? materialId, rpe: e.rpe, nombre: e.nombre,
+        tipo: p ? TIPOS_TRABAJADOR[tipoDe(p)] : '', veces: 0, piezas: 0, primera: e.fecha, ultima: e.fecha, notas: [], entregaIds: [],
+      }
+      x.veces++
+      x.piezas += cantidad
+      if (e.fecha < x.primera) x.primera = e.fecha
+      if (e.fecha > x.ultima) x.ultima = e.fecha
+      if (e.recurrencia?.nota && e.recurrencia.materiales.includes(materialId) && !x.notas.includes(e.recurrencia.nota)) x.notas.push(e.recurrencia.nota)
+      x.entregaIds.push(e.id)
+      mapa.set(k, x)
+    }
+  }
+  return [...mapa.values()]
+    .filter((x) => x.veces >= minimo)
+    .sort((a, b) => a.area.localeCompare(b.area) || a.material.localeCompare(b.material) || b.veces - a.veces || b.piezas - a.piezas)
+}
+
 export interface DatosReporte {
   desde: string
   hasta: string
@@ -80,6 +128,8 @@ export interface DatosReporte {
   reabastecer: { nombre: string; existencia: number; minimo: number }[]
   prestamosVencidos: Resguardo[]
   resguardosActivos: { nombre: string; cantidad: number }[]
+  /** Solicitantes recurrentes del periodo (2 o más entregas del mismo material). */
+  recurrentes: SolicitanteRecurrente[]
   hallazgos: string[]
 }
 
@@ -204,6 +254,7 @@ export function calcularReporte(f: Fuentes, desde: string, hasta: string, area =
     reabastecer,
     prestamosVencidos: prestamosVencidos(activos, fechaLocal()),
     resguardosActivos,
+    recurrentes: solicitantesRecurrentes(entregas, mats, f.personal),
     hallazgos: [],
   }
   d.hallazgos = hallazgos(d)
@@ -237,6 +288,12 @@ export function hallazgos(d: DatosReporte): string[] {
       const [motivo, n] = d.motivosCasco[0]
       h.push(`El motivo más frecuente de entrega de casco fue «${motivo}» (${pct(n, d.cascos)}%).`)
     }
+  }
+  const muyRecurrentes = d.recurrentes.filter((r) => r.veces >= 3)
+  if (muyRecurrentes.length) {
+    const top = [...muyRecurrentes].sort((a, b) => b.veces - a.veces)[0]
+    const personas = new Set(muyRecurrentes.map((r) => r.rpe)).size
+    h.push(`${personas} persona${personas > 1 ? 's recibieron' : ' recibió'} el mismo material 3 o más veces; el caso más alto es ${titulo(top.nombre)} (${titulo(top.area)}) con ${top.material.toLowerCase()} en ${top.veces} entregas.`)
   }
   if (d.prestamosVencidos.length) h.push(`Hay ${d.prestamosVencidos.length} préstamo${d.prestamosVencidos.length > 1 ? 's' : ''} de equipo de altura sin devolver a tiempo.`)
   if (d.reabastecer.length) h.push(`${d.reabastecer.length} material${d.reabastecer.length > 1 ? 'es están' : ' está'} por debajo del mínimo y requiere${d.reabastecer.length > 1 ? 'n' : ''} reabastecimiento.`)

@@ -1,4 +1,4 @@
-import type { Kit, Material, Movimiento, Resguardo, Trabajador } from './types'
+import type { Entrega, Kit, Material, Movimiento, Resguardo, Trabajador } from './types'
 import { SIN_TALLA } from './types'
 import { normalizar } from '../lib/util'
 
@@ -98,6 +98,60 @@ export function lecturaEscanerValida(codigo: string): boolean {
 /** RPE a partir de lo escaneado o tecleado: solo letras y números, máximo 5 caracteres. */
 export function rpeDeCodigo(codigo: string): string {
   return codigo.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5)
+}
+
+// ---------------- Tipo de trabajador ----------------
+
+export type TipoNormal = 'permanente' | 'temporal' | 'eventual'
+
+export const TIPOS_TRABAJADOR: Record<TipoNormal, string> = { permanente: 'Permanente', temporal: 'Temporal', eventual: 'Eventual' }
+
+/** Regla de la oficina: los RPE que empiezan con 9 son permanentes; el resto, eventuales (salvo corrección). */
+export function tipoPorRpe(rpe: string): TipoNormal {
+  return rpe.trim().startsWith('9') ? 'permanente' : 'eventual'
+}
+
+/** Tipo del trabajador con el nombre actual ('planta' era el nombre anterior de permanente). */
+export function tipoDe(t: Pick<Trabajador, 'tipo'>): TipoNormal {
+  return t.tipo === 'planta' || t.tipo === 'permanente' ? 'permanente' : t.tipo === 'temporal' ? 'temporal' : 'eventual'
+}
+
+// ---------------- Entregas anteriores y recurrencia ----------------
+
+export interface EntregaPrevia {
+  entrega: Entrega
+  cantidad: number
+}
+
+/** Entregas vigentes en las que esta persona recibió ese material, de la más reciente a la más antigua. */
+export function entregasPrevias(entregas: Entrega[], rpe: string, materialId: string, limite = 50): EntregaPrevia[] {
+  const r: EntregaPrevia[] = []
+  for (let i = entregas.length - 1; i >= 0 && r.length < limite; i--) {
+    const e = entregas[i]
+    if (e.rpe !== rpe || e.estado !== 'registrada') continue
+    const cantidad = e.lineas.filter((l) => l.materialId === materialId).reduce((s, l) => s + l.cantidad, 0)
+    if (cantidad > 0) r.push({ entrega: e, cantidad })
+  }
+  return r.sort((a, b) => (a.entrega.ts < b.entrega.ts ? 1 : -1))
+}
+
+/** Se avisa cuando ya recibió ese material `veces` o más en los últimos `dias`. */
+export const REGLA_RECURRENCIA = { dias: 30, veces: 2 }
+
+export interface MaterialRecurrente {
+  materialId: string
+  previas: EntregaPrevia[] // dentro de la ventana de días
+}
+
+/** Materiales del ticket que la persona ya recibió de forma recurrente. `hoy` en formato YYYY-MM-DD. */
+export function materialesRecurrentes(entregas: Entrega[], rpe: string, materialIds: string[], hoy: string, regla = REGLA_RECURRENCIA): MaterialRecurrente[] {
+  const desde = sumarDias(hoy, -regla.dias)
+  const r: MaterialRecurrente[] = []
+  for (const materialId of new Set(materialIds)) {
+    const previas = entregasPrevias(entregas, rpe, materialId).filter((p) => p.entrega.fecha >= desde)
+    if (previas.length >= regla.veces) r.push({ materialId, previas })
+  }
+  return r
 }
 
 export function buscarTrabajadores(lista: Trabajador[], texto: string, limite = 8): Trabajador[] {

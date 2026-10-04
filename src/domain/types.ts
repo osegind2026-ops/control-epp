@@ -76,7 +76,11 @@ export interface Ubicacion {
   activo: boolean
 }
 
-export type TipoTrabajador = 'planta' | 'eventual'
+/**
+ * permanente: personal de base (su RPE empieza con 9). temporal y eventual: el resto.
+ * 'planta' es el nombre anterior de «permanente» (registros viejos).
+ */
+export type TipoTrabajador = 'permanente' | 'temporal' | 'eventual' | 'planta'
 
 export interface Supervisor {
   nombre: string
@@ -92,6 +96,8 @@ export interface Trabajador {
   casillero: string
   gafete?: string // número impreso en el gafete
   tipo: TipoTrabajador
+  /** Un administrador o encargado de almacén corrigió el tipo a mano: no se recalcula por el RPE. */
+  tipoManual?: boolean
   vigencia?: string // fecha fin de contrato (eventuales)
   tallas: Record<string, string> // materialId → varianteId usada la última vez
   supervisor?: Supervisor // último supervisor registrado en un préstamo
@@ -177,6 +183,15 @@ export interface Entrega {
   estado: 'registrada' | 'anulada'
   anulacion?: Anulacion
   prestamo?: DatosPrestamo
+  /** Se entregó material que la persona ya había recibido varias veces hace poco. */
+  recurrencia?: Recurrencia
+}
+
+export interface Recurrencia {
+  /** Materiales de esta entrega que resultaron recurrentes. */
+  materiales: string[]
+  /** Comentario del despachador sobre el motivo. */
+  nota: string
 }
 
 export type TipoMovimiento = 'INICIAL' | 'ENTRADA' | 'SALIDA' | 'DEVOLUCION' | 'AJUSTE' | 'TRASPASO' | 'ANULACION'

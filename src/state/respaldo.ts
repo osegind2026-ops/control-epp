@@ -1,5 +1,6 @@
 import { db, guardarConfig, TABLAS, type NombreTabla } from '../db/db'
 import { ganaEntrante } from '../domain/fusion'
+import { tipoPorRpe } from '../domain/logica'
 import type { Entrega, Trabajador } from '../domain/types'
 import { csvq, fechaDeTs, fechaLocal, horaLocal } from '../lib/util'
 import * as S from './store'
@@ -164,7 +165,7 @@ function partirCSV(linea: string, sep: string): string[] {
  * Lee un padrón en CSV. Acepta el formato de personal_semilla.csv
  * (rpe,nombre,area,puesto,casillero) o simplemente «RPE,Nombre,Área» sin encabezado.
  */
-export function leerPadronCSV(texto: string, tipo: Trabajador['tipo'] = 'planta'): Trabajador[] {
+export function leerPadronCSV(texto: string): Trabajador[] {
   const lineas = texto.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim())
   if (!lineas.length) return []
   const sep = lineas[0].includes(';') && !lineas[0].includes(',') ? ';' : ','
@@ -189,7 +190,7 @@ export function leerPadronCSV(texto: string, tipo: Trabajador['tipo'] = 'planta'
       area: (iA >= 0 ? c[iA] : '')?.toUpperCase() || 'SIN ÁREA',
       puesto: (iP >= 0 ? c[iP] : '') || 'OPERADOR / TÉCNICO',
       casillero: (iC >= 0 ? c[iC] : '') || '',
-      tipo,
+      tipo: tipoPorRpe(rpe),
       tallas: {},
       activo: true,
       alta: ahora,
@@ -207,7 +208,8 @@ export async function importarPadron(lista: Trabajador[]): Promise<{ nuevos: num
     const previo = actuales.get(t.rpe)
     if (previo) {
       actualizados++
-      return { ...previo, nombre: t.nombre, area: t.area, puesto: t.puesto || previo.puesto, casillero: t.casillero || previo.casillero, actualizado: t.actualizado }
+      // El tipo corregido a mano se respeta; si no, se recalcula por el RPE
+      return { ...previo, nombre: t.nombre, area: t.area, puesto: t.puesto || previo.puesto, casillero: t.casillero || previo.casillero, tipo: previo.tipoManual ? previo.tipo : t.tipo, actualizado: t.actualizado }
     }
     nuevos++
     return t

@@ -633,3 +633,13 @@ details > summary { list-style: revert; }
 .pin-temporal { font: 700 44px/1 var(--display); letter-spacing: 0.3em; text-align: center; padding: 18px; border-radius: 10px; background: var(--accent-soft); color: var(--ink); }
 .pasos { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 .btn.disabled { opacity: 0.5; pointer-events: none; }
+
+/* ---------- Entregas anteriores y recurrencia ---------- */
+.enlace { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; text-align: left; }
+.anteriores { display: grid; gap: 8px; padding: 10px 12px; }
+.anteriores-fila { display: grid; gap: 4px; }
+.anteriores-fila .badge { margin-left: 6px; }
+.recurrencia { display: block; }
+.recurrencia svg { width: 16px; height: 16px; vertical-align: -3px; }
+.recurrencia .input { min-height: 40px; background: var(--surface); }
+.rp-tabla.rp-izq td, .rp-tabla.rp-izq th { text-align: left; } .rp-tabla.rp-izq td.rp-total, .rp-tabla.rp-izq th.rp-guinda { text-align: center; }

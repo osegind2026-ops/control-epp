@@ -69,3 +69,43 @@ describe('intercambio por archivo', () => {
     expect(detectarFoliosRepetidos([{ id: 'E-mia', folio: 'CFE-T1-0001' }], [choque])).toEqual(['CFE-T1-0001'])
   })
 })
+
+describe('tipo de trabajador y recurrencia', () => {
+  it('asigna el tipo por el RPE y solo almacén o administrador lo corrige', async () => {
+    const { guardarTrabajador, registrarEntrega } = await import('./servicios')
+    const { tipoDe, materialesRecurrentes, entregasPrevias } = await import('../domain/logica')
+    const { solicitantesRecurrentes } = await import('../reportes/datos')
+    const base = { area: 'TALLER', puesto: 'OPERADOR', casillero: '', activo: true }
+    const perm = await guardarTrabajador({ ...base, rpe: '9zz01', nombre: 'Permanente Prueba' })
+    const even = await guardarTrabajador({ ...base, rpe: 'zz902', nombre: 'Eventual Prueba' })
+    expect(tipoDe(perm)).toBe('permanente')
+    expect(tipoDe(even)).toBe('eventual')
+    const temporal = await guardarTrabajador({ ...even, tipo: 'temporal' })
+    expect(temporal.tipo).toBe('temporal')
+    expect(temporal.tipoManual).toBe(true)
+    const admin = S.sesion.value
+    S.sesion.value = { ...admin!, rol: 'despachador', esAdmin: false }
+    await expect(guardarTrabajador({ ...temporal, tipo: 'permanente' })).rejects.toThrow(/almacén/)
+    // Editar otros datos sin tocar el tipo sí se permite
+    expect((await guardarTrabajador({ ...temporal, puesto: 'AYUDANTE' })).tipo).toBe('temporal')
+    S.sesion.value = admin
+
+    // Recurrencia: a la tercera entrega del mismo consumible en 30 días se marca y guarda el comentario
+    await db.movimientos.add({ id: 'M-ini', ts: new Date().toISOString(), tipo: 'INICIAL', materialId: 'tapones', varianteId: '', ubicacionId: 'ubi_despacho', cantidad: 50, ref: '', motivo: '', nota: '', usuarioId: 'x', usuarioNombre: 'x', equipo: 'T1' })
+    await S.recargar('movimientos')
+    const linea = [{ materialId: 'tapones', varianteId: '', cantidad: 1 }]
+    const e1 = (await registrarEntrega(even, linea, '')).entrega
+    const e2 = (await registrarEntrega(even, linea, '')).entrega
+    expect(e1.recurrencia ?? e2.recurrencia).toBeUndefined()
+    expect(materialesRecurrentes(S.entregas.value, even.rpe, ['tapones'], e2.fecha)[0].previas).toHaveLength(2)
+    const e3 = (await registrarEntrega(even, linea, '', undefined, 'Se le rompieron')).entrega
+    expect(e3.recurrencia).toEqual({ materiales: ['tapones'], nota: 'Se le rompieron' })
+    expect(entregasPrevias(S.entregas.value, even.rpe, 'tapones').map((p) => p.entrega.id)).toContain(e1.id)
+
+    const rec = solicitantesRecurrentes(S.entregas.value, S.materialesPorId.value, S.personal.value)
+    const fila = rec.find((r) => r.rpe === even.rpe && r.materialId === 'tapones')!
+    expect(fila.veces).toBe(3)
+    expect(fila.tipo).toBe('Temporal')
+    expect(fila.notas).toEqual(['Se le rompieron'])
+  })
+})

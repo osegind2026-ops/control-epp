@@ -4,7 +4,9 @@ import { entregarArchivo, fechaLocal } from '../lib/util'
 import { calcularReporte, type DatosReporte, type Fuentes } from '../reportes/datos'
 import { cargarPlantilla, type Plantilla } from '../reportes/plantilla'
 import { ReporteImprimible } from '../reportes/ReporteImprimible'
+import { tipoDe } from '../domain/logica'
 import * as S from '../state/store'
+import { Recurrentes } from './Recurrentes'
 import { avisar, FotoMaterial, intentar, Vacio } from './comunes'
 import { Icono } from './iconos'
 import { listaAreas } from './Trabajador'
@@ -142,7 +144,7 @@ export function PantallaReportes() {
       u.piezas += pz
       porUsuario.set(e.usuarioNombre, u)
     }
-    const eventuales = new Set(ent.filter((e) => S.personal.value.get(e.rpe)?.tipo === 'eventual').map((e) => e.rpe)).size
+    const eventuales = new Set(ent.filter((e) => { const p = S.personal.value.get(e.rpe); return p && tipoDe(p) !== 'permanente' }).map((e) => e.rpe)).size
     return {
       ent,
       piezas,
@@ -218,7 +220,7 @@ export function PantallaReportes() {
           <b>{d.piezas}</b>
         </div>
         <div class="kpi">
-          <span>Eventuales atendidos</span>
+          <span>Eventuales y temporales</span>
           <b>{d.eventuales}</b>
         </div>
         <div class="kpi">
@@ -298,6 +300,8 @@ export function PantallaReportes() {
               </tbody>
             </table>
           </div>
+
+          <Recurrentes entregas={d.ent} />
 
           <div class="row" style={{ alignItems: 'start', gap: '16px' }}>
             <div class="stack grow" style={{ minWidth: '300px' }}>
