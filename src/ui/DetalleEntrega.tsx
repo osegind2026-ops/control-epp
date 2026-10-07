@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks'
 import type { Entrega } from '../domain/types'
-import { fechaLocal } from '../lib/util'
+import { fechaLocal, horaLocal } from '../lib/util'
 import { anularEntrega } from '../state/servicios'
 import * as S from '../state/store'
 import { avisar, FotoMaterial, intentar, Modal, SelectorMotivo, Talla } from './comunes'
@@ -51,6 +51,7 @@ export function DetalleEntrega({ e, onCerrar }: { e: Entrega; onCerrar: () => vo
     >
       <div class="row">
         {e.estado === 'anulada' ? <span class="badge bad">Anulada</span> : <span class="badge ok">Registrada</span>}
+        {e.capturada && <span class="badge warn">Captura posterior</span>}
         <span class="muted small">
           {e.fecha} {e.hora} · despachó {e.usuarioNombre} · equipo {e.equipo} · {ubi}
         </span>
@@ -100,6 +101,11 @@ export function DetalleEntrega({ e, onCerrar }: { e: Entrega; onCerrar: () => vo
       {e.prestamo && (
         <p class="small">
           Préstamo · devolver a más tardar el <strong>{e.prestamo.vence}</strong> · supervisor {e.prestamo.supervisor.nombre} (RPE {e.prestamo.supervisor.rpe}, ext. {e.prestamo.supervisor.extension})
+        </p>
+      )}
+      {e.capturada && (
+        <p class="small muted">
+          Entrega del {e.fecha}, capturada después: el {fechaLocal(new Date(e.capturada))} a las {horaLocal(new Date(e.capturada))} por {e.usuarioNombre}.
         </p>
       )}
       {e.observaciones && <p class="small">Observaciones: {e.observaciones}</p>}

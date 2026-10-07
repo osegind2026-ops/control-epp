@@ -148,7 +148,8 @@ export function materialesRecurrentes(entregas: Entrega[], rpe: string, material
   const desde = sumarDias(hoy, -regla.dias)
   const r: MaterialRecurrente[] = []
   for (const materialId of new Set(materialIds)) {
-    const previas = entregasPrevias(entregas, rpe, materialId).filter((p) => p.entrega.fecha >= desde)
+    // Solo cuentan las entregas de la ventana anterior a ese día (importa al capturar días pasados)
+    const previas = entregasPrevias(entregas, rpe, materialId).filter((p) => p.entrega.fecha >= desde && p.entrega.fecha <= hoy)
     if (previas.length >= regla.veces) r.push({ materialId, previas })
   }
   return r

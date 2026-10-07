@@ -128,7 +128,14 @@ export function PantallaHistorial() {
                   </td>
                   <td class="small">{e.lineas.map((l) => `${S.nombreMaterial(l.materialId, l.varianteId)} (${l.cantidad})`).join(', ')}</td>
                   <td class="small">{e.usuarioNombre}</td>
-                  <td>{e.estado === 'anulada' ? <span class="badge bad">Anulada</span> : <span class="badge ok">OK</span>}</td>
+                  <td>
+                    {e.estado === 'anulada' ? <span class="badge bad">Anulada</span> : <span class="badge ok">OK</span>}
+                    {e.capturada && (
+                      <span class="badge warn" title={`Capturada después, el ${fechaLocal(new Date(e.capturada))}`}>
+                        Captura posterior
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

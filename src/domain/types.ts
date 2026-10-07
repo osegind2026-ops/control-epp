@@ -185,6 +185,11 @@ export interface Entrega {
   prestamo?: DatosPrestamo
   /** Se entregó material que la persona ya había recibido varias veces hace poco. */
   recurrencia?: Recurrencia
+  /**
+   * Solo en capturas posteriores (entrega de un día anterior registrada después para
+   * cuadrar el inventario): momento real en que se capturó. `fecha` y `ts` llevan el día de la entrega.
+   */
+  capturada?: string
 }
 
 export interface Recurrencia {

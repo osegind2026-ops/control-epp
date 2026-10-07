@@ -109,3 +109,38 @@ describe('tipo de trabajador y recurrencia', () => {
     expect(fila.notas).toEqual(['Se le rompieron'])
   })
 })
+
+describe('captura de entregas de días anteriores', () => {
+  it('solo almacén o administrador; fecha, kardex y recurrencia quedan en el día de la entrega', async () => {
+    const { guardarTrabajador, registrarEntrega } = await import('./servicios')
+    const { fechaLocal, fechaDeTs } = await import('../lib/util')
+    const { sumarDias } = await import('../domain/logica')
+    const t = await guardarTrabajador({ rpe: 'zz955', nombre: 'Captura Posterior', area: 'TALLER', puesto: 'OPERADOR', casillero: '', activo: true })
+    const linea = [{ materialId: 'tapones', varianteId: '', cantidad: 2 }]
+    const hoy = fechaLocal()
+    const hace3 = sumarDias(hoy, -3)
+
+    const admin = S.sesion.value
+    S.sesion.value = { ...admin!, rol: 'despachador', esAdmin: false }
+    await expect(registrarEntrega(t, linea, '', undefined, '', hace3)).rejects.toThrow(/almacén/)
+    // La fecha de hoy la puede usar cualquiera (es el caso normal)
+    expect((await registrarEntrega(t, linea, '', undefined, '', hoy)).entrega.capturada).toBeUndefined()
+    S.sesion.value = { ...admin!, rol: 'almacen', esAdmin: false }
+    await expect(registrarEntrega(t, linea, '', undefined, '', sumarDias(hoy, 1))).rejects.toThrow(/posterior a hoy/)
+    await expect(registrarEntrega(t, linea, '', undefined, '', '2026-13-45')).rejects.toThrow(/no es válida/)
+
+    const antes = S.movimientos.value.length
+    const { entrega } = await registrarEntrega(t, linea, 'Registro atrasado', undefined, '', hace3)
+    expect(entrega.fecha).toBe(hace3)
+    expect(fechaDeTs(entrega.ts)).toBe(hace3)
+    expect(fechaDeTs(entrega.capturada!)).toBe(hoy)
+    const movs = S.movimientos.value.filter((m) => m.grupo === entrega.id)
+    expect(S.movimientos.value.length).toBe(antes + 1)
+    expect(movs.every((m) => fechaDeTs(m.ts) === hace3 && m.cantidad === -2)).toBe(true)
+    // La ficha del trabajador se marca como actualizada hoy (para que gane al sincronizar)
+    expect(fechaDeTs(S.personal.value.get('ZZ955')!.actualizado)).toBe(hoy)
+    // La entrega de hoy no cuenta como «anterior» de una captura con fecha pasada
+    expect(entrega.recurrencia).toBeUndefined()
+    S.sesion.value = admin
+  })
+})

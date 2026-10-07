@@ -656,3 +656,4 @@ details > summary { list-style: revert; }
 .historial-fila.repetida { background: var(--warn-soft); border-color: var(--warn); }
 .historial-fecha { display: grid; flex: none; width: 92px; line-height: 1.2; }
 .mat-repetido { font-weight: 700; color: var(--warn); }
+.fecha-entrega { display: grid; gap: 6px; } .fecha-entrega .input { min-height: 40px; background: var(--surface); }

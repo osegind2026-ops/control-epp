@@ -8,6 +8,7 @@ import { deshacerEntrega, registrarEntrega, type LineaTicket } from '../state/se
 import { pantalla } from '../state/navegacion'
 import * as S from '../state/store'
 import { avisar, FotoMaterial, intentar, Modal, Talla } from './comunes'
+import { puedeInventario } from '../state/permisos'
 import { DetalleEntrega } from './DetalleEntrega'
 import { Icono } from './iconos'
 import { BuscadorTrabajador, FormTrabajador, TarjetaTrabajador } from './Trabajador'
@@ -20,6 +21,60 @@ const ticket = signal<Linea[]>([])
 const trabajadorSel = signal<Trabajador | null>(null)
 const observaciones = signal('')
 const notaRecurrencia = signal('')
+/** Día de la entrega cuando se capturan registros anteriores ('' = hoy). Solo almacén o administrador. */
+const fechaCaptura = signal('')
+const diaEntrega = () => fechaCaptura.value || fechaLocal()
+
+const fechaLarga = (fecha: string) => new Date(fecha + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+
+/**
+ * Fecha de la entrega. Por defecto es hoy; un administrador o encargado de almacén puede
+ * indicar un día anterior para capturar registros atrasados y cuadrar el inventario.
+ * La fecha se conserva entre entregas (para capturar varias del mismo día) hasta volver a hoy.
+ */
+function FechaEntrega() {
+  const [abierto, setAbierto] = useState(false)
+  if (!puedeInventario()) return null
+  const hoy = fechaLocal()
+  const atrasada = !!fechaCaptura.value && fechaCaptura.value !== hoy
+  if (!atrasada && !abierto) {
+    return (
+      <button class="btn ghost sm" style={{ justifySelf: 'start' }} onClick={() => setAbierto(true)}>
+        <Icono n="historial" /> Fecha de la entrega: hoy · cambiar
+      </button>
+    )
+  }
+  return (
+    <div class={`aviso ${atrasada ? 'warn' : 'info'} fecha-entrega`}>
+      <label class="campo" style={{ width: '100%' }}>
+        Fecha en que se entregó
+        <input
+          class="input"
+          id="fecha-entrega"
+          type="date"
+          max={hoy}
+          value={fechaCaptura.value || hoy}
+          onInput={(e) => {
+            const v = (e.target as HTMLInputElement).value
+            fechaCaptura.value = !v || v >= hoy ? '' : v
+          }}
+        />
+      </label>
+      <div class="spread small" style={{ width: '100%' }}>
+        <span>{atrasada ? `Se registrará con fecha del ${fechaLarga(fechaCaptura.value)}.` : 'Elija el día real de la entrega (no puede ser posterior a hoy).'}</span>
+        <button
+          class="btn ghost sm"
+          onClick={() => {
+            fechaCaptura.value = ''
+            setAbierto(false)
+          }}
+        >
+          {atrasada ? 'Volver a hoy' : 'Cerrar'}
+        </button>
+      </div>
+    </div>
+  )
+}
 const datosPrestamo = signal<DatosPrestamo>({ supervisor: { nombre: '', rpe: '', extension: '' }, vence: '' })
 
 const fechaCorta = (fecha: string) => {
@@ -32,7 +87,7 @@ const fechaCorta = (fecha: string) => {
 function recurrentesDelTicket(t: Trabajador | null): MaterialRecurrente[] {
   if (!t) return []
   const ids = ticket.value.filter((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'consumible').map((l) => l.materialId)
-  return materialesRecurrentes(S.entregas.value, t.rpe, ids, fechaLocal())
+  return materialesRecurrentes(S.entregas.value, t.rpe, ids, diaEntrega())
 }
 
 let ultimoAvisoRecurrencia = ''
@@ -169,7 +224,7 @@ function lineasPrestamo(): Linea[] {
 /** Fecha límite sugerida: hoy + el plazo más corto de los equipos prestados. */
 function venceSugerido(): string {
   const plazos = lineasPrestamo().map((l) => S.materialesPorId.value.get(l.materialId)?.plazoDias ?? 1)
-  return sumarDias(fechaLocal(), plazos.length ? Math.min(...plazos) : 1)
+  return sumarDias(diaEntrega(), plazos.length ? Math.min(...plazos) : 1)
 }
 
 const claveLinea = (materialId: string, varianteId: string) => `${materialId}|${varianteId}`
@@ -440,7 +495,7 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
     if (bloqueo || !t || enviando) return
     if (sinExistencia && !confirmarFalta) return setConfirmarFalta(true)
     setEnviando(true)
-    const r = await intentar(() => registrarEntrega(t, lineas, observaciones.value, hayPrestamo ? datosPrestamo.value : undefined, notaRecurrencia.value))
+    const r = await intentar(() => registrarEntrega(t, lineas, observaciones.value, hayPrestamo ? datosPrestamo.value : undefined, notaRecurrencia.value, fechaCaptura.value))
     setEnviando(false)
     if (!r) return
     const { entrega, deshacer } = r
@@ -456,7 +511,7 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
     datosPrestamo.value = { supervisor: { nombre: '', rpe: '', extension: '' }, vence: '' }
     setNota(false)
     onEntregado()
-    avisar(`✓ ${entrega.folio} · ${entrega.nombre.split(' ').slice(0, 2).join(' ')} · ${piezas} pieza${piezas > 1 ? 's' : ''}`, {
+    avisar(`✓ ${entrega.folio} · ${entrega.nombre.split(' ').slice(0, 2).join(' ')} · ${piezas} pieza${piezas > 1 ? 's' : ''}${entrega.capturada ? ` · fecha ${fechaCorta(entrega.fecha)}` : ''}`, {
       ms: 12000,
       accion: {
         texto: 'Deshacer',
@@ -493,6 +548,7 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
         )}
       </div>
       <div class="ticket-pie">
+        <FechaEntrega />
         {hayPrestamo && <PanelPrestamo />}
         <AvisoRecurrencia t={t} />
         {nota || observaciones.value ? (
@@ -515,7 +571,7 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
           </strong>
         </div>
         <button class={`btn block entregar ${confirmarFalta ? 'warn' : 'primary'}`} disabled={!!bloqueo || enviando} onClick={entregar}>
-          {confirmarFalta ? `Entregar aunque falte existencia (${sinExistencia})` : 'ENTREGAR'}
+          {confirmarFalta ? `Entregar aunque falte existencia (${sinExistencia})` : fechaCaptura.value ? `REGISTRAR · ${fechaCorta(fechaCaptura.value).toUpperCase()}` : 'ENTREGAR'}
         </button>
       </div>
     </div>
@@ -525,6 +581,8 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
 // ---------- Pantalla ----------
 
 export function PantallaDespacho() {
+  // La captura de días anteriores es solo para almacén o administrador
+  if (fechaCaptura.value && (!puedeInventario() || fechaCaptura.value >= fechaLocal())) fechaCaptura.value = ''
   const [cat, setCat] = useState('top')
   const [buscar, setBuscar] = useState('')
   const [tallaDe, setTallaDe] = useState<Material | null>(null)
@@ -622,6 +680,17 @@ export function PantallaDespacho() {
               {vencidos.length > 3 && '…'} Toque para ver.
             </span>
           </button>
+        )}
+        {fechaCaptura.value && (
+          <div class="aviso warn">
+            <Icono n="historial" />
+            <span class="grow">
+              <strong>Captura de un día anterior:</strong> las entregas se registran con fecha del {fechaLarga(fechaCaptura.value)}.
+            </span>
+            <button class="btn sm" onClick={() => (fechaCaptura.value = '')}>
+              Volver a hoy
+            </button>
+          </div>
         )}
         <div class="card" style={{ padding: '12px' }}>
           {t ? (

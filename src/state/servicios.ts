@@ -321,6 +321,11 @@ export async function registrarEntrega(
   prestamo?: DatosPrestamo,
   /** Comentario cuando se entrega algo que la persona recibe de forma recurrente. */
   notaRecurrencia = '',
+  /**
+   * Día real de la entrega (YYYY-MM-DD) cuando se captura después para cuadrar el
+   * inventario. Solo administrador o encargado de almacén; vacío = hoy.
+   */
+  fechaEntrega = '',
 ): Promise<{ entrega: Entrega; deshacer: Deshacer }> {
   const { sesion, equipo } = actor()
   if (!lineas.length) throw new ErrorNegocio('Agregue al menos un material.')
@@ -343,7 +348,7 @@ export async function registrarEntrega(
     }
     if (m.tipo === 'prestamo') {
       if (activosTrabajador.some((r) => r.materialId === m.id)) throw new ErrorNegocio(`${trabajador.nombre} no ha devuelto el ${m.nombre} que tiene en préstamo.`)
-      validarPrestamo(prestamo)
+      validarPrestamo(prestamo, fechaEntrega || fechaLocal())
     }
     return {
       materialId: m.id,
@@ -356,7 +361,16 @@ export async function registrarEntrega(
   })
   const hayPrestamo = lineasEntrega.some((l) => l.esPrestamo)
 
-  const ahora = new Date()
+  const captura = new Date()
+  let ahora = captura
+  const posterior = !!fechaEntrega && fechaEntrega !== fechaLocal(captura)
+  if (posterior) {
+    if (sesion.rol !== 'admin' && sesion.rol !== 'almacen') throw new ErrorNegocio('Solo un administrador o el encargado de almacén puede registrar entregas de días anteriores.')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaEntrega) || isNaN(new Date(fechaEntrega + 'T12:00:00').getTime())) throw new ErrorNegocio('La fecha de la entrega no es válida.')
+    if (fechaEntrega > fechaLocal(captura)) throw new ErrorNegocio('La fecha de la entrega no puede ser posterior a hoy.')
+    // Mismo día de la entrega, con la hora de captura (conserva el orden entre varias capturas)
+    ahora = new Date(`${fechaEntrega}T${String(captura.getHours()).padStart(2, '0')}:${String(captura.getMinutes()).padStart(2, '0')}:${String(captura.getSeconds()).padStart(2, '0')}`)
+  }
   const ubicacionId = ubicacionDespachoId()
   const folioNum = siguienteFolio(equipo.codigo, S.folios.value[equipo.codigo] ?? 0, S.entregas.value.map((e) => e.folio))
   const folio = formatoFolio(equipo.codigo, folioNum)
@@ -381,6 +395,7 @@ export async function registrarEntrega(
     estado: 'registrada',
     prestamo: hayPrestamo ? limpiarPrestamo(prestamo!) : undefined,
   }
+  if (posterior) entrega.capturada = captura.toISOString()
   // Consumibles que esta persona ya recibió varias veces en los últimos días
   const consumibles = lineasEntrega.filter((l) => !l.esResguardo && !l.esPrestamo).map((l) => l.materialId)
   const recurrentes = materialesRecurrentes(S.entregas.value, trabajador.rpe, consumibles, entrega.fecha)
@@ -482,7 +497,9 @@ export async function registrarEntrega(
   const ficha = S.personal.value.get(trabajador.rpe) ?? trabajador
   const tallas = { ...ficha.tallas }
   for (const l of lineasEntrega) if (l.varianteId) tallas[l.materialId] = l.varianteId
-  const trabajadorNuevo: Trabajador = { ...ficha, tallas, supervisor: entrega.prestamo?.supervisor ?? ficha.supervisor, actualizado: entrega.ts }
+  const trabajadorNuevo: Trabajador = { ...ficha, tallas, supervisor: entrega.prestamo?.supervisor ?? ficha.supervisor, actualizado: captura.toISOString() }
+  // El kardex lleva el día de la entrega, para que las existencias por fecha cuadren
+  if (posterior) for (const m of movs) m.ts = entrega.ts
   const nuevosFolios = { ...S.folios.value, [equipo.codigo]: folioNum }
 
   await db.transaction('rw', [db.entregas, db.movimientos, db.resguardos, db.personal, db.config], async () => {
@@ -505,12 +522,12 @@ function limpiarPrestamo(p: DatosPrestamo): DatosPrestamo {
   }
 }
 
-function validarPrestamo(p?: DatosPrestamo): void {
+function validarPrestamo(p?: DatosPrestamo, diaEntrega = fechaLocal()): void {
   if (!p) throw new ErrorNegocio('Faltan los datos del préstamo (supervisor y fecha de devolución).')
   if (!p.supervisor.nombre.trim() || !p.supervisor.rpe.trim() || !p.supervisor.extension.trim()) {
     throw new ErrorNegocio('Para prestar el equipo capture nombre, RPE y extensión del supervisor.')
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(p.vence) || p.vence < fechaLocal()) throw new ErrorNegocio('La fecha de devolución debe ser hoy o posterior.')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(p.vence) || p.vence < diaEntrega) throw new ErrorNegocio('La fecha de devolución no puede ser anterior al día de la entrega.')
 }
 
 /** Revierte una entrega recién registrada (botón «Deshacer»). */
