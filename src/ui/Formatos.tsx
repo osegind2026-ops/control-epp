@@ -9,7 +9,7 @@ type TipoFormato = 'contaminado' | 'registro_epp' | 'resguardo_economico' | 'pdf
 
 const ANIO_ACTUAL = new Date().getFullYear()
 
-/** Genera la clave de configuración para el contador de folios. */
+/** Genera la clave de configuración para el contador de folios de EPP contaminado. */
 const claveFolioContaminado = (u: Unidad) => `folio_contaminado_${u}`
 
 /** Formato oficial de folio de EPP contaminado. */
@@ -42,6 +42,7 @@ function FormatoContaminadoIndividual({ folioTexto }: { folioTexto: string }) {
       </div>
 
       <div class="fmt-c-grid-datos">
+        {/* Fila 1: Nombre a la izquierda, RPE al centro, Fecha a la derecha */}
         <div class="fmt-c-celda fmt-c-nom">
           <span class="fmt-lbl">NOMBRE:</span>
           <span class="fmt-linea" />
@@ -55,12 +56,13 @@ function FormatoContaminadoIndividual({ folioTexto }: { folioTexto: string }) {
           <span class="fmt-txt-fijo">____ / ____ / ________</span>
         </div>
 
-        <div class="fmt-c-celda fmt-c-area">
-          <span class="fmt-lbl">ÁREA:</span>
-          <span class="fmt-linea" />
-        </div>
+        {/* Fila 2: Supervisor a la izquierda (bajo Nombre), Área al centro (bajo RPE), Hora a la derecha */}
         <div class="fmt-c-celda fmt-c-sup">
           <span class="fmt-lbl">SUPERVISOR:</span>
+          <span class="fmt-linea" />
+        </div>
+        <div class="fmt-c-celda fmt-c-area">
+          <span class="fmt-lbl">ÁREA:</span>
           <span class="fmt-linea" />
         </div>
         <div class="fmt-c-celda fmt-c-hora">
@@ -78,32 +80,29 @@ function FormatoContaminadoIndividual({ folioTexto }: { folioTexto: string }) {
 
       <div class="fmt-c-epp-bloque">
         <div class="fmt-c-epp-barra">TIPO DE EQUIPO DE PROTECCIÓN PERSONAL</div>
-        <div class="fmt-c-epp-tabla">
-          <div class="fmt-c-col">
-            <span class="fmt-c-col-h">CASCO</span>
-            <span class="fmt-c-chk" />
-          </div>
-          <div class="fmt-c-col">
-            <span class="fmt-c-col-h">LENTES</span>
-            <span class="fmt-c-chk" />
-          </div>
-          <div class="fmt-c-col">
-            <span class="fmt-c-col-h">TAPONES</span>
-            <span class="fmt-c-chk" />
-          </div>
-          <div class="fmt-c-col">
-            <span class="fmt-c-col-h">GUANTE<br />CARNAZA</span>
-            <span class="fmt-c-chk" />
-          </div>
-          <div class="fmt-c-col">
-            <span class="fmt-c-col-h">GUANTE<br />HYFLEX</span>
-            <span class="fmt-c-chk" />
-          </div>
-          <div class="fmt-c-col">
-            <span class="fmt-c-col-h">FAJA</span>
-            <span class="fmt-c-chk" />
-          </div>
-        </div>
+        {/* Tabla con encabezados y casillas perfectamente alineadas en fila */}
+        <table class="fmt-c-epp-tbl">
+          <thead>
+            <tr>
+              <th style={{ width: '16.66%' }}>CASCO</th>
+              <th style={{ width: '16.66%' }}>LENTES</th>
+              <th style={{ width: '16.66%' }}>TAPONES</th>
+              <th style={{ width: '16.66%' }}>GUANTE<br />CARNAZA</th>
+              <th style={{ width: '16.66%' }}>GUANTE<br />HYFLEX</th>
+              <th style={{ width: '16.7%' }}>FAJA</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="td-chk">&nbsp;</td>
+              <td class="td-chk">&nbsp;</td>
+              <td class="td-chk">&nbsp;</td>
+              <td class="td-chk">&nbsp;</td>
+              <td class="td-chk">&nbsp;</td>
+              <td class="td-chk">&nbsp;</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div class="fmt-c-pie-firma">
@@ -121,82 +120,83 @@ function FormatoContaminadoIndividual({ folioTexto }: { folioTexto: string }) {
 }
 
 // =========================================================================
-// 2. FORMATO REGISTRO DE ENTREGA DE EPP 2026 (Firmas - Hoja Completa)
+// 2. FORMATO REGISTRO DE ENTREGA DE EPP 2026 (Firmas - Horizontal Landscape)
 // =========================================================================
-function FormatoRegistroEntrega({ paginaNum, anio = ANIO_ACTUAL }: { paginaNum: number; anio?: number }) {
-  const renglones = Array.from({ length: 18 }, (_, i) => i)
+function FormatoRegistroEntregaHorizontal({ paginaNum, anio = ANIO_ACTUAL }: { paginaNum: number; anio?: number }) {
+  const renglones = Array.from({ length: 15 }, (_, i) => i)
   return (
-    <div class="fmt-reg-pagina">
-      <div class="fmt-reg-cab">
-        <div class="fmt-reg-logo">
+    <div class="fmt-reg-h-pagina">
+      <div class="fmt-reg-h-cab">
+        <div class="fmt-reg-h-logo">
           <img src="plantilla/logo_encabezado.png" alt="CFE" />
-          <small>Comisión Federal de Electricidad</small>
+          <span class="fmt-reg-h-cfe-txt">Comisión Federal de Electricidad</span>
         </div>
-        <div class="fmt-reg-tit">
+        <div class="fmt-reg-h-tit">
           <h1>REGISTRO DE ENTREGA DE EPP {anio}</h1>
         </div>
-        <div class="fmt-reg-sub">
+        <div class="fmt-reg-h-sub">
           <span>Central Nucleoeléctrica Laguna Verde</span>
           <span>Subgerencia de Seguridad Nuclear</span>
           <span>Oficina de Seguridad Industrial</span>
-          {paginaNum > 0 && <span class="fmt-reg-folio">Hoja No. {paginaNum}</span>}
+          <span class="fmt-reg-h-pagina-num">PÁGINA No. {String(paginaNum).padStart(3, '0')}</span>
         </div>
       </div>
 
-      <table class="fmt-reg-tabla">
+      <table class="fmt-reg-h-tabla">
         <thead>
           <tr>
-            <th rowspan={2} class="col-nom">NOMBRE</th>
-            <th rowspan={2} class="col-rpe">RPE</th>
-            <th rowspan={2} class="col-firma">FIRMA</th>
-            <th rowspan={2} class="col-area">ÁREA</th>
-            <th rowspan={2} class="col-vert">L<br/>E<br/>N<br/>T<br/>E<br/>S</th>
-            <th colspan={3} class="col-subgrupo">GUANTES</th>
-            <th rowspan={2} class="col-vert">T<br/>A<br/>P<br/>O<br/>N<br/>E<br/>S</th>
-            <th colspan={4} class="col-subgrupo">MASCARILLA</th>
-            <th rowspan={2} class="col-fecha">FECHA<br/><small>(DD/MM/AAAA)</small></th>
-            <th rowspan={2} class="col-hora">HORA</th>
-            <th rowspan={2} class="col-obs">OBSERVACIONES</th>
+            <th rowspan={2} class="col-h-nom">NOMBRE</th>
+            <th rowspan={2} class="col-h-rpe">RPE</th>
+            <th rowspan={2} class="col-h-firma">FIRMA</th>
+            <th rowspan={2} class="col-h-area">ÁREA</th>
+            <th rowspan={2} class="col-h-rotado">LENTES</th>
+            <th colspan={3} class="col-h-grupo">GUANTES</th>
+            <th rowspan={2} class="col-h-rotado">TAPONES</th>
+            <th colspan={4} class="col-h-grupo">MASCARILLA</th>
+            <th rowspan={2} class="col-h-fecha">FECHA<br/><small>(DD/MM/AAA)</small></th>
+            <th rowspan={2} class="col-h-hora">HORA</th>
+            <th rowspan={2} class="col-h-obs">OBSERVACIONES</th>
           </tr>
           <tr>
-            <th class="col-vert sub">C<br/>A<br/>R<br/>N<br/>A<br/>Z<br/>A</th>
-            <th class="col-vert sub">H<br/>Y<br/>F<br/>L<br/>E<br/>X</th>
-            <th class="col-vert sub">N<br/>I<br/>T<br/>R<br/>I<br/>L<br/>O</th>
-            <th class="col-vert sub">A<br/>Z<br/>U<br/>L</th>
-            <th class="col-vert sub">N<br/>E<br/>G<br/>R<br/>A</th>
-            <th class="col-vert sub">G<br/>R<br/>I<br/>S</th>
-            <th class="col-vert sub">P<br/>O<br/>L<br/>V<br/>O</th>
+            <th class="col-h-rotado sub">CARNAZA</th>
+            <th class="col-h-rotado sub">HYFLEX</th>
+            <th class="col-h-rotado sub">NITRILO</th>
+            <th class="col-h-rotado sub">AZUL</th>
+            <th class="col-h-rotado sub">NEGRA</th>
+            <th class="col-h-rotado sub">GRIS</th>
+            <th class="col-h-rotado sub">POLVO</th>
           </tr>
         </thead>
         <tbody>
           {renglones.map((i) => (
             <tr key={i}>
-              <td class="col-nom">&nbsp;</td>
-              <td class="col-rpe">&nbsp;</td>
-              <td class="col-firma">&nbsp;</td>
-              <td class="col-area">&nbsp;</td>
-              <td class="col-chk">&nbsp;</td>
-              <td class="col-chk">&nbsp;</td>
-              <td class="col-chk">&nbsp;</td>
-              <td class="col-chk">&nbsp;</td>
-              <td class="col-chk">&nbsp;</td>
-              <td class="col-chk">&nbsp;</td>
-              <td class="col-chk">&nbsp;</td>
-              <td class="col-chk">&nbsp;</td>
-              <td class="col-chk">&nbsp;</td>
-              <td class="col-fecha">&nbsp;</td>
-              <td class="col-hora">&nbsp;</td>
-              <td class="col-obs">&nbsp;</td>
+              <td class="col-h-nom">&nbsp;</td>
+              <td class="col-h-rpe">&nbsp;</td>
+              <td class="col-h-firma">&nbsp;</td>
+              <td class="col-h-area">&nbsp;</td>
+              <td class="col-h-chk">&nbsp;</td>
+              <td class="col-h-chk">&nbsp;</td>
+              <td class="col-h-chk">&nbsp;</td>
+              <td class="col-h-chk">&nbsp;</td>
+              <td class="col-h-chk">&nbsp;</td>
+              <td class="col-h-chk">&nbsp;</td>
+              <td class="col-h-chk">&nbsp;</td>
+              <td class="col-h-chk">&nbsp;</td>
+              <td class="col-h-chk">&nbsp;</td>
+              <td class="col-h-fecha">&nbsp;</td>
+              <td class="col-h-hora">&nbsp;</td>
+              <td class="col-h-obs">&nbsp;</td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      <div class="fmt-reg-pie">
-        <div class="fmt-reg-leyenda">
-          <strong>IMPORTANTE:</strong> TENGO EL CONOCIMIENTO DE CÓMO UTILIZAR MI EPP CORRECTAMENTE Y EL CUIDADO QUE REQUIERE EL MISMO. EN CASO DE REQUERIR UN REEMPLAZO SE DEBERÁ MOSTRAR EL EPP DAÑADO, LO ANTERIOR CON BASE EN LA NOM-017-STPS-2024 APARTADO 7.1 INCISO K.
+      <div class="fmt-reg-h-pie">
+        <div class="fmt-reg-h-leyenda">
+          <strong>IMPORTANTE:</strong> TENGO EL CONOCIMIENTO DE COMO UTILIZAR MI EPP CORRECTAMENTE Y EL CUIDADO QUE REQUIERE EL MISMO.
+          EN CASO DE REQUERIR UN REEMPLAZO SE DEBERA MOSTRAR EL EPP DAÑADO, LO ANTERIOR CON BASE EN LA NOM-017-STPS-2024 APARTADO 7.1 INCISO K.
         </div>
-        <div class="fmt-reg-dir">
+        <div class="fmt-reg-h-dir">
           Carretera Federal 180 Cardel-Nautla km 42.5, Mpio. Alto Lucero, Ver. CP 91680 Tel (01229) 9899090 Ext 45114/46044
         </div>
       </div>
@@ -205,7 +205,7 @@ function FormatoRegistroEntrega({ paginaNum, anio = ANIO_ACTUAL }: { paginaNum: 
 }
 
 // =========================================================================
-// 3. FORMATO RESGUARDO ECONÓMICO (2 por hoja)
+// 3. FORMATO RESGUARDO ECONÓMICO (2 por hoja tamaño carta)
 // =========================================================================
 function FormatoResguardoIndividual({ folioTexto }: { folioTexto: string }) {
   return (
@@ -343,16 +343,16 @@ export function PantallaFormatos() {
   // Estado para EPP Contaminado
   const [unidad, setUnidad] = useState<Unidad>('U1')
   const [folioInicioContaminado, setFolioInicioContaminado] = useState(1)
-  const [cantContaminado, setCantContaminado] = useState(8) // Múltiplos de 4 por defecto
+  const [cantContaminado, setCantContaminado] = useState(8)
   const [cargandoFolio, setCargandoFolio] = useState(true)
 
-  // Estado para Registro de Entrega
+  // Estado para Registro de Entrega Horizontal
   const [hojaInicioReg, setHojaInicioReg] = useState(1)
   const [cantHojasReg, setCantHojasReg] = useState(5)
 
   // Estado para Resguardo Económico
   const [folioInicioResg, setFolioInicioResg] = useState(1)
-  const [cantResg, setCantResg] = useState(4) // Múltiplos de 2 por defecto
+  const [cantResg, setCantResg] = useState(4)
 
   // Estado para PDF Externo cargado
   const [pdfArchivo, setPdfArchivo] = useState<File | null>(null)
@@ -443,39 +443,40 @@ export function PantallaFormatos() {
         <div>
           <h1>Formatos Imprimibles</h1>
           <p class="muted small">
-            Genere e imprima formatos oficiales en blanco con control de folios consecutivos o cargue un PDF externo.
+            Genere e imprima formatos oficiales en blanco con foliado automático o cargue un archivo PDF externo.
           </p>
         </div>
       </div>
 
-      <div class="row" style={{ gap: '8px', flexWrap: 'wrap' }}>
+      {/* Barra de pestañas con iconos proporcionales que no se amontonan con el texto */}
+      <div class="fmt-pestanas">
         <button
-          class="chip"
-          aria-pressed={tipo === 'contaminado'}
+          class={`fmt-tab ${tipo === 'contaminado' ? 'activo' : ''}`}
           onClick={() => setTipo('contaminado')}
         >
-          <Icono n="pdf" /> EPP Contaminado (4 por hoja)
+          <Icono n="radiacion" />
+          <span>EPP Contaminado (4 por hoja)</span>
         </button>
         <button
-          class="chip"
-          aria-pressed={tipo === 'registro_epp'}
+          class={`fmt-tab ${tipo === 'registro_epp' ? 'activo' : ''}`}
           onClick={() => setTipo('registro_epp')}
         >
-          <Icono n="nota" /> Registro de Entrega EPP 2026 (Firmas)
+          <Icono n="eppEntrega" />
+          <span>Registro de Entrega EPP 2026 (Firmas)</span>
         </button>
         <button
-          class="chip"
-          aria-pressed={tipo === 'resguardo_economico'}
+          class={`fmt-tab ${tipo === 'resguardo_economico' ? 'activo' : ''}`}
           onClick={() => setTipo('resguardo_economico')}
         >
-          <Icono n="equipo" /> Resguardo Económico (2 por hoja)
+          <Icono n="casco" />
+          <span>Resguardo Económico (Casco / Faja)</span>
         </button>
         <button
-          class="chip"
-          aria-pressed={tipo === 'pdf_externo'}
+          class={`fmt-tab ${tipo === 'pdf_externo' ? 'activo' : ''}`}
           onClick={() => setTipo('pdf_externo')}
         >
-          <Icono n="subir" /> Cargar Formato PDF con Folios
+          <Icono n="pdfSubir" />
+          <span>Cargar Formato PDF con Folios</span>
         </button>
       </div>
 
@@ -485,7 +486,7 @@ export function PantallaFormatos() {
           <div>
             <h3>Reporte de EPP Contaminado</h3>
             <p class="muted small">
-              Formato oficial para cambio de EPP contaminado. Diseñado con visto bueno de Protección Radiológica. Caben <strong>4 formatos completos por cada hoja tamaño carta</strong>.
+              Formato oficial para cambio de EPP contaminado con visto bueno de Protección Radiológica. Caben <strong>4 formatos completos por cada hoja tamaño carta</strong>.
             </p>
           </div>
 
@@ -493,7 +494,7 @@ export function PantallaFormatos() {
             <label class="campo">
               Unidad
               <select
-                class="input"
+                class="input fmt-select"
                 id="fc-unidad"
                 value={unidad}
                 onChange={(e) => setUnidad((e.target as HTMLSelectElement).value as Unidad)}
@@ -519,7 +520,7 @@ export function PantallaFormatos() {
             <label class="campo">
               Cantidad de folios
               <select
-                class="input"
+                class="input fmt-select"
                 id="fc-cantidad"
                 value={cantContaminado}
                 onChange={(e) => setCantContaminado(Number((e.target as HTMLSelectElement).value))}
@@ -545,25 +546,25 @@ export function PantallaFormatos() {
 
           <div class="row">
             <button class="btn primary" onClick={ejecutarImpresion}>
-              <Icono n="pdf" /> Generar e Imprimir Formatos ({cantContaminado} talones en {Math.ceil(cantContaminado / 4)} hojas)
+              <Icono n="radiacion" /> Generar e Imprimir Formatos ({cantContaminado} talones en {Math.ceil(cantContaminado / 4)} hojas)
             </button>
           </div>
         </div>
       )}
 
-      {/* ---------------- PESTAÑA 2: REGISTRO DE ENTREGA EPP 2026 ---------------- */}
+      {/* ---------------- PESTAÑA 2: REGISTRO DE ENTREGA EPP 2026 (HORIZONTAL) ---------------- */}
       {tipo === 'registro_epp' && (
         <div class="card stack" style={{ padding: '20px', gap: '16px' }}>
           <div>
-            <h3>Registro de Entrega de EPP 2026 (Hojas de Firmas)</h3>
+            <h3>Registro de Entrega de EPP 2026 (Formato Horizontal)</h3>
             <p class="muted small">
-              Formato institucional con tabla completa de firmas por trabajador, área, desglose de lentes, guantes (carnaza, hyflex, nitrilo), tapones, mascarillas y leyenda oficial NOM-017-STPS-2024.
+              Formato oficial en orientación <strong>horizontal (apaisado)</strong> con tabla completa de firmas por trabajador, área, desglose de lentes, guantes (carnaza, hyflex, nitrilo), tapones, mascarillas y foliado de páginas correlativo.
             </p>
           </div>
 
           <div class="filtros" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <label class="campo">
-              Número de hoja inicial
+              Página / Folio inicial
               <input
                 class="input"
                 id="reg-hoja-inicio"
@@ -575,26 +576,32 @@ export function PantallaFormatos() {
             </label>
 
             <label class="campo">
-              Cantidad de hojas
-              <input
-                class="input"
+              Cantidad de páginas
+              <select
+                class="input fmt-select"
                 id="reg-cant-hojas"
-                type="number"
-                min={1}
-                max={50}
                 value={cantHojasReg}
-                onInput={(e) => setCantHojasReg(Math.max(1, Math.min(50, Number((e.target as HTMLInputElement).value))))}
-              />
+                onChange={(e) => setCantHojasReg(Number((e.target as HTMLSelectElement).value))}
+              >
+                <option value={1}>1 página (15 renglones)</option>
+                <option value={3}>3 páginas (45 renglones)</option>
+                <option value={5}>5 páginas (75 renglones)</option>
+                <option value={10}>10 páginas (150 renglones)</option>
+                <option value={20}>20 páginas (300 renglones)</option>
+              </select>
             </label>
           </div>
 
-          <p class="small muted">
-            Cada hoja contiene 18 renglones amplios para recabar firmas del personal.
-          </p>
+          <div class="aviso info small">
+            <Icono n="info" />
+            <span>
+              Se generará en orientación horizontal desde la <strong>PÁGINA No. {String(hojaInicioReg).padStart(3, '0')}</strong> hasta la <strong>PÁGINA No. {String(hojaInicioReg + cantHojasReg - 1).padStart(3, '0')}</strong>.
+            </span>
+          </div>
 
           <div class="row">
             <button class="btn primary" onClick={() => setImprimiendo(true)}>
-              <Icono n="pdf" /> Imprimir {cantHojasReg} Hoja{cantHojasReg > 1 ? 's' : ''} de Registro
+              <Icono n="eppEntrega" /> Imprimir {cantHojasReg} Página{cantHojasReg > 1 ? 's' : ''} en Horizontal
             </button>
           </div>
         </div>
@@ -606,7 +613,7 @@ export function PantallaFormatos() {
           <div>
             <h3>Resguardo Económico (Casco / Faja)</h3>
             <p class="muted small">
-              Vale de resguardo económico oficial No. SI-2026. Con recuadros de firma para Quien Entrega, Visto Bueno Jefe de Oficina y Recibí. Caben <strong>2 formatos por cada hoja tamaño carta</strong>.
+              Vale de resguardo económico oficial No. SI-2026 con recuadros para Quien Entrega, Visto Bueno Jefe de Oficina y Recibí. Caben <strong>2 formatos por cada hoja tamaño carta</strong>.
             </p>
           </div>
 
@@ -626,7 +633,7 @@ export function PantallaFormatos() {
             <label class="campo">
               Cantidad de formatos
               <select
-                class="input"
+                class="input fmt-select"
                 id="resg-cantidad"
                 value={cantResg}
                 onChange={(e) => setCantResg(Number((e.target as HTMLSelectElement).value))}
@@ -651,7 +658,7 @@ export function PantallaFormatos() {
 
           <div class="row">
             <button class="btn primary" onClick={ejecutarImpresion}>
-              <Icono n="pdf" /> Generar e Imprimir ({cantResg} vales en {Math.ceil(cantResg / 2)} hojas)
+              <Icono n="casco" /> Generar e Imprimir ({cantResg} vales en {Math.ceil(cantResg / 2)} hojas)
             </button>
           </div>
         </div>
@@ -708,7 +715,7 @@ export function PantallaFormatos() {
                 <label class="campo">
                   Posición del folio
                   <select
-                    class="input"
+                    class="input fmt-select"
                     value={posicionFolio}
                     onChange={(e) => setPosicionFolio((e.target as HTMLSelectElement).value as any)}
                   >
@@ -754,7 +761,7 @@ export function PantallaFormatos() {
                     }
                   }}
                 >
-                  <Icono n="pdf" /> Imprimir PDF Cargado
+                  <Icono n="pdfSubir" /> Imprimir PDF Cargado
                 </button>
               </div>
             </div>
@@ -780,11 +787,11 @@ export function PantallaFormatos() {
               </section>
             ))}
 
-          {/* Registro de entrega de EPP 2026: 1 página completa por hoja */}
+          {/* Registro de entrega de EPP 2026: 1 página completa por hoja en HORIZONTAL */}
           {tipo === 'registro_epp' &&
             Array.from({ length: cantHojasReg }, (_, i) => hojaInicioReg + i).map((numPag) => (
-              <section key={numPag} class="hoja-carta-formato hoja-registro">
-                <FormatoRegistroEntrega paginaNum={numPag} />
+              <section key={numPag} class="hoja-carta-formato hoja-registro-horizontal">
+                <FormatoRegistroEntregaHorizontal paginaNum={numPag} />
               </section>
             ))}
 

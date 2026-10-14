@@ -141,6 +141,29 @@ const UI: Record<string, JSX.Element> = {
   excel: <path {...trazo} d="M5 3h10l4 4v14H5zM15 3v4h4M8 11l4 6M12 11l-4 6M14 17h2" />,
   pdf: <path {...trazo} d="M5 3h10l4 4v14H5zM15 3v4h4M8 13h1.5a1.5 1.5 0 0 1 0 3H8v-5M13 11v5h1a2 2 0 0 0 0-5zM18 11h-2v5M16 13.5h1.5" />,
   presentacion: <path {...trazo} d="M3 4h18M4 4v11h16V4M12 15v3M8 21l4-3 4 3M8 11l3-3 2 2 3-3" />,
+  radiacion: (
+    <g {...trazo}>
+      <circle cx="12" cy="12" r="2.2" />
+      <path d="M12 9.8V4.5a7.5 7.5 0 0 1 6.5 3.75l-4.59 2.65A2.2 2.2 0 0 0 12 9.8z" />
+      <path d="M13.9 13.1l4.59 2.65A7.5 7.5 0 0 1 12 19.5v-5.3a2.2 2.2 0 0 0 1.9-1.1z" />
+      <path d="M10.1 13.1A2.2 2.2 0 0 0 12 14.2v5.3a7.5 7.5 0 0 1-6.5-3.75l4.59-2.65z" />
+    </g>
+  ),
+  eppEntrega: (
+    <g {...trazo}>
+      <circle cx="7" cy="7" r="2.8" />
+      <circle cx="17" cy="7" r="2.8" />
+      <path d="M9.8 7h4.4M4.2 6.5l-2-2M19.8 6.5l2-2" />
+      <path d="M8 21v-4.5l-1.5-1.5a1 1 0 0 1 1.4-1.4l1.6 1.4V12.5a.9.9 0 0 1 1.8 0v2.2a.9.9 0 0 1 1.8 0v-1.2a.9.9 0 0 1 1.8 0v1.2a.9.9 0 0 1 1.8 0v2.8a4 4 0 0 1-2 3.5V21z" />
+    </g>
+  ),
+  casco: <path {...trazo} d="M3 17h18M5 17a7 7 0 0 1 14 0M10 7.5V12M14 7.5V12M9.5 7.2a7 7 0 0 1 5 0" />,
+  pdfSubir: (
+    <g {...trazo}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6" />
+      <path d="M12 18v-6M9 15l3-3 3 3" />
+    </g>
+  ),
 }
 
 export function Icono({ n, titulo }: { n: string; titulo?: string }) {

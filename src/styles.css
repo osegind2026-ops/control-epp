@@ -676,6 +676,59 @@ details > summary { list-style: revert; }
    FORMATOS IMPRIMIBLES (EPP Contaminado, Registro EPP, Resguardo Económico)
    ========================================================================= */
 
+@page formatoCarta { size: letter portrait; margin: 4mm 6mm; }
+@page formatoRegistroHorizontal { size: letter landscape; margin: 4mm 6mm; }
+
+/* Barra de pestañas de formatos con iconos alineados */
+.fmt-pestanas {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fmt-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink);
+  font: 600 14px/1.2 var(--body);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.fmt-tab svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: var(--muted);
+}
+
+.fmt-tab:hover {
+  border-color: var(--accent);
+}
+
+.fmt-tab.activo {
+  background: var(--ink);
+  color: var(--surface);
+  border-color: var(--ink);
+}
+
+.fmt-tab.activo svg {
+  color: var(--surface);
+}
+
+/* Listas desplegables con espacio suficiente para que no se corte el texto */
+.fmt-select {
+  min-width: 230px !important;
+  max-width: 100% !important;
+  padding-right: 32px !important;
+}
+
+/* Modal y portal de impresión */
 .portal-formatos-wrap {
   position: fixed;
   inset: 0;
@@ -787,11 +840,12 @@ details > summary { list-style: revert; }
   white-space: nowrap;
 }
 
+/* Campos de datos equilibrados con intercambio Área <-> Supervisor */
 .fmt-c-grid-datos {
   display: grid;
-  grid-template-columns: 2.2fr 1.1fr 1.3fr;
+  grid-template-columns: 1.55fr 1.25fr 1fr;
   row-gap: 1.5mm;
-  column-gap: 3mm;
+  column-gap: 4mm;
   font-size: 8pt;
   border-bottom: 1px solid #000;
   padding-bottom: 1.5mm;
@@ -819,6 +873,7 @@ details > summary { list-style: revert; }
   font-family: monospace;
   font-size: 7.5pt;
   letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 
 .fmt-c-seccion-act {
@@ -841,6 +896,7 @@ details > summary { list-style: revert; }
   min-height: 9px;
 }
 
+/* Tabla de EPP con línea continua completamente recta de extremo a extremo */
 .fmt-c-epp-bloque {
   display: flex;
   flex-direction: column;
@@ -858,40 +914,26 @@ details > summary { list-style: revert; }
   print-color-adjust: exact;
 }
 
-.fmt-c-epp-tabla {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  text-align: center;
+.fmt-c-epp-tbl {
+  width: 100%;
+  border-collapse: collapse;
   font-size: 7pt;
 }
 
-.fmt-c-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  border-right: 1px solid #000;
-}
-
-.fmt-c-col:last-child {
-  border-right: none;
-}
-
-.fmt-c-col-h {
+.fmt-c-epp-tbl th {
+  border: 1px solid #000;
+  padding: 1.5px 2px;
   font-weight: 700;
-  padding: 1px 2px;
-  min-height: 4.5mm;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
+  text-align: center;
+  vertical-align: middle;
+  height: 4.8mm;
+  line-height: 1.05;
 }
 
-.fmt-c-chk {
-  width: 100%;
-  height: 4mm;
-  border-top: 1px solid #000;
+.fmt-c-epp-tbl td.td-chk {
+  border: 1px solid #000;
+  height: 4.5mm;
   background: #fff;
-  display: block;
 }
 
 .fmt-c-pie-firma {
@@ -929,93 +971,105 @@ details > summary { list-style: revert; }
   margin-top: 1px;
 }
 
-/* ---------- 2. REGISTRO DE ENTREGA DE EPP (Firmas) ---------- */
-.hoja-registro {
+/* ---------- 2. REGISTRO DE ENTREGA DE EPP (Horizontal Landscape) ---------- */
+.hoja-registro-horizontal {
+  width: 270mm !important;
+  min-height: 202mm !important;
+  background: #fff;
+  color: #000;
+  padding: 6mm 8mm;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 6mm;
 }
 
-.fmt-reg-cab {
+.fmt-reg-h-cab {
   display: grid;
-  grid-template-columns: 45mm 1fr 48mm;
+  grid-template-columns: 55mm 1fr 65mm;
   align-items: center;
   gap: 8px;
   border-bottom: 1.5px solid #000;
   padding-bottom: 2mm;
 }
 
-.fmt-reg-logo img {
-  max-height: 12mm;
+.fmt-reg-h-logo img {
+  max-height: 11mm;
   display: block;
 }
 
-.fmt-reg-logo small {
-  font-size: 6.5pt;
+.fmt-reg-h-cfe-txt {
+  font-size: 7pt;
   color: #0b6623;
   font-weight: 700;
   display: block;
 }
 
-.fmt-reg-tit h1 {
-  font-size: 11pt;
+.fmt-reg-h-tit h1 {
+  font-size: 13pt;
   text-align: center;
   margin: 0;
   font-weight: 800;
+  letter-spacing: 0.5px;
 }
 
-.fmt-reg-sub {
+.fmt-reg-h-sub {
   display: flex;
   flex-direction: column;
-  font-size: 6.5pt;
+  font-size: 7pt;
   text-align: right;
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
-.fmt-reg-folio {
-  font-weight: 700;
+.fmt-reg-h-pagina-num {
+  font-weight: 800;
+  font-size: 8pt;
   margin-top: 2px;
 }
 
-.fmt-reg-tabla {
+.fmt-reg-h-tabla {
   width: 100%;
   border-collapse: collapse;
-  font-size: 6.5pt;
+  font-size: 7pt;
   margin-top: 2mm;
 }
 
-.fmt-reg-tabla th, .fmt-reg-tabla td {
+.fmt-reg-h-tabla th, .fmt-reg-h-tabla td {
   border: 1px solid #000;
-  padding: 2px 1px;
+  padding: 2px 2px;
   text-align: center;
 }
 
-.fmt-reg-tabla th {
-  background: #eaeaea;
+.fmt-reg-h-tabla th {
+  background: #f0f0f0;
   font-weight: 700;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
 
-.fmt-reg-tabla .col-nom { width: 44mm; text-align: left; }
-.fmt-reg-tabla .col-rpe { width: 14mm; }
-.fmt-reg-tabla .col-firma { width: 22mm; }
-.fmt-reg-tabla .col-area { width: 24mm; }
-.fmt-reg-tabla .col-vert { width: 5.5mm; font-size: 5.5pt; line-height: 1; vertical-align: middle; }
-.fmt-reg-tabla .col-subgrupo { font-size: 6.5pt; }
-.fmt-reg-tabla .col-fecha { width: 16mm; font-size: 6pt; }
-.fmt-reg-tabla .col-hora { width: 11mm; }
-.fmt-reg-tabla .col-obs { width: 28mm; }
-.fmt-reg-tabla tbody tr { height: 9.5mm; }
+.fmt-reg-h-tabla .col-h-nom { width: 48mm; text-align: left; padding-left: 4px; }
+.fmt-reg-h-tabla .col-h-rpe { width: 16mm; }
+.fmt-reg-h-tabla .col-h-firma { width: 26mm; }
+.fmt-reg-h-tabla .col-h-area { width: 28mm; }
+.fmt-reg-h-tabla .col-h-rotado { width: 10mm; font-size: 6.5pt; font-weight: 700; }
+.fmt-reg-h-tabla .col-h-rotado.sub { font-size: 6pt; }
+.fmt-reg-h-tabla .col-h-grupo { font-size: 7pt; }
+.fmt-reg-h-tabla .col-h-chk { width: 10mm; }
+.fmt-reg-h-tabla .col-h-fecha { width: 18mm; font-size: 6.5pt; }
+.fmt-reg-h-tabla .col-h-hora { width: 13mm; }
+.fmt-reg-h-tabla .col-h-obs { width: 36mm; }
+.fmt-reg-h-tabla tbody tr { height: 9mm; }
 
-.fmt-reg-pie {
-  font-size: 6.5pt;
-  line-height: 1.2;
+.fmt-reg-h-pie {
+  font-size: 7pt;
+  line-height: 1.25;
   border-top: 1px solid #000;
-  padding-top: 1.5mm;
+  padding-top: 2mm;
   margin-top: 2mm;
 }
+
+.fmt-reg-h-leyenda { font-weight: 500; }
+.fmt-reg-h-dir { color: #444; margin-top: 1px; }
 
 /* ---------- 3. RESGUARDO ECONÓMICO (2 por hoja) ---------- */
 .hoja-resguardo {
@@ -1143,4 +1197,15 @@ details > summary { list-style: revert; }
   border-bottom: 1px solid #000;
   min-height: 12mm;
   margin-bottom: 2px;
+}
+
+@media print {
+  .hoja-registro-horizontal {
+    page: formatoRegistroHorizontal !important;
+    width: 270mm !important;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 5mm !important;
+  }
 }
