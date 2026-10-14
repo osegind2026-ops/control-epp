@@ -582,7 +582,8 @@ details > summary { list-style: revert; }
   .reporte-imprimible { position: static; padding: 0; background: none; display: block; overflow: visible; }
   .rp-pagina { zoom: 1; box-shadow: none; page-break-after: always; break-after: page; }
   .no-imprimir, .no-print { display: none !important; }
-  .hoja-carta-formato { page: formatoCarta; width: 100% !important; min-height: 0 !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important; }
+  .hoja-carta-formato { page: formatoCarta; width: 100% !important; min-height: 0 !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important; page-break-after: always; break-after: page; }
+  .hoja-carta-formato:last-child { page-break-after: auto; break-after: auto; }
 }
 
 /* ---------- Plantilla de reportes ---------- */
@@ -1157,6 +1158,12 @@ details > summary { list-style: revert; }
 .fmt-reg-h-tabla .col-h-fecha { width: 22mm; font-size: 6.5pt; line-height: 1.1; }
 .fmt-reg-h-tabla .col-h-hora { width: 13mm; }
 .fmt-reg-h-tabla .col-h-obs { width: 26mm; }
+.fmt-reg-h-tabla th.col-h-obs {
+  font-size: 5.4pt !important;
+  letter-spacing: -0.2px !important;
+  white-space: nowrap !important;
+  padding: 0 1px !important;
+}
 
 /* 20 renglones exactos que aprovechan toda la altura de la hoja carta */
 .fmt-reg-h-tabla tbody tr {
@@ -1180,12 +1187,23 @@ details > summary { list-style: revert; }
 .fmt-reg-h-leyenda { font-weight: 500; }
 .fmt-reg-h-dir { color: #444; margin-top: 1px; text-align: center; }
 
-/* ---------- 3. RESGUARDO ECONÓMICO (2 por hoja) ---------- */
+/* ---------- 3. RESGUARDO ECONÓMICO (2 o 3 por hoja) ---------- */
 .hoja-resguardo {
   display: flex;
   flex-direction: column;
   justify-content: space-around;
   padding: 8mm 6mm;
+}
+
+.hoja-resguardo.resg-2-por-hoja {
+  padding: 8mm 6mm;
+  justify-content: space-around;
+}
+
+.hoja-resguardo.resg-3-por-hoja {
+  padding: 4mm 6mm;
+  justify-content: space-between;
+  gap: 2mm;
 }
 
 .fmt-resg-item {
@@ -1199,7 +1217,12 @@ details > summary { list-style: revert; }
   position: relative;
 }
 
-.fmt-resg-item:first-child::after {
+.resg-2-por-hoja .fmt-resg-item {
+  height: 124mm;
+  padding: 5mm;
+}
+
+.resg-2-por-hoja .fmt-resg-item:not(:last-child)::after {
   content: '✂ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -';
   position: absolute;
   bottom: -6mm;
@@ -1208,6 +1231,85 @@ details > summary { list-style: revert; }
   font-size: 6.5pt;
   color: #777;
   text-align: center;
+  pointer-events: none;
+}
+
+/* 3 formatos por hoja: optimizado para aprovechar hoja carta vertical sin desbordar */
+.resg-3-por-hoja .fmt-resg-item {
+  height: 84mm;
+  max-height: 85mm;
+  padding: 2.5mm 4mm;
+  gap: 1mm;
+}
+
+.resg-3-por-hoja .fmt-resg-item:not(:last-child)::after {
+  content: '✂ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -';
+  position: absolute;
+  bottom: -3mm;
+  left: 0;
+  right: 0;
+  font-size: 5.5pt;
+  color: #777;
+  text-align: center;
+  pointer-events: none;
+}
+
+.resg-3-por-hoja .fmt-resg-cab {
+  grid-template-columns: 36mm 1fr 30mm;
+  padding-bottom: 1mm;
+}
+
+.resg-3-por-hoja .fmt-resg-logo img {
+  max-height: 8.5mm;
+}
+
+.resg-3-por-hoja .fmt-resg-inst {
+  font-size: 5.5pt;
+  line-height: 1.1;
+}
+
+.resg-3-por-hoja .fmt-resg-folio {
+  font-size: 7.5pt;
+}
+
+.resg-3-por-hoja .fmt-resg-tit {
+  margin: 1mm 0;
+  font-size: 8pt;
+}
+
+.resg-3-por-hoja .fmt-resg-datos {
+  gap: 2mm;
+  font-size: 7.5pt;
+  margin-bottom: 1.5mm;
+}
+
+.resg-3-por-hoja .fmt-resg-tabla {
+  font-size: 6.8pt !important;
+  margin-bottom: 1.5mm !important;
+}
+
+.resg-3-por-hoja .fmt-resg-tabla th,
+.resg-3-por-hoja .fmt-resg-tabla td {
+  padding: 1.5px !important;
+}
+
+.resg-3-por-hoja .fmt-resg-tabla tbody tr {
+  height: 6mm !important;
+}
+
+.resg-3-por-hoja .fmt-resg-fecha-lug {
+  font-size: 7pt;
+  margin-bottom: 1.5mm;
+}
+
+.resg-3-por-hoja .fmt-resg-firmas {
+  gap: 4mm;
+  font-size: 6.2pt;
+}
+
+.resg-3-por-hoja .fmt-linea-firma {
+  min-height: 7mm;
+  margin-bottom: 1px;
 }
 
 .fmt-resg-cab {

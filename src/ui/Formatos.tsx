@@ -84,16 +84,18 @@ function FormatoContaminadoIndividual({ folioTexto }: { folioTexto: string }) {
         <table class="fmt-c-epp-tbl">
           <thead>
             <tr>
-              <th style={{ width: '16.66%' }}>CASCO</th>
-              <th style={{ width: '16.66%' }}>LENTES</th>
-              <th style={{ width: '16.66%' }}>TAPONES</th>
-              <th style={{ width: '16.66%' }}>GUANTE<br />CARNAZA</th>
-              <th style={{ width: '16.66%' }}>GUANTE<br />HYFLEX</th>
-              <th style={{ width: '16.7%' }}>FAJA</th>
+              <th style={{ width: '14.28%' }}>CASCO</th>
+              <th style={{ width: '14.28%' }}>LENTES</th>
+              <th style={{ width: '14.28%' }}>TAPONES</th>
+              <th style={{ width: '14.28%' }}>GUANTE<br />CARNAZA</th>
+              <th style={{ width: '14.28%' }}>GUANTE<br />HYFLEX</th>
+              <th style={{ width: '14.28%' }}>FAJA</th>
+              <th style={{ width: '14.32%' }}>OTROS</th>
             </tr>
           </thead>
           <tbody>
             <tr>
+              <td class="td-chk">&nbsp;</td>
               <td class="td-chk">&nbsp;</td>
               <td class="td-chk">&nbsp;</td>
               <td class="td-chk">&nbsp;</td>
@@ -352,7 +354,8 @@ export function PantallaFormatos() {
 
   // Estado para Resguardo Económico
   const [folioInicioResg, setFolioInicioResg] = useState(1)
-  const [cantResg, setCantResg] = useState(4)
+  const [cantResg, setCantResg] = useState(6)
+  const [porHojaResg, setPorHojaResg] = useState<2 | 3>(2)
 
   // Estado para PDF Externo cargado
   const [pdfArchivo, setPdfArchivo] = useState<File | null>(null)
@@ -427,12 +430,12 @@ export function PantallaFormatos() {
     return paginas
   }
 
-  // Agrupación en páginas para Resguardo Económico (2 por hoja carta)
+  // Agrupación en páginas para Resguardo Económico (2 o 3 por hoja carta)
   const gruposResguardo = () => {
     const items = Array.from({ length: cantResg }, (_, i) => folioInicioResg + i)
     const paginas: number[][] = []
-    for (let i = 0; i < items.length; i += 2) {
-      paginas.push(items.slice(i, i + 2))
+    for (let i = 0; i < items.length; i += porHojaResg) {
+      paginas.push(items.slice(i, i + porHojaResg))
     }
     return paginas
   }
@@ -613,11 +616,24 @@ export function PantallaFormatos() {
           <div>
             <h3>Resguardo Económico (Casco / Faja)</h3>
             <p class="muted small">
-              Vale de resguardo económico oficial No. SI-2026 con recuadros para Quien Entrega, Visto Bueno Jefe de Oficina y Recibí. Caben <strong>2 formatos por cada hoja tamaño carta</strong>.
+              Vale de resguardo económico oficial No. SI-2026 con recuadros para Quien Entrega, Visto Bueno Jefe de Oficina y Recibí. Puede elegir entre <strong>2 o 3 formatos por cada hoja carta</strong> para optimizar el espacio.
             </p>
           </div>
 
           <div class="filtros" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <label class="campo">
+              Formatos por hoja
+              <select
+                class="input fmt-select"
+                id="resg-por-hoja"
+                value={porHojaResg}
+                onChange={(e) => setPorHojaResg(Number((e.target as HTMLSelectElement).value) as 2 | 3)}
+              >
+                <option value={2}>2 formatos por hoja (amplio)</option>
+                <option value={3}>3 formatos por hoja (optimizar espacio)</option>
+              </select>
+            </label>
+
             <label class="campo">
               Folio inicial
               <input
@@ -638,12 +654,11 @@ export function PantallaFormatos() {
                 value={cantResg}
                 onChange={(e) => setCantResg(Number((e.target as HTMLSelectElement).value))}
               >
-                <option value={2}>2 formatos (1 hoja carta)</option>
-                <option value={4}>4 formatos (2 hojas carta)</option>
-                <option value={6}>6 formatos (3 hojas carta)</option>
-                <option value={8}>8 formatos (4 hojas carta)</option>
-                <option value={10}>10 formatos (5 hojas carta)</option>
-                <option value={20}>20 formatos (10 hojas carta)</option>
+                {[2, 3, 4, 6, 8, 9, 10, 12, 15, 20, 30].map((n) => (
+                  <option key={n} value={n}>
+                    {n} formatos ({Math.ceil(n / porHojaResg)} hoja{Math.ceil(n / porHojaResg) > 1 ? 's' : ''})
+                  </option>
+                ))}
               </select>
             </label>
           </div>
@@ -652,13 +667,14 @@ export function PantallaFormatos() {
             <Icono n="info" />
             <span>
               Se generarán folios del <strong>{formatoFolioResguardo(folioInicioResg)}</strong> al{' '}
-              <strong>{formatoFolioResguardo(folioInicioResg + cantResg - 1)}</strong>.
+              <strong>{formatoFolioResguardo(folioInicioResg + cantResg - 1)}</strong> impresos a{' '}
+              <strong>{porHojaResg} por hoja</strong> ({Math.ceil(cantResg / porHojaResg)} hoja{Math.ceil(cantResg / porHojaResg) > 1 ? 's' : ''} en total).
             </span>
           </div>
 
           <div class="row">
             <button class="btn primary" onClick={ejecutarImpresion}>
-              <Icono n="casco" /> Generar e Imprimir ({cantResg} vales en {Math.ceil(cantResg / 2)} hojas)
+              <Icono n="casco" /> Generar e Imprimir ({cantResg} vales en {Math.ceil(cantResg / porHojaResg)} hoja{Math.ceil(cantResg / porHojaResg) > 1 ? 's' : ''})
             </button>
           </div>
         </div>
@@ -795,10 +811,13 @@ export function PantallaFormatos() {
               </section>
             ))}
 
-          {/* Resguardo Económico: 2 por hoja carta */}
+          {/* Resguardo Económico: 2 o 3 por hoja carta */}
           {tipo === 'resguardo_economico' &&
             gruposResguardo().map((grupo, numPag) => (
-              <section key={numPag} class="hoja-carta-formato hoja-resguardo">
+              <section
+                key={numPag}
+                class={`hoja-carta-formato hoja-resguardo ${porHojaResg === 3 ? 'resg-3-por-hoja' : 'resg-2-por-hoja'}`}
+              >
                 {grupo.map((n) => (
                   <FormatoResguardoIndividual
                     key={n}
