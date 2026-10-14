@@ -4,6 +4,7 @@ import type { Usuario } from '../domain/types'
 import { iniciales } from '../lib/util'
 import { esperaPin, iniciarSesion } from '../state/servicios'
 import * as S from '../state/store'
+import { VERSION } from '../version'
 
 /** Teclado numérico para el PIN. Prueba en cuanto hay 4, 5 o 6 dígitos. */
 export function TecladoPin({ onIntento, error }: { onIntento: (pin: string) => boolean; error?: boolean }) {
@@ -79,6 +80,9 @@ export function PantallaAcceso() {
         <div class="stack" style={{ gap: '4px' }}>
           <span class="badge ok" style={{ justifySelf: 'start' }}>
             Equipo {S.dispositivo.value?.codigo}
+          </span>
+          <span class="muted small" style={{ justifySelf: 'start' }}>
+            Versión {VERSION}
           </span>
           <h1>Control EPP</h1>
           <p class="muted">{elegido ? `Hola, ${elegido.nombre}. Escriba su PIN.` : '¿Quién va a despachar?'}</p>

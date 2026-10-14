@@ -3,7 +3,7 @@ import { soloAlfanumerico } from '../domain/equipoQr'
 import type { CondicionRegreso, Equipo, PrestamoEquipo, Trabajador } from '../domain/types'
 import { fechaLocal, horaLocal, nuevoId } from '../lib/util'
 import { avisarCambioLocal } from './nube'
-import { ErrorNegocio } from './servicios'
+import { ErrorNegocio, guardarFotosEvidencia } from './servicios'
 import * as S from './store'
 
 // Equipos a resguardo de la oficina (explosímetros, higrómetros, detectores…):
@@ -177,6 +177,8 @@ export interface DatosRegreso {
   accesorios: string[]
   bitacora: boolean
   comentarios: string
+  /** Fotos del equipo al regresar (data URL), p. ej. del daño. */
+  fotos?: string[]
 }
 
 export async function registrarRegreso(d: DatosRegreso): Promise<void> {
@@ -205,12 +207,13 @@ export async function registrarRegreso(d: DatosRegreso): Promise<void> {
     actualizado: ahora,
   }
   const eq = S.equipos.value.find((e) => e.id === p.equipoId)
-  await db.transaction('rw', [db.prestamosEquipo, db.equipos], async () => {
+  await db.transaction('rw', [db.prestamosEquipo, db.equipos, db.fotos], async () => {
+    actualizado.regreso!.fotos = await guardarFotosEvidencia(d.fotos ?? [])
     await db.prestamosEquipo.put(actualizado)
     // Un equipo dañado no se vuelve a prestar hasta que alguien lo revise
     if (eq && d.condicion === 'danado' && eq.estado === 'operativo') await db.equipos.put({ ...eq, estado: 'revision', actualizado: ahora })
   })
-  await S.recargar('prestamosEquipo', 'equipos')
+  await S.recargar('prestamosEquipo', 'equipos', 'fotos')
   avisarCambioLocal()
 }
 

@@ -36,6 +36,22 @@ function ModalMovimiento(props: { tipo: TipoOp; materialId?: string; varianteId?
   }
 
   const guardar = async () => {
+    if (props.tipo === 'entrada' && n > 0) {
+      // ¿Ya se registró hoy la misma entrada? (mismo material, talla, almacén y cantidad)
+      const hoy = fechaDeTs(new Date().toISOString())
+      const igual = S.movimientos.value.find(
+        (m) => m.tipo === 'ENTRADA' && m.materialId === materialId && m.varianteId === varianteId && m.ubicacionId === ubicacionId && m.cantidad === n && fechaDeTs(m.ts) === hoy,
+      )
+      if (igual) {
+        const seguir = await confirmar(
+          'Posible entrada duplicada',
+          `Hoy a las ${horaLocal(new Date(igual.ts))} ${igual.usuarioNombre} ya registró una entrada de ${n} de ${S.nombreMaterial(materialId, varianteId)} en este almacén${igual.ref ? ` (ref. ${igual.ref})` : ''}.\n\n¿Registrar otra entrada igual?`,
+          'Sí, registrar otra',
+          true,
+        )
+        if (!seguir) return
+      }
+    }
     const ok = await intentar(async () => {
       if (props.tipo === 'entrada') {
         await registrarEntrada({ materialId, varianteId, ubicacionId, cantidad: n, motivoId, ref, nota })

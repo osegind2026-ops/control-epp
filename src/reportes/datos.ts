@@ -108,6 +108,39 @@ export function solicitantesRecurrentes(entregas: Entrega[], materiales: Map<str
     .sort((a, b) => a.area.localeCompare(b.area) || a.material.localeCompare(b.material) || b.veces - a.veces || b.piezas - a.piezas)
 }
 
+/** Entrega que fue marcada como EPP contaminado (la nota de recurrencia contiene «EPP Contaminado»). */
+export interface EntregaContaminada {
+  entrega: Entrega
+  materiales: string[] // nombres de los materiales contaminados
+  supervisor: string
+}
+
+/**
+ * Entregas del periodo donde el despachador indicó «EPP Contaminado» como motivo
+ * de recurrencia. Sirve para el reporte de material contaminado.
+ */
+export function entregasContaminadas(
+  entregas: Entrega[],
+  materiales: Map<string, Material>,
+  personal: Map<string, Trabajador>,
+): EntregaContaminada[] {
+  const r: EntregaContaminada[] = []
+  for (const e of entregas) {
+    if (e.estado !== 'registrada') continue
+    const esContaminado =
+      e.recurrencia?.nota === 'EPP Contaminado' ||
+      e.observaciones.toLowerCase().includes('contaminado')
+    if (!esContaminado) continue
+    const mats = e.recurrencia?.materiales.length
+      ? e.recurrencia.materiales.map((id) => materiales.get(id)?.nombre ?? id)
+      : e.lineas.map((l) => materiales.get(l.materialId)?.nombre ?? l.materialId)
+    const trab = personal.get(e.rpe)
+    const supervisor = trab?.supervisor ? `${trab.supervisor.nombre} (${trab.supervisor.rpe})` : ''
+    r.push({ entrega: e, materiales: mats, supervisor })
+  }
+  return r.sort((a, b) => (a.entrega.ts < b.entrega.ts ? 1 : -1))
+}
+
 export interface DatosReporte {
   desde: string
   hasta: string

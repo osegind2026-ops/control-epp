@@ -5,6 +5,7 @@ import { diasEntre, fechaLocal } from '../lib/util'
 import { devolverResguardo } from '../state/servicios'
 import * as S from '../state/store'
 import { avisar, FotoMaterial, intentar, Modal, Talla } from './comunes'
+import { CapturaFotos, FotosGuardadas } from './Evidencia'
 import { Icono } from './iconos'
 import { BuscadorTrabajador, diasDesde, TarjetaTrabajador } from './Trabajador'
 
@@ -32,11 +33,12 @@ function Supervisor({ r }: { r: Resguardo }) {
 function ModalDevolver({ r, onCerrar }: { r: Resguardo; onCerrar: () => void }) {
   const [motivo, setMotivo] = useState('')
   const [nota, setNota] = useState('')
+  const [fotos, setFotos] = useState<string[]>([])
   const opciones = S.motivosDe('devolucion')
   const elegido = opciones.find((m) => m.id === motivo)
   const guardar = async () => {
     const ok = await intentar(async () => {
-      await devolverResguardo(r.id, motivo, nota)
+      await devolverResguardo(r.id, motivo, nota, fotos)
       return true
     })
     if (ok) {
@@ -76,7 +78,8 @@ function ModalDevolver({ r, onCerrar }: { r: Resguardo; onCerrar: () => void }) 
           </button>
         ))}
       </div>
-      <input class="input" id="dev-nota" placeholder="Nota (opcional)" value={nota} onInput={(e) => setNota((e.target as HTMLInputElement).value)} />
+      <input class="input" id="dev-nota" placeholder={elegido && !elegido.reingresa ? 'Describa el daño o el motivo de la baja' : 'Nota (opcional)'} value={nota} onInput={(e) => setNota((e.target as HTMLInputElement).value)} />
+      <CapturaFotos fotos={fotos} onCambio={setFotos} sugerida={!!elegido && !elegido.reingresa} />
     </Modal>
   )
 }
@@ -168,6 +171,7 @@ export function PantallaDevolucion() {
                   <th>Entregado</th>
                   <th>Cerrado</th>
                   <th>Motivo</th>
+                  <th>Fotos</th>
                 </tr>
               </thead>
               <tbody>
@@ -178,6 +182,9 @@ export function PantallaDevolucion() {
                     <td>{r.fechaEntrega}</td>
                     <td>{r.cierre?.fecha}</td>
                     <td>{r.cierre?.motivo}</td>
+                    <td>
+                      <FotosGuardadas ids={r.cierre?.fotos} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

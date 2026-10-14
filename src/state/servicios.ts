@@ -598,7 +598,17 @@ export async function anularEntrega(entregaId: string, motivoId: string, nota: s
 
 // ---------- Resguardos ----------
 
-export async function devolverResguardo(resguardoId: string, motivoId: string, nota: string): Promise<void> {
+/** Guarda fotos de evidencia y devuelve sus ids (para llamarse dentro de una transacción con db.fotos). */
+export async function guardarFotosEvidencia(dataUrls: string[]): Promise<string[] | undefined> {
+  const validas = dataUrls.filter(Boolean).slice(0, MAX_FOTOS_EVIDENCIA)
+  if (!validas.length) return undefined
+  const fotos = validas.map((dataUrl) => ({ id: nuevoId('F'), dataUrl }))
+  await db.fotos.bulkPut(fotos)
+  return fotos.map((f) => f.id)
+}
+export const MAX_FOTOS_EVIDENCIA = 4
+
+export async function devolverResguardo(resguardoId: string, motivoId: string, nota: string, fotos: string[] = []): Promise<void> {
   const { sesion } = actor()
   const r = S.resguardos.value.find((x) => x.id === resguardoId)
   if (!r || r.estatus !== 'ACTIVO') throw new ErrorNegocio('El resguardo ya no está activo.')
@@ -619,7 +629,8 @@ export async function devolverResguardo(resguardoId: string, motivoId: string, n
       ref: 'DEVOLUCIÓN',
     },
   }
-  await db.transaction('rw', [db.resguardos, db.movimientos], async () => {
+  await db.transaction('rw', [db.resguardos, db.movimientos, db.fotos], async () => {
+    cerrado.cierre!.fotos = await guardarFotosEvidencia(fotos)
     await db.resguardos.put(cerrado)
     if (motivo.reingresa) {
       await db.movimientos.add(
@@ -635,7 +646,7 @@ export async function devolverResguardo(resguardoId: string, motivoId: string, n
       )
     }
   })
-  await S.recargar('resguardos', 'movimientos')
+  await S.recargar('resguardos', 'movimientos', 'fotos')
   await marcarCambio()
 }
 

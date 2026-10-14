@@ -12,6 +12,7 @@ import { Intercambio } from './Intercambio'
 import { SeccionUsuarios } from './Usuarios'
 import { PruebaLectorGafete } from './Trabajador'
 import { esLocal, nube } from '../state/nube'
+import { FECHA_VERSION, VERSION } from '../version'
 
 function Equipo() {
   const eq = S.dispositivo.value!
@@ -235,7 +236,8 @@ export function PantallaAjustes() {
       <Ubicaciones />
       <ProbarCamara />
       <PlantillaReportes />
-      <p class="muted small">Control EPP v2.1 · {nube.value ? (esLocal(nube.value.url) ? 'Sincronizado con la carpeta de red' : 'Sincronizado con Google Sheets') : 'Los datos se guardan solo en este navegador'}.</p>
+      <p class="muted small">
+        <strong>Control EPP v{VERSION}</strong> ({FECHA_VERSION}) · {nube.value ? (esLocal(nube.value.url) ? 'Sincronizado con la carpeta de red' : 'Sincronizado con Google Sheets') : 'Los datos se guardan solo en este navegador'}.</p>
     </div>
   )
 }

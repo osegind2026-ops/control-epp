@@ -1,10 +1,11 @@
 import { createPortal } from 'preact/compat'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { entregarArchivo, fechaLocal } from '../lib/util'
-import { calcularReporte, type DatosReporte, type Fuentes } from '../reportes/datos'
+import { calcularReporte, entregasContaminadas, type DatosReporte, type Fuentes } from '../reportes/datos'
 import { cargarPlantilla, type Plantilla } from '../reportes/plantilla'
 import { ReporteImprimible } from '../reportes/ReporteImprimible'
 import { tipoDe } from '../domain/logica'
+import type { Entrega } from '../domain/types'
 import * as S from '../state/store'
 import { Recurrentes } from './Recurrentes'
 import { avisar, FotoMaterial, intentar, Vacio } from './comunes'
@@ -44,6 +45,55 @@ function limites(desde: string, hasta: string): [string, string] {
 }
 
 const nombreReporte = (d: DatosReporte, ext: string) => `Entrega de EPP ${d.titulo.replace(/[·/\\:]/g, '-')}.${ext}`
+
+/** Reporte de entregas marcadas como EPP contaminado en el periodo. */
+function ReporteContaminado({ entregas }: { entregas: Entrega[] }) {
+  const lista = useMemo(
+    () => entregasContaminadas(entregas, S.materialesPorId.value, S.personal.value),
+    [entregas, S.materiales.value, S.personal.value],
+  )
+  if (!lista.length) return null
+  return (
+    <div class="stack">
+      <div class="spread">
+        <h2>EPP Contaminado</h2>
+        <span class="muted small">{lista.length} registro{lista.length > 1 ? 's' : ''}</span>
+      </div>
+      <div class="tabla-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Hora</th>
+              <th>Nombre</th>
+              <th>RPE</th>
+              <th>Área</th>
+              <th>Material contaminado</th>
+              <th>Supervisor</th>
+              <th>Observaciones</th>
+              <th>Folio</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lista.map((c) => (
+              <tr key={c.entrega.id}>
+                <td>{c.entrega.fecha}</td>
+                <td>{c.entrega.hora}</td>
+                <td>{c.entrega.nombre}</td>
+                <td class="mono small">{c.entrega.rpe}</td>
+                <td>{c.entrega.area}</td>
+                <td>{c.materiales.join(', ')}</td>
+                <td class="small">{c.supervisor || <span class="muted">—</span>}</td>
+                <td class="small">{c.entrega.observaciones || <span class="muted">—</span>}</td>
+                <td class="mono small">{c.entrega.folio}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
 
 function Exportar({ desde, hasta, area }: { desde: string; hasta: string; area: string }) {
   const [trabajando, setTrabajando] = useState('')
@@ -302,6 +352,7 @@ export function PantallaReportes() {
           </div>
 
           <Recurrentes entregas={d.ent} />
+          <ReporteContaminado entregas={d.ent} />
 
           <div class="row" style={{ alignItems: 'start', gap: '16px' }}>
             <div class="stack grow" style={{ minWidth: '300px' }}>

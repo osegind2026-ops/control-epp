@@ -21,6 +21,7 @@ import { comprimirFoto } from '../lib/imagen'
 import { puedeInventario } from '../state/permisos'
 import * as S from '../state/store'
 import { CamaraEnVivo } from './Camara'
+import { CapturaFotos, FotosGuardadas } from './Evidencia'
 import { avisar, intentar, Modal, Vacio } from './comunes'
 import { Icono } from './iconos'
 import { BuscadorTrabajador } from './Trabajador'
@@ -291,6 +292,7 @@ function ModalRegreso({ p, onCerrar }: { p: PrestamoEquipo; onCerrar: () => void
   const [bitacora, setBitacora] = useState(p.bitacora)
   const [condicion, setCondicion] = useState<CondicionRegreso>('bueno')
   const [comentarios, setComentarios] = useState('')
+  const [fotos, setFotos] = useState<string[]>([])
   const faltan = p.accesorios.filter((a) => !accesorios.includes(a))
   const conDetalle = condicion !== 'bueno' || faltan.length > 0 || (p.bitacora && !bitacora)
 
@@ -298,7 +300,7 @@ function ModalRegreso({ p, onCerrar }: { p: PrestamoEquipo; onCerrar: () => void
     const devolvio = mismo ? { rpe: p.rpe, nombre: p.nombre } : otro
     if (!devolvio) return avisar('Indique quién devuelve el equipo.', { tipo: 'bad' })
     const ok = await intentar(async () => {
-      await registrarRegreso({ prestamoId: p.id, devolvio, condicion, accesorios, bitacora, comentarios })
+      await registrarRegreso({ prestamoId: p.id, devolvio, condicion, accesorios, bitacora, comentarios, fotos })
       return true
     })
     if (ok) {
@@ -372,6 +374,7 @@ function ModalRegreso({ p, onCerrar }: { p: PrestamoEquipo; onCerrar: () => void
         {conDetalle ? 'Describa el detalle o lo que falta (obligatorio)' : 'Comentarios (opcional)'}
         <textarea class="input" id="eq-comentarios" rows={2} value={comentarios} onInput={(e) => setComentarios((e.target as HTMLTextAreaElement).value)} />
       </label>
+      <CapturaFotos fotos={fotos} onCambio={setFotos} sugerida={conDetalle} />
       <p class="muted small">Revisa: {S.sesion.value?.usuarioNombre}</p>
     </Modal>
   )
@@ -735,7 +738,7 @@ async function exportarBitacora(lista: PrestamoEquipo[]) {
   const ENC = { fontWeight: 'bold' as const, color: '#FFFFFF', backgroundColor: '#235B4E' }
   const enc = [
     'Folio', 'Código', 'Equipo', 'Salida', 'Recibió RPE', 'Recibió', 'Área', 'Contacto', 'Uso / lugar', 'Entregó', 'Debía volver', 'Accesorios', 'Lleva bitácora',
-    'Estatus', 'Regreso', 'Devolvió', 'Revisó', 'Condición', 'Faltantes', 'Comentarios',
+    'Estatus', 'Regreso', 'Devolvió', 'Revisó', 'Condición', 'Faltantes', 'Comentarios', 'Fotos',
   ].map((value) => ({ value, ...ENC }))
   const filas = lista.map((p) => {
     const r = p.regreso
@@ -743,13 +746,13 @@ async function exportarBitacora(lista: PrestamoEquipo[]) {
     return [
       p.folio, p.equipoCodigo, p.equipoNombre, fmtTs(p.ts), p.rpe, p.nombre, p.area, p.contacto, p.uso, p.usuarioNombre, p.vence.replace('T', ' '),
       p.accesorios.join(', '), p.bitacora ? 'SI' : 'NO', p.estatus, r ? fmtTs(r.ts) : '', r ? `${r.devolvioNombre} (${r.devolvioRpe})` : '', r?.usuarioNombre ?? '',
-      r ? CONDICIONES[r.condicion] : '', faltan.join(', '), [r?.comentarios, p.observaciones].filter(Boolean).join(' · '),
+      r ? CONDICIONES[r.condicion] : '', faltan.join(', '), [r?.comentarios, p.observaciones].filter(Boolean).join(' · '), r?.fotos?.length ? `${r.fotos.length} en la app` : '',
     ].map((value) => ({ value: value ?? '' }))
   })
   const blob = (await escribir([enc, ...filas], {
     sheet: 'Bitácora de equipos',
     stickyRowsCount: 1,
-    columns: [14, 11, 26, 16, 10, 28, 22, 14, 24, 18, 16, 24, 10, 11, 16, 28, 18, 16, 20, 34].map((width) => ({ width })),
+    columns: [14, 11, 26, 16, 10, 28, 22, 14, 24, 18, 16, 24, 10, 11, 16, 28, 18, 16, 20, 34, 12].map((width) => ({ width })),
   }).toBlob()) as Blob
   await entregarArchivo(`Bitácora de equipos ${fechaLocal()}.xlsx`, blob)
 }
@@ -839,6 +842,7 @@ function Bitacora() {
                         {faltan.length > 0 && <div class="muted">Faltó: {faltan.join(', ')}</div>}
                         {p.bitacora && !r.bitacora && <div class="muted">Faltó la bitácora</div>}
                         {r.comentarios && <div class="muted">{r.comentarios}</div>}
+                        <FotosGuardadas ids={r.fotos} />
                       </>
                     ) : (
                       ''

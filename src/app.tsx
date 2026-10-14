@@ -21,6 +21,7 @@ import { IndicadorNube } from './ui/Nube'
 import { PantallaInventario } from './ui/Inventario'
 import { PantallaPersonal } from './ui/Personal'
 import { PantallaReportes } from './ui/Reportes'
+import { PantallaFormatos } from './ui/Formatos'
 
 
 const NAV: { id: Pantalla; texto: string; icono: string }[] = [
@@ -30,6 +31,7 @@ const NAV: { id: Pantalla; texto: string; icono: string }[] = [
   { id: 'inventario', texto: 'Inventario', icono: 'inventario' },
   { id: 'historial', texto: 'Historial', icono: 'historial' },
   { id: 'reportes', texto: 'Reportes', icono: 'reportes' },
+  { id: 'formatos', texto: 'Formatos', icono: 'pdf' },
   { id: 'catalogo', texto: 'Catálogo', icono: 'catalogo' },
   { id: 'personal', texto: 'Personal', icono: 'personal' },
   { id: 'ajustes', texto: 'Ajustes', icono: 'ajustes' },
@@ -77,6 +79,8 @@ function Contenido() {
       return <PantallaHistorial />
     case 'reportes':
       return <PantallaReportes />
+    case 'formatos':
+      return <PantallaFormatos />
     case 'catalogo':
       return <PantallaCatalogo />
     case 'personal':

@@ -144,3 +144,54 @@ describe('captura de entregas de días anteriores', () => {
     S.sesion.value = admin
   })
 })
+
+describe('registros duplicados y fotos de devolución', () => {
+  it('detecta la entrega repetida del mismo día y agrupa las idénticas', async () => {
+    const { guardarTrabajador, registrarEntrega } = await import('./servicios')
+    const { posiblesDuplicados, gruposDuplicados } = await import('../domain/logica')
+    const { fechaLocal } = await import('../lib/util')
+    const t = await guardarTrabajador({ rpe: 'zz977', nombre: 'Doble Captura', area: 'TALLER', puesto: 'OPERADOR', casillero: '', activo: true })
+    const lineas = [{ materialId: 'tapones', varianteId: '', cantidad: 3 }]
+    const hoy = fechaLocal()
+    expect(posiblesDuplicados(S.entregas.value, t.rpe, hoy, lineas)).toEqual([])
+    const e1 = (await registrarEntrega(t, lineas, '')).entrega
+    const dup = posiblesDuplicados(S.entregas.value, t.rpe, hoy, lineas)
+    expect(dup).toHaveLength(1)
+    expect(dup[0].identica).toBe(true)
+    expect(dup[0].entrega.id).toBe(e1.id)
+    // Mismo material con otra cantidad: coincide, pero no es idéntica
+    expect(posiblesDuplicados(S.entregas.value, t.rpe, hoy, [{ materialId: 'tapones', varianteId: '', cantidad: 1 }])[0].identica).toBe(false)
+    // Otro día u otro material: no es duplicado
+    expect(posiblesDuplicados(S.entregas.value, t.rpe, '2020-01-01', lineas)).toEqual([])
+    expect(posiblesDuplicados(S.entregas.value, t.rpe, hoy, [{ materialId: 'lentes_claros', varianteId: '', cantidad: 1 }])).toEqual([])
+    const e2 = (await registrarEntrega(t, lineas, '')).entrega
+    const grupo = gruposDuplicados(S.entregas.value).find((g) => g.some((e) => e.id === e1.id))!
+    expect(grupo.map((e) => e.id).sort()).toEqual([e1.id, e2.id].sort())
+  })
+
+  it('guarda las fotos del equipo devuelto (resguardo y equipo a resguardo)', async () => {
+    const { guardarTrabajador, registrarEntrega, devolverResguardo, MAX_FOTOS_EVIDENCIA } = await import('./servicios')
+    const { guardarEquipo, prestarEquipo, registrarRegreso, ahoraLocal } = await import('./equipos')
+    const t = await guardarTrabajador({ rpe: 'zz988', nombre: 'Devuelve Dañado', area: 'TALLER', puesto: 'OPERADOR', casillero: '', activo: true })
+    await db.movimientos.add({ id: 'M-casco', ts: new Date().toISOString(), tipo: 'INICIAL', materialId: 'casco', varianteId: '', ubicacionId: 'ubi_despacho', cantidad: 5, ref: '', motivo: '', nota: '', usuarioId: 'x', usuarioNombre: 'x', equipo: 'T1' })
+    await S.recargar('movimientos')
+    await registrarEntrega(t, [{ materialId: 'casco', varianteId: '', cantidad: 1, motivoId: 'ent_primera' }], '')
+    const r = S.resguardosActivos.value.find((x) => x.rpe === t.rpe)!
+    const foto = 'data:image/jpeg;base64,AAAA'
+    await devolverResguardo(r.id, 'dev_desgaste', 'Casco roto', [foto, foto, foto, foto, foto, foto])
+    const cerrado = S.resguardos.value.find((x) => x.id === r.id)!
+    expect(cerrado.cierre?.fotos).toHaveLength(MAX_FOTOS_EVIDENCIA)
+    expect(S.fotos.value.get(cerrado.cierre!.fotos![0])).toBe(foto)
+
+    const eq = await guardarEquipo({ codigo: 'FOT-01', nombre: 'Sonómetro', marca: '', modelo: '', serie: '', accesorios: [], llevaBitacora: false, estado: 'operativo', notas: '', activo: true })
+    const p = await prestarEquipo({ equipoId: eq.id, trabajador: t, contacto: '123', uso: '', vence: ahoraLocal(new Date(Date.now() + 864e5)), accesorios: [], bitacora: false, observaciones: '' })
+    await registrarRegreso({ prestamoId: p.id, devolvio: t, condicion: 'danado', accesorios: [], bitacora: false, comentarios: 'Pantalla rota', fotos: [foto] })
+    const regreso = S.prestamosEquipo.value.find((x) => x.id === p.id)!.regreso!
+    expect(regreso.fotos).toHaveLength(1)
+    // Sin fotos no se guarda el campo
+    const eq2 = await guardarEquipo({ codigo: 'FOT-02', nombre: 'Luxómetro', marca: '', modelo: '', serie: '', accesorios: [], llevaBitacora: false, estado: 'operativo', notas: '', activo: true })
+    const p2 = await prestarEquipo({ equipoId: eq2.id, trabajador: t, contacto: '123', uso: '', vence: ahoraLocal(new Date(Date.now() + 864e5)), accesorios: [], bitacora: false, observaciones: '' })
+    await registrarRegreso({ prestamoId: p2.id, devolvio: t, condicion: 'bueno', accesorios: [], bitacora: false, comentarios: '' })
+    expect(S.prestamosEquipo.value.find((x) => x.id === p2.id)!.regreso!.fotos).toBeUndefined()
+  })
+})

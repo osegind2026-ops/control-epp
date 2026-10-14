@@ -135,6 +135,52 @@ export function entregasPrevias(entregas: Entrega[], rpe: string, materialId: st
   return r.sort((a, b) => (a.entrega.ts < b.entrega.ts ? 1 : -1))
 }
 
+// ---------------- Registros duplicados ----------------
+
+const firmaLineas = (lineas: { materialId: string; varianteId: string; cantidad: number }[]) =>
+  lineas
+    .map((l) => `${l.materialId}|${l.varianteId}|${l.cantidad}`)
+    .sort()
+    .join(';')
+
+export interface PosibleDuplicado {
+  entrega: Entrega
+  /** true = mismos materiales, tallas y cantidades; false = solo coincide parte del material. */
+  identica: boolean
+  /** Materiales que coinciden con lo que se quiere registrar. */
+  materiales: string[]
+}
+
+/**
+ * Entregas vigentes del mismo trabajador en el mismo día que repiten material con lo
+ * que se va a registrar: lo más probable es que ya se haya capturado (doble captura).
+ */
+export function posiblesDuplicados(entregas: Entrega[], rpe: string, fecha: string, lineas: { materialId: string; varianteId: string; cantidad: number }[]): PosibleDuplicado[] {
+  const firma = firmaLineas(lineas)
+  const ids = new Set(lineas.map((l) => l.materialId))
+  const r: PosibleDuplicado[] = []
+  for (const e of entregas) {
+    if (e.rpe !== rpe || e.fecha !== fecha || e.estado !== 'registrada') continue
+    const materiales = [...new Set(e.lineas.filter((l) => ids.has(l.materialId)).map((l) => l.materialId))]
+    if (materiales.length) r.push({ entrega: e, identica: firmaLineas(e.lineas) === firma, materiales })
+  }
+  return r.sort((a, b) => Number(b.identica) - Number(a.identica) || (a.entrega.ts < b.entrega.ts ? 1 : -1))
+}
+
+/**
+ * Grupos de entregas vigentes idénticas (mismo trabajador, día, materiales, tallas y
+ * cantidades): para revisar capturas dobles, por ejemplo entre celulares y PCs.
+ */
+export function gruposDuplicados(entregas: Entrega[]): Entrega[][] {
+  const mapa = new Map<string, Entrega[]>()
+  for (const e of entregas) {
+    if (e.estado !== 'registrada') continue
+    const k = `${e.rpe}|${e.fecha}|${firmaLineas(e.lineas)}`
+    mapa.set(k, [...(mapa.get(k) ?? []), e])
+  }
+  return [...mapa.values()].filter((g) => g.length > 1)
+}
+
 /** Se avisa cuando ya recibió ese material `veces` o más en los últimos `dias`. */
 export const REGLA_RECURRENCIA = { dias: 30, veces: 2 }
 

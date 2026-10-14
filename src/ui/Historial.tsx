@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'preact/hooks'
+import { gruposDuplicados } from '../domain/logica'
 import type { Entrega } from '../domain/types'
 import { descargarArchivo, entregarArchivo, fechaLocal, normalizar, plural } from '../lib/util'
 import { calcularReporte } from '../reportes/datos'
@@ -45,19 +46,23 @@ export function PantallaHistorial() {
   const [hasta, setHasta] = useState('')
   const [estado, setEstado] = useState<'' | 'registrada' | 'anulada'>('')
   const [detalle, setDetalle] = useState<Entrega | null>(null)
+  const [soloDuplicados, setSoloDuplicados] = useState(false)
+  // Entregas idénticas (misma persona, día, materiales y cantidades): posibles capturas dobles
+  const duplicadas = useMemo(() => new Set(gruposDuplicados(S.entregas.value).flat().map((e) => e.id)), [S.entregas.value])
 
   const lista = useMemo(() => {
     const t = normalizar(q)
     return S.entregas.value
       .filter(
         (e) =>
+          (!soloDuplicados || duplicadas.has(e.id)) &&
           (!t || normalizar(`${e.folio} ${e.rpe} ${e.nombre} ${e.area} ${e.usuarioNombre}`).includes(t)) &&
           (!desde || e.fecha >= desde) &&
           (!hasta || e.fecha <= hasta) &&
           (!estado || e.estado === estado),
       )
       .reverse()
-  }, [S.entregas.value, q, desde, hasta, estado])
+  }, [S.entregas.value, q, desde, hasta, estado, soloDuplicados, duplicadas])
 
   const exportar = async (tipo: 'excel' | 'detalle') => {
     const orden = [...lista].reverse()
@@ -95,6 +100,17 @@ export function PantallaHistorial() {
           <option value="anulada">Anuladas</option>
         </select>
       </div>
+      {duplicadas.size > 0 && (
+        <div class="aviso warn small">
+          <Icono n="alerta" />
+          <span class="grow">
+            Hay {plural(duplicadas.size, 'entrega que parece', 'entregas que parecen')} captura doble (misma persona, mismo día y mismo material). Revíselas y anule las que sobren.
+          </span>
+          <button class="btn sm" onClick={() => setSoloDuplicados(!soloDuplicados)}>
+            {soloDuplicados ? 'Ver todas' : 'Ver solo esas'}
+          </button>
+        </div>
+      )}
       <p class="muted small">{plural(lista.length, 'entrega', 'entregas')}</p>
       {lista.length === 0 ? (
         <Vacio>No hay entregas con este filtro.</Vacio>
@@ -130,6 +146,7 @@ export function PantallaHistorial() {
                   <td class="small">{e.usuarioNombre}</td>
                   <td>
                     {e.estado === 'anulada' ? <span class="badge bad">Anulada</span> : <span class="badge ok">OK</span>}
+                    {duplicadas.has(e.id) && <span class="badge warn">Posible duplicada</span>}
                     {e.capturada && (
                       <span class="badge warn" title={`Capturada después, el ${fechaLocal(new Date(e.capturada))}`}>
                         Captura posterior

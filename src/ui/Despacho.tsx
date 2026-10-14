@@ -1,13 +1,13 @@
 import { signal } from '@preact/signals'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { MAS_PEDIDOS_BASE } from '../db/semilla'
-import { aplicarKit, existencia, lecturaEscanerValida, masPedidos, materialesRecurrentes, REGLA_RECURRENCIA, type MaterialRecurrente, nivelStock, prestamosVencidos, resolverRpe, sumarDias, tieneTallas, variantesDe } from '../domain/logica'
+import { aplicarKit, existencia, posiblesDuplicados, lecturaEscanerValida, masPedidos, materialesRecurrentes, REGLA_RECURRENCIA, type MaterialRecurrente, nivelStock, prestamosVencidos, resolverRpe, sumarDias, tieneTallas, variantesDe } from '../domain/logica'
 import type { DatosPrestamo, Entrega, Material, Trabajador } from '../domain/types'
 import { fechaLocal, hace, normalizar, plural } from '../lib/util'
 import { deshacerEntrega, registrarEntrega, type LineaTicket } from '../state/servicios'
 import { pantalla } from '../state/navegacion'
 import * as S from '../state/store'
-import { avisar, FotoMaterial, intentar, Modal, Talla } from './comunes'
+import { avisar, confirmar, FotoMaterial, intentar, Modal, Talla } from './comunes'
 import { puedeInventario } from '../state/permisos'
 import { DetalleEntrega } from './DetalleEntrega'
 import { Icono } from './iconos'
@@ -91,7 +91,7 @@ function recurrentesDelTicket(t: Trabajador | null): MaterialRecurrente[] {
 }
 
 let ultimoAvisoRecurrencia = ''
-const MOTIVOS_RECURRENCIA = ['Desgaste por el trabajo', 'Se dañó o rompió', 'Extravío', 'Talla incorrecta', 'Para su cuadrilla']
+const MOTIVOS_RECURRENCIA = ['EPP Contaminado', 'Desgaste por el trabajo', 'Se dañó o rompió', 'Extravío', 'Talla incorrecta', 'Para su cuadrilla']
 
 /**
  * Bajo los datos del trabajador: lista desplegable con sus últimas entregas. Se resaltan
@@ -494,6 +494,24 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
   const entregar = async () => {
     if (bloqueo || !t || enviando) return
     if (sinExistencia && !confirmarFalta) return setConfirmarFalta(true)
+    // ¿Ya se capturó hoy (o en el día elegido) lo mismo para esta persona?
+    const consumibles = lineas.filter((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'consumible')
+    const dups = posiblesDuplicados(S.entregas.value, t.rpe, diaEntrega(), consumibles)
+    if (dups.length) {
+      const identica = dups.some((d) => d.identica)
+      const detalle = dups
+        .slice(0, 4)
+        .map((d) => `• ${d.entrega.folio} · ${d.entrega.hora} · ${d.entrega.usuarioNombre}: ${d.entrega.lineas.map((l) => `${S.nombreMaterial(l.materialId)}${l.varianteId ? ` ${l.varianteId}` : ''} ×${l.cantidad}`).join(', ')}`)
+        .join('\n')
+      const dia = diaEntrega() === fechaLocal() ? 'hoy' : `el ${fechaCorta(diaEntrega())}`
+      const seguir = await confirmar(
+        identica ? 'Posible registro duplicado' : 'Ya recibió este material ese día',
+        `${t.nombre} ya tiene ${identica ? 'una entrega idéntica' : `entregas con ${[...new Set(dups.flatMap((d) => d.materiales))].map((m) => S.nombreMaterial(m)).join(', ')}`} ${dia}:\n${detalle}\n\n¿Registrar de todos modos otra entrega?`,
+        'Sí, registrar otra',
+        true,
+      )
+      if (!seguir) return
+    }
     setEnviando(true)
     const r = await intentar(() => registrarEntrega(t, lineas, observaciones.value, hayPrestamo ? datosPrestamo.value : undefined, notaRecurrencia.value, fechaCaptura.value))
     setEnviando(false)

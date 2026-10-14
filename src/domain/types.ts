@@ -226,6 +226,8 @@ export interface CierreResguardo {
   usuarioId: string
   usuarioNombre: string
   ref: string
+  /** Fotos del equipo devuelto (ids de la tabla fotos), sobre todo si regresó con daño. */
+  fotos?: string[]
 }
 
 export interface Resguardo {
@@ -299,6 +301,8 @@ export interface RegresoEquipo {
   accesorios: string[] // los que regresaron
   bitacora: boolean
   comentarios: string
+  /** Fotos del equipo al regresar (ids de la tabla fotos), sobre todo si regresó con daño. */
+  fotos?: string[]
 }
 
 export interface PrestamoEquipo {
