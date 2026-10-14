@@ -149,22 +149,22 @@ function FormatoRegistroEntregaHorizontal({ paginaNum, anio = ANIO_ACTUAL }: { p
             <th rowspan={2} class="col-h-rpe">RPE</th>
             <th rowspan={2} class="col-h-firma">FIRMA</th>
             <th rowspan={2} class="col-h-area">ÁREA</th>
-            <th rowspan={2} class="col-h-rotado">LENTES</th>
+            <th rowspan={2} class="col-h-lentes col-h-rot"><span class="col-v-txt">LENTES</span></th>
             <th colspan={3} class="col-h-grupo">GUANTES</th>
-            <th rowspan={2} class="col-h-rotado">TAPONES</th>
+            <th rowspan={2} class="col-h-tapones col-h-rot"><span class="col-v-txt">TAPONES</span></th>
             <th colspan={4} class="col-h-grupo">MASCARILLA</th>
             <th rowspan={2} class="col-h-fecha">FECHA<br/><small>(DD/MM/AAA)</small></th>
             <th rowspan={2} class="col-h-hora">HORA</th>
             <th rowspan={2} class="col-h-obs">OBSERVACIONES</th>
           </tr>
           <tr>
-            <th class="col-h-rotado sub">CARNAZA</th>
-            <th class="col-h-rotado sub">HYFLEX</th>
-            <th class="col-h-rotado sub">NITRILO</th>
-            <th class="col-h-rotado sub">AZUL</th>
-            <th class="col-h-rotado sub">NEGRA</th>
-            <th class="col-h-rotado sub">GRIS</th>
-            <th class="col-h-rotado sub">POLVO</th>
+            <th class="col-h-carnaza col-h-rot"><span class="col-v-txt">CARNAZA</span></th>
+            <th class="col-h-hyflex col-h-rot"><span class="col-v-txt">HYFLEX</span></th>
+            <th class="col-h-nitrilo col-h-rot"><span class="col-v-txt">NITRILO</span></th>
+            <th class="col-h-azul col-h-rot"><span class="col-v-txt">AZUL</span></th>
+            <th class="col-h-negra col-h-rot"><span class="col-v-txt">NEGRA</span></th>
+            <th class="col-h-gris col-h-rot"><span class="col-v-txt">GRIS</span></th>
+            <th class="col-h-polvo col-h-rot"><span class="col-v-txt">POLVO</span></th>
           </tr>
         </thead>
         <tbody>
@@ -174,15 +174,15 @@ function FormatoRegistroEntregaHorizontal({ paginaNum, anio = ANIO_ACTUAL }: { p
               <td class="col-h-rpe">&nbsp;</td>
               <td class="col-h-firma">&nbsp;</td>
               <td class="col-h-area">&nbsp;</td>
-              <td class="col-h-chk">&nbsp;</td>
-              <td class="col-h-chk">&nbsp;</td>
-              <td class="col-h-chk">&nbsp;</td>
-              <td class="col-h-chk">&nbsp;</td>
-              <td class="col-h-chk">&nbsp;</td>
-              <td class="col-h-chk">&nbsp;</td>
-              <td class="col-h-chk">&nbsp;</td>
-              <td class="col-h-chk">&nbsp;</td>
-              <td class="col-h-chk">&nbsp;</td>
+              <td class="col-h-lentes">&nbsp;</td>
+              <td class="col-h-carnaza">&nbsp;</td>
+              <td class="col-h-hyflex">&nbsp;</td>
+              <td class="col-h-nitrilo">&nbsp;</td>
+              <td class="col-h-tapones">&nbsp;</td>
+              <td class="col-h-azul">&nbsp;</td>
+              <td class="col-h-negra">&nbsp;</td>
+              <td class="col-h-gris">&nbsp;</td>
+              <td class="col-h-polvo">&nbsp;</td>
               <td class="col-h-fecha">&nbsp;</td>
               <td class="col-h-hora">&nbsp;</td>
               <td class="col-h-obs">&nbsp;</td>

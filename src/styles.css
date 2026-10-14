@@ -677,7 +677,7 @@ details > summary { list-style: revert; }
    ========================================================================= */
 
 @page formatoCarta { size: letter portrait; margin: 4mm 6mm; }
-@page formatoRegistroHorizontal { size: letter landscape; margin: 4mm 6mm; }
+@page formatoRegistroHorizontal { size: letter landscape; margin: 4mm 5.5mm; }
 
 /* Barra de pestañas de formatos con iconos alineados */
 .fmt-pestanas {
@@ -1020,40 +1020,53 @@ details > summary { list-style: revert; }
 
 /* ---------- 2. REGISTRO DE ENTREGA DE EPP (Horizontal Landscape) ---------- */
 .hoja-registro-horizontal {
-  width: 270mm !important;
-  min-height: 202mm !important;
-  background: #fff;
-  color: #000;
-  padding: 4mm 6mm;
-  box-sizing: border-box;
+  width: 279.4mm !important;
+  max-width: 279.4mm !important;
+  height: 215.9mm !important;
+  max-height: 215.9mm !important;
+  background: #fff !important;
+  color: #000 !important;
+  padding: 4.5mm 5.5mm 4mm 5.5mm !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  overflow: hidden !important;
+}
+
+.fmt-reg-h-pagina {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  height: 100%;
+  width: 100%;
 }
 
 .fmt-reg-h-cab {
   display: grid;
-  grid-template-columns: 55mm 1fr 65mm;
+  grid-template-columns: 50mm 1fr 68mm;
   align-items: center;
   gap: 8px;
   border-bottom: 1.5px solid #000;
   padding-bottom: 1.5mm;
+  height: 15.5mm;
+  flex: none;
 }
 
 .fmt-reg-h-logo img {
-  max-height: 9.5mm;
+  max-height: 11mm;
   display: block;
 }
 
 .fmt-reg-h-cfe-txt {
-  font-size: 6.5pt;
+  font-size: 6.8pt;
   color: #0b6623;
   font-weight: 700;
   display: block;
 }
 
 .fmt-reg-h-tit h1 {
-  font-size: 11.5pt;
+  font-size: 14pt;
   text-align: center;
   margin: 0;
   font-weight: 800;
@@ -1063,66 +1076,109 @@ details > summary { list-style: revert; }
 .fmt-reg-h-sub {
   display: flex;
   flex-direction: column;
-  font-size: 6.5pt;
+  font-size: 6.8pt;
   text-align: right;
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
 .fmt-reg-h-pagina-num {
   font-weight: 800;
-  font-size: 7.5pt;
+  font-size: 8pt;
   margin-top: 1px;
 }
 
+/* Tabla de Registro con proporciones fieles al documento original CFE */
 .fmt-reg-h-tabla {
   width: 100% !important;
   border-collapse: collapse !important;
-  font-size: 6.5pt !important;
-  margin-top: 1.5mm !important;
+  font-size: 6.8pt !important;
+  margin: 1mm 0 !important;
   background: #fff !important;
+  table-layout: fixed !important;
+  flex: 1;
 }
 
 .fmt-reg-h-tabla th, .fmt-reg-h-tabla td {
   border: 1px solid #000 !important;
-  padding: 1px 1.5px;
+  padding: 0;
   text-align: center;
+  vertical-align: middle;
+  box-sizing: border-box;
 }
 
-.fmt-reg-h-tabla th {
+.fmt-reg-h-tabla thead th {
   background: #f0f0f0 !important;
   color: #000 !important;
   font-weight: 700;
   -webkit-print-color-adjust: exact !important;
   print-color-adjust: exact !important;
-  padding: 1.5px 1px;
-  line-height: 1.1;
   position: static !important;
+  line-height: 1.1;
+  padding: 1px 0;
 }
 
-.fmt-reg-h-tabla .col-h-nom { width: 48mm; text-align: left; padding-left: 4px; }
-.fmt-reg-h-tabla .col-h-rpe { width: 16mm; }
-.fmt-reg-h-tabla .col-h-firma { width: 26mm; }
-.fmt-reg-h-tabla .col-h-area { width: 28mm; }
-.fmt-reg-h-tabla .col-h-rotado { width: 9.5mm; font-size: 6pt; font-weight: 700; }
-.fmt-reg-h-tabla .col-h-rotado.sub { font-size: 5.5pt; }
-.fmt-reg-h-tabla .col-h-grupo { font-size: 6.5pt; }
-.fmt-reg-h-tabla .col-h-chk { width: 9.5mm; }
-.fmt-reg-h-tabla .col-h-fecha { width: 17mm; font-size: 6pt; }
-.fmt-reg-h-tabla .col-h-hora { width: 12mm; }
-.fmt-reg-h-tabla .col-h-obs { width: 36mm; }
-.fmt-reg-h-tabla tbody tr { height: 7.1mm; background: #fff !important; }
-.fmt-reg-h-tabla tbody td { background: #fff !important; color: #000 !important; }
+/* Encabezados de tabla de altura proporcional para textos verticales */
+.fmt-reg-h-tabla thead tr:first-child {
+  height: 5.5mm;
+}
+.fmt-reg-h-tabla thead tr:nth-child(2) {
+  height: 15.5mm;
+}
+.fmt-reg-h-tabla thead th[rowspan="2"] {
+  height: 21mm;
+}
+
+/* Textos rotados verticalmente fieles a la plantilla original */
+.fmt-reg-h-tabla .col-v-txt {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  display: inline-block;
+  white-space: nowrap;
+  font-size: 6.5pt;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+/* Anchos fieles al formato original (suma total = 268.4mm) */
+.fmt-reg-h-tabla .col-h-nom { width: 53mm; text-align: left !important; padding-left: 4px !important; }
+.fmt-reg-h-tabla .col-h-rpe { width: 17mm; }
+.fmt-reg-h-tabla .col-h-firma { width: 25mm; }
+.fmt-reg-h-tabla .col-h-area { width: 20mm; }
+.fmt-reg-h-tabla .col-h-lentes { width: 10.5mm; }
+.fmt-reg-h-tabla .col-h-grupo { font-size: 6.8pt; }
+.fmt-reg-h-tabla .col-h-carnaza { width: 12.5mm; }
+.fmt-reg-h-tabla .col-h-hyflex { width: 10.5mm; }
+.fmt-reg-h-tabla .col-h-nitrilo { width: 10.5mm; }
+.fmt-reg-h-tabla .col-h-tapones { width: 12mm; }
+.fmt-reg-h-tabla .col-h-azul { width: 8.5mm; }
+.fmt-reg-h-tabla .col-h-negra { width: 9.5mm; }
+.fmt-reg-h-tabla .col-h-gris { width: 8.5mm; }
+.fmt-reg-h-tabla .col-h-polvo { width: 9.5mm; }
+.fmt-reg-h-tabla .col-h-fecha { width: 22mm; font-size: 6.5pt; line-height: 1.1; }
+.fmt-reg-h-tabla .col-h-hora { width: 13mm; }
+.fmt-reg-h-tabla .col-h-obs { width: 26mm; }
+
+/* 20 renglones exactos que aprovechan toda la altura de la hoja carta */
+.fmt-reg-h-tabla tbody tr {
+  height: 7.2mm !important;
+  background: #fff !important;
+}
+.fmt-reg-h-tabla tbody td {
+  background: #fff !important;
+  color: #000 !important;
+  height: 7.2mm !important;
+}
 
 .fmt-reg-h-pie {
-  font-size: 6pt;
-  line-height: 1.2;
+  font-size: 6.2pt;
+  line-height: 1.25;
   border-top: 1px solid #000;
   padding-top: 1.5mm;
-  margin-top: 1.5mm;
+  flex: none;
 }
 
 .fmt-reg-h-leyenda { font-weight: 500; }
-.fmt-reg-h-dir { color: #444; margin-top: 1px; }
+.fmt-reg-h-dir { color: #444; margin-top: 1px; text-align: center; }
 
 /* ---------- 3. RESGUARDO ECONÓMICO (2 por hoja) ---------- */
 .hoja-resguardo {
@@ -1269,14 +1325,19 @@ details > summary { list-style: revert; }
 }
 
 @media print {
+  @page formatoRegistroHorizontal {
+    size: letter landscape;
+    margin: 4mm 5.5mm;
+  }
   .hoja-registro-horizontal {
     page: formatoRegistroHorizontal !important;
-    width: 270mm !important;
-    height: 202mm !important;
-    max-height: 204mm !important;
+    width: 268.4mm !important;
+    max-width: 268.4mm !important;
+    height: 207.9mm !important;
+    max-height: 207.9mm !important;
     box-shadow: none !important;
     margin: 0 !important;
-    padding: 3mm 5mm !important;
+    padding: 0 !important;
     page-break-after: always;
     break-after: page;
     box-sizing: border-box;
