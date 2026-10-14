@@ -123,7 +123,7 @@ function FormatoContaminadoIndividual({ folioTexto }: { folioTexto: string }) {
 // 2. FORMATO REGISTRO DE ENTREGA DE EPP 2026 (Firmas - Horizontal Landscape)
 // =========================================================================
 function FormatoRegistroEntregaHorizontal({ paginaNum, anio = ANIO_ACTUAL }: { paginaNum: number; anio?: number }) {
-  const renglones = Array.from({ length: 15 }, (_, i) => i)
+  const renglones = Array.from({ length: 20 }, (_, i) => i)
   return (
     <div class="fmt-reg-h-pagina">
       <div class="fmt-reg-h-cab">
@@ -583,11 +583,11 @@ export function PantallaFormatos() {
                 value={cantHojasReg}
                 onChange={(e) => setCantHojasReg(Number((e.target as HTMLSelectElement).value))}
               >
-                <option value={1}>1 página (15 renglones)</option>
-                <option value={3}>3 páginas (45 renglones)</option>
-                <option value={5}>5 páginas (75 renglones)</option>
-                <option value={10}>10 páginas (150 renglones)</option>
-                <option value={20}>20 páginas (300 renglones)</option>
+                <option value={1}>1 página (20 renglones)</option>
+                <option value={3}>3 páginas (60 renglones)</option>
+                <option value={5}>5 páginas (100 renglones)</option>
+                <option value={10}>10 páginas (200 renglones)</option>
+                <option value={20}>20 páginas (400 renglones)</option>
               </select>
             </label>
           </div>
