@@ -763,13 +763,53 @@ details > summary { list-style: revert; }
 .hoja-carta-formato {
   width: 210mm;
   min-height: 275mm;
-  background: #fff;
-  color: #000;
+  background: #fff !important;
+  color: #000 !important;
+  color-scheme: light !important;
   padding: 5mm;
   box-sizing: border-box;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
   font-family: var(--body, Arial, sans-serif);
   line-height: 1.15;
+}
+
+/* Aislamiento completo de estilos para los formatos: evita fondos oscuros heredados del modo oscuro */
+.hoja-carta-formato,
+.hoja-registro-horizontal,
+.hoja-carta-formato *,
+.hoja-registro-horizontal * {
+  color-scheme: light !important;
+}
+
+.hoja-carta-formato table,
+.hoja-registro-horizontal table {
+  background: #fff !important;
+  color: #000 !important;
+  border-collapse: collapse !important;
+}
+
+.hoja-carta-formato thead th,
+.hoja-registro-horizontal thead th {
+  position: static !important;
+  background: #f0f0f0 !important;
+  color: #000 !important;
+  border: 1px solid #000 !important;
+  font-family: inherit !important;
+  letter-spacing: normal !important;
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+}
+
+.hoja-carta-formato tbody tr,
+.hoja-registro-horizontal tbody tr {
+  background: #fff !important;
+}
+
+.hoja-carta-formato tbody td,
+.hoja-registro-horizontal tbody td {
+  background: #fff !important;
+  color: #000 !important;
+  border: 1px solid #000 !important;
 }
 
 /* ---------- 1. EPP CONTAMINADO (4 por hoja) ---------- */
@@ -915,25 +955,32 @@ details > summary { list-style: revert; }
 }
 
 .fmt-c-epp-tbl {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 7pt;
+  width: 100% !important;
+  border-collapse: collapse !important;
+  font-size: 7pt !important;
+  background: #fff !important;
 }
 
 .fmt-c-epp-tbl th {
-  border: 1px solid #000;
+  background: #f0f0f0 !important;
+  color: #000 !important;
+  border: 1px solid #000 !important;
   padding: 1.5px 2px;
   font-weight: 700;
   text-align: center;
   vertical-align: middle;
   height: 4.8mm;
   line-height: 1.05;
+  position: static !important;
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
 }
 
 .fmt-c-epp-tbl td.td-chk {
-  border: 1px solid #000;
+  background: #fff !important;
+  color: #000 !important;
+  border: 1px solid #000 !important;
   height: 4.5mm;
-  background: #fff;
 }
 
 .fmt-c-pie-firma {
@@ -1028,25 +1075,28 @@ details > summary { list-style: revert; }
 }
 
 .fmt-reg-h-tabla {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 6.5pt;
-  margin-top: 1.5mm;
+  width: 100% !important;
+  border-collapse: collapse !important;
+  font-size: 6.5pt !important;
+  margin-top: 1.5mm !important;
+  background: #fff !important;
 }
 
 .fmt-reg-h-tabla th, .fmt-reg-h-tabla td {
-  border: 1px solid #000;
+  border: 1px solid #000 !important;
   padding: 1px 1.5px;
   text-align: center;
 }
 
 .fmt-reg-h-tabla th {
-  background: #f0f0f0;
+  background: #f0f0f0 !important;
+  color: #000 !important;
   font-weight: 700;
-  -webkit-print-color-adjust: exact;
-  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
   padding: 1.5px 1px;
   line-height: 1.1;
+  position: static !important;
 }
 
 .fmt-reg-h-tabla .col-h-nom { width: 48mm; text-align: left; padding-left: 4px; }
@@ -1060,7 +1110,8 @@ details > summary { list-style: revert; }
 .fmt-reg-h-tabla .col-h-fecha { width: 17mm; font-size: 6pt; }
 .fmt-reg-h-tabla .col-h-hora { width: 12mm; }
 .fmt-reg-h-tabla .col-h-obs { width: 36mm; }
-.fmt-reg-h-tabla tbody tr { height: 7.1mm; }
+.fmt-reg-h-tabla tbody tr { height: 7.1mm; background: #fff !important; }
+.fmt-reg-h-tabla tbody td { background: #fff !important; color: #000 !important; }
 
 .fmt-reg-h-pie {
   font-size: 6pt;
@@ -1153,20 +1204,36 @@ details > summary { list-style: revert; }
 }
 
 .fmt-resg-tabla {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 8pt;
-  margin-bottom: 3mm;
+  width: 100% !important;
+  border-collapse: collapse !important;
+  font-size: 8pt !important;
+  margin-bottom: 3mm !important;
+  background: #fff !important;
 }
 
 .fmt-resg-tabla th, .fmt-resg-tabla td {
-  border: 1px solid #000;
+  border: 1px solid #000 !important;
   padding: 3px;
   text-align: center;
 }
 
+.fmt-resg-tabla th {
+  background: #f0f0f0 !important;
+  color: #000 !important;
+  font-weight: 700;
+  position: static !important;
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+}
+
 .fmt-resg-tabla tbody tr {
+  background: #fff !important;
   height: 9mm;
+}
+
+.fmt-resg-tabla tbody td {
+  background: #fff !important;
+  color: #000 !important;
 }
 
 .fmt-box-chk {
