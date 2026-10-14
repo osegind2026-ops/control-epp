@@ -302,21 +302,42 @@ function FormatoResguardoIndividual({ folioTexto }: { folioTexto: string }) {
 // =========================================================================
 // VENTANA MODAL / PORTAL DE IMPRESIÓN
 // =========================================================================
-function VistaImpresionPortal({ children, onCerrar }: { children: preact.ComponentChildren; onCerrar: () => void }) {
+function VistaImpresionPortal({
+  children,
+  onCerrar,
+  orientacion = 'portrait',
+}: {
+  children: preact.ComponentChildren
+  onCerrar: () => void
+  orientacion?: 'portrait' | 'landscape'
+}) {
   const [contenedor] = useState(() => {
     const el = document.createElement('div')
     el.className = 'contenedor-formatos-impresion'
     document.body.appendChild(el)
     document.body.classList.add('imprimiendo-formato-activo')
+    document.body.classList.add(orientacion === 'landscape' ? 'imprimiendo-formato-horizontal' : 'imprimiendo-formato-vertical')
     return el
   })
 
   useEffect(() => {
+    // Inyectar regla @page exacta para que el diálogo de impresión de Chrome/Edge
+    // detecte automáticamente tamaño Carta y la orientación correcta (horizontal o vertical) con márgenes 0
+    const estilo = document.createElement('style')
+    estilo.id = 'estilo-formato-print-dinamico'
+    estilo.textContent = orientacion === 'landscape'
+      ? `@page { size: letter landscape; margin: 0; }`
+      : `@page { size: letter portrait; margin: 0; }`
+    document.head.appendChild(estilo)
+
     return () => {
       document.body.classList.remove('imprimiendo-formato-activo')
+      document.body.classList.remove('imprimiendo-formato-horizontal')
+      document.body.classList.remove('imprimiendo-formato-vertical')
+      estilo.remove()
       contenedor.remove()
     }
-  }, [contenedor])
+  }, [contenedor, orientacion])
 
   return createPortal(
     <div class="portal-formatos-wrap">
@@ -789,11 +810,14 @@ export function PantallaFormatos() {
       {/* VISTA DE IMPRESIÓN MODAL ACTIVA (PORTAL) */}
       {/* =================================================================== */}
       {imprimiendo && (
-        <VistaImpresionPortal onCerrar={() => setImprimiendo(false)}>
-          {/* EPP Contaminado: exactamente 4 por página carta */}
+        <VistaImpresionPortal
+          orientacion={tipo === 'registro_epp' ? 'landscape' : 'portrait'}
+          onCerrar={() => setImprimiendo(false)}
+        >
+          {/* EPP Contaminado: exactamente 4 por página carta (Vertical) */}
           {tipo === 'contaminado' &&
             gruposContaminado().map((grupo, numPag) => (
-              <section key={numPag} class="hoja-carta-formato hoja-contaminado">
+              <section key={numPag} class="hoja-formato-impresion hoja-contaminado">
                 {grupo.map((n) => (
                   <FormatoContaminadoIndividual
                     key={n}
@@ -806,17 +830,17 @@ export function PantallaFormatos() {
           {/* Registro de entrega de EPP 2026: 1 página completa por hoja en HORIZONTAL */}
           {tipo === 'registro_epp' &&
             Array.from({ length: cantHojasReg }, (_, i) => hojaInicioReg + i).map((numPag) => (
-              <section key={numPag} class="hoja-carta-formato hoja-registro-horizontal">
+              <section key={numPag} class="hoja-formato-impresion hoja-registro-horizontal">
                 <FormatoRegistroEntregaHorizontal paginaNum={numPag} />
               </section>
             ))}
 
-          {/* Resguardo Económico: 2 o 3 por hoja carta */}
+          {/* Resguardo Económico: 2 o 3 por hoja carta (Vertical) */}
           {tipo === 'resguardo_economico' &&
             gruposResguardo().map((grupo, numPag) => (
               <section
                 key={numPag}
-                class={`hoja-carta-formato hoja-resguardo ${porHojaResg === 3 ? 'resg-3-por-hoja' : 'resg-2-por-hoja'}`}
+                class={`hoja-formato-impresion hoja-resguardo ${porHojaResg === 3 ? 'resg-3-por-hoja' : 'resg-2-por-hoja'}`}
               >
                 {grupo.map((n) => (
                   <FormatoResguardoIndividual

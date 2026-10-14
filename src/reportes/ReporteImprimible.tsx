@@ -79,10 +79,16 @@ export function ReporteImprimible({ d, p, onCerrar }: { d: DatosReporte; p: Plan
 
   useEffect(() => {
     document.body.classList.add('imprimiendo-reporte')
+    const estilo = document.createElement('style')
+    estilo.id = 'estilo-reporte-16-9'
+    estilo.textContent = '@page { size: 13.333in 7.5in; margin: 0; }'
+    document.head.appendChild(estilo)
+
     const t = document.title
     document.title = `Entrega de EPP · ${d.titulo}`
     return () => {
       document.body.classList.remove('imprimiendo-reporte')
+      estilo.remove()
       document.title = t
     }
   }, [])
