@@ -10,6 +10,8 @@ import type {
   Material,
   Motivo,
   Movimiento,
+  ObsEquipo,
+  PersonalSI,
   PrestamoEquipo,
   Resguardo,
   Sesion,
@@ -34,6 +36,9 @@ export const movimientos = signal<Movimiento[]>([])
 export const resguardos = signal<Resguardo[]>([])
 export const equipos = signal<Equipo[]>([])
 export const prestamosEquipo = signal<PrestamoEquipo[]>([])
+export const personalSI = signal<PersonalSI[]>([])
+export const obsEquipo = signal<ObsEquipo[]>([])
+export const ajustes = signal<Map<string, unknown>>(new Map())
 
 export const dispositivo = signal<Dispositivo | null>(null)
 export const folios = signal<Record<string, number>>({})
@@ -100,6 +105,9 @@ export async function recargar(...tablas: string[]): Promise<void> {
   if (t('resguardos')) tareas.push(db.resguardos.toArray().then((v) => void (resguardos.value = v)))
   if (t('equipos')) tareas.push(db.equipos.toArray().then((v) => void (equipos.value = v.sort((a, b) => a.codigo.localeCompare(b.codigo)))))
   if (t('prestamosEquipo')) tareas.push(db.prestamosEquipo.orderBy('ts').toArray().then((v) => void (prestamosEquipo.value = v)))
+  if (t('personalSI')) tareas.push(db.personalSI.toArray().then((v) => void (personalSI.value = v.sort((a, b) => a.corto.localeCompare(b.corto)))))
+  if (t('obsEquipo')) tareas.push(db.obsEquipo.toArray().then((v) => void (obsEquipo.value = v)))
+  if (t('ajustes')) tareas.push(db.ajustes.toArray().then((v) => void (ajustes.value = new Map(v.map((a) => [a.id, a.valor])))))
   if (t('config')) {
     tareas.push(
       (async () => {

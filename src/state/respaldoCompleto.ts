@@ -79,14 +79,19 @@ async function excelCompleto(): Promise<Blob> {
     ...S.equipos.value.map((e) => [v(e.codigo), v(e.nombre), v(e.marca), v(e.modelo), v(e.serie), v(e.accesorios.join(' · ')), si(e.llevaBitacora), v(e.calibracion), v(e.estado), si(e.activo), v(e.notas)]),
   ]
 
+  const nombreSI = (r: { corto?: string; nombre: string } | undefined, otro = '') => r?.corto || r?.nombre || otro
   const bitacora: Fila[] = [
-    enc('Folio', 'Código', 'Equipo', 'Salida', 'Recibió RPE', 'Recibió', 'Área', 'Contacto', 'Uso / lugar', 'Entregó', 'Devolver antes de', 'Accesorios', 'Estatus', 'Regreso', 'Devolvió', 'Condición', 'Comentarios'),
+    enc('Folio', 'Código', 'Equipo', 'Salida', 'Recibió RPE', 'Recibió', 'Área', 'Actividad', 'Entregó (SI)', 'Lleva libreta', 'Observaciones al entregar', 'Accesorios', 'Estatus', 'Cierre', 'Fecha y hora del cierre', 'Devolvió o transfirió', 'Recibió (SI)', 'Condición', 'Observaciones al recibir', 'Fotos'),
     ...S.prestamosEquipo.value.map((p) => [
-      v(p.folio), v(p.equipoCodigo), v(p.equipoNombre), v(`${fechaDeTs(p.ts)} ${horaLocal(new Date(p.ts))}`), v(p.rpe), v(p.nombre), v(p.area), v(p.contacto), v(p.uso), v(p.usuarioNombre),
-      v(p.vence.replace('T', ' ')), v(p.accesorios.join(' · ')), v(p.estatus), v(p.regreso ? `${fechaDeTs(p.regreso.ts)} ${horaLocal(new Date(p.regreso.ts))}` : ''),
-      v(p.regreso ? `${p.regreso.devolvioNombre} · ${p.regreso.devolvioRpe}` : ''), v(p.regreso?.condicion), v(p.regreso?.comentarios || p.observaciones),
+      v(p.folio), v(p.equipoCodigo), v(p.equipoNombre), v(`${fechaDeTs(p.ts)} ${horaLocal(new Date(p.ts))}`), v(p.rpe), v(p.nombre), v(p.area), v(p.uso), v(nombreSI(p.entregoSI, p.usuarioNombre)), si(p.bitacora),
+      v(p.observaciones), v(p.accesorios.join(' · ')), v(p.estatus), v(p.regreso ? (p.regreso.tipo === 'transferencia' ? 'Transferencia' : 'Devolución') : ''),
+      v(p.regreso ? `${fechaDeTs(p.regreso.ts)} ${horaLocal(new Date(p.regreso.ts))}` : ''), v(p.regreso ? `${p.regreso.devolvioNombre} · ${p.regreso.devolvioRpe}` : ''),
+      v(p.regreso ? nombreSI(p.regreso.recibioSI, p.regreso.usuarioNombre) : ''), v(p.regreso?.condicion), v(p.regreso?.comentarios), n((p.fotos?.length ?? 0) + (p.regreso?.fotos?.length ?? 0)),
     ]),
   ]
+
+  const personalSI: Fila[] = [enc('RPE', 'Nombre', 'Nombre corto', 'Activo'), ...S.personalSI.value.map((x) => [v(x.rpe), v(x.nombre), v(x.corto), si(x.activo)])]
+  const observaciones: Fila[] = [enc('Observación', 'Gravedad', 'Activa'), ...S.obsEquipo.value.map((o) => [v(o.texto), v({ ok: 'Sin novedad', detalle: 'Detalle', dano: 'Daño' }[o.tipo]), si(o.activo)])]
 
   const materiales: Fila[] = [
     enc('Material', 'Categoría', 'Tipo', 'Tallas', 'Activo'),
@@ -103,7 +108,9 @@ async function excelCompleto(): Promise<Blob> {
     { data: personal, sheet: 'Personal', columns: ancho(9, 40, 32, 24, 12, 8), stickyRowsCount: 1 },
     { data: resguardos, sheet: 'Resguardos y préstamos', columns: ancho(20, 11, 9, 34, 30, 28, 7, 9, 11, 10, 11, 30, 16, 30, 12), stickyRowsCount: 1 },
     { data: equipos, sheet: 'Equipos a resguardo', columns: ancho(12, 22, 16, 16, 18, 40, 10, 14, 12, 8, 30), stickyRowsCount: 1 },
-    { data: bitacora, sheet: 'Bitácora de equipos', columns: ancho(18, 12, 22, 16, 10, 30, 28, 16, 30, 20, 16, 40, 10, 16, 30, 10, 40), stickyRowsCount: 1 },
+    { data: bitacora, sheet: 'Bitácora de equipos', columns: ancho(18, 12, 22, 16, 10, 30, 28, 30, 14, 10, 30, 40, 10, 14, 16, 30, 14, 10, 40, 8), stickyRowsCount: 1 },
+    { data: personalSI, sheet: 'Personal de SI', columns: ancho(9, 40, 16, 8), stickyRowsCount: 1 },
+    { data: observaciones, sheet: 'Observaciones de equipos', columns: ancho(40, 14, 8), stickyRowsCount: 1 },
     { data: materiales, sheet: 'Materiales', columns: ancho(34, 20, 12, 30, 8), stickyRowsCount: 1 },
     { data: usuarios, sheet: 'Usuarios', columns: ancho(30, 24, 8), stickyRowsCount: 1 },
   ]

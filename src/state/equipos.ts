@@ -1,7 +1,7 @@
 import { db } from '../db/db'
 import { soloAlfanumerico } from '../domain/equipoQr'
-import type { CondicionRegreso, Equipo, PrestamoEquipo, Trabajador } from '../domain/types'
-import { fechaLocal, horaLocal, nuevoId } from '../lib/util'
+import type { CondicionRegreso, Equipo, ObsElegida, ObsEquipo, PersonalSI, PrestamoEquipo, RefSI, TipoObsEquipo, Trabajador } from '../domain/types'
+import { fechaLocal, horaLocal, normalizar, nuevoId } from '../lib/util'
 import { avisarCambioLocal } from './nube'
 import { ErrorNegocio, guardarFotosEvidencia } from './servicios'
 import * as S from './store'
@@ -27,8 +27,24 @@ export function ahoraLocal(d = new Date()): string {
   return `${fechaLocal(d)}T${horaLocal(d)}`
 }
 
-export function prestamoVencido(p: Pick<PrestamoEquipo, 'estatus' | 'vence'>, ahora = ahoraLocal()): boolean {
-  return p.estatus === 'ACTIVO' && !!p.vence && p.vence < ahora
+export const AJUSTE_HORAS_ALERTA = 'horasAlertaEquipo'
+export const HORAS_ALERTA_DEFECTO = 24
+
+/** Horas fuera de la oficina a partir de las cuales un equipo se marca «sin devolver» (0 = sin alerta). */
+export function horasAlerta(): number {
+  const v = S.ajustes.value.get(AJUSTE_HORAS_ALERTA)
+  return typeof v === 'number' && v >= 0 ? v : HORAS_ALERTA_DEFECTO
+}
+
+/**
+ * Equipo sin devolver. Los préstamos anteriores tenían fecha de regreso y se siguen evaluando con ella;
+ * los nuevos no la llevan: se alertan cuando pasan más horas fuera que el límite configurado.
+ */
+export function prestamoVencido(p: Pick<PrestamoEquipo, 'estatus' | 'vence' | 'ts'>, ahora = ahoraLocal(), horasLimite = horasAlerta()): boolean {
+  if (p.estatus !== 'ACTIVO') return false
+  if (p.vence) return p.vence < ahora
+  if (!horasLimite) return false
+  return new Date(ahora).getTime() - new Date(p.ts).getTime() > horasLimite * 3600000
 }
 
 /** Días que faltan para la calibración (negativo = vencida); null si no aplica. */
@@ -113,108 +129,353 @@ export async function guardarEquipo(datos: Omit<Equipo, 'id' | 'actualizado'> & 
   return eq
 }
 
-// ---------- Préstamo y regreso ----------
+// ---------- Personal de Seguridad Industrial, observaciones rápidas y ajustes ----------
+
+function exigirRol(...roles: ('admin' | 'almacen')[]) {
+  const { sesion } = actor()
+  if (!roles.includes(sesion.rol as 'admin' | 'almacen')) {
+    throw new ErrorNegocio(roles.length === 1 ? 'Solo un administrador puede cambiar esto.' : 'Solo un administrador o el encargado de almacén puede cambiar esto.')
+  }
+}
+
+/** Primer nombre de pila de un nombre «NOMBRES APELLIDOS», para sugerir el nombre corto. */
+export const cortoSugerido = (nombre: string) => {
+  const p = nombre.trim().split(/\s+/)[0] ?? ''
+  return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()
+}
+
+/** El integrante sale del padrón de trabajadores: de ahí vienen el nombre completo y el área. */
+export async function guardarPersonalSI(d: { id?: string; rpe: string; corto: string; usuarioId?: string; activo: boolean }): Promise<PersonalSI> {
+  exigirRol('admin')
+  const trabajador = S.personal.value.get(d.rpe)
+  if (!trabajador) throw new ErrorNegocio('Elija a la persona del padrón (o dé de alta al trabajador primero).')
+  const yaEsta = S.personalSI.value.find((x) => x.id !== d.id && x.rpe === d.rpe)
+  if (yaEsta) throw new ErrorNegocio(`${trabajador.nombre} ya está en la lista (botón «${yaEsta.corto}»).`)
+  const nombre = trabajador.nombre
+  const corto = d.corto.trim().replace(/\s+/g, ' ')
+  if (!corto) throw new ErrorNegocio('Escriba el nombre corto que aparecerá en el botón.')
+  if (corto.length > 18) throw new ErrorNegocio('El nombre corto debe tener 18 letras o menos.')
+  const repetido = S.personalSI.value.find((x) => x.id !== d.id && x.activo && normalizar(x.corto) === normalizar(corto))
+  if (d.activo && repetido) throw new ErrorNegocio(`Ya hay un botón «${repetido.corto}». Use otro nombre corto.`)
+  const reg: PersonalSI = { id: d.id ?? nuevoId('SI'), rpe: d.rpe, nombre, corto, usuarioId: d.usuarioId || undefined, activo: d.activo, actualizado: new Date().toISOString() }
+  await db.personalSI.put(reg)
+  await S.recargar('personalSI')
+  avisarCambioLocal()
+  return reg
+}
+
+export async function guardarObsEquipo(d: { id?: string; texto: string; tipo: TipoObsEquipo; activo: boolean }): Promise<ObsEquipo> {
+  exigirRol('admin', 'almacen')
+  const texto = d.texto.trim().replace(/\s+/g, ' ')
+  if (!texto) throw new ErrorNegocio('Escriba el texto de la observación.')
+  if (texto.length > 80) throw new ErrorNegocio('La observación debe tener 80 letras o menos.')
+  const repetida = S.obsEquipo.value.find((x) => x.id !== d.id && normalizar(x.texto) === normalizar(texto))
+  if (repetida) throw new ErrorNegocio(`Ya existe la observación «${repetida.texto}».`)
+  const reg: ObsEquipo = { id: d.id ?? nuevoId('OB'), texto, tipo: d.tipo, activo: d.activo, actualizado: new Date().toISOString() }
+  await db.obsEquipo.put(reg)
+  await S.recargar('obsEquipo')
+  avisarCambioLocal()
+  return reg
+}
+
+/** Guarda un ajuste compartido entre todos los equipos de la oficina. Solo administrador. */
+export async function guardarAjuste(id: string, valor: unknown): Promise<void> {
+  exigirRol('admin')
+  await db.ajustes.put({ id, valor, actualizado: new Date().toISOString() })
+  await S.recargar('ajustes')
+  avisarCambioLocal()
+}
+
+/** Botones de Seguridad Industrial: primero a quien se usó más recientemente, después el resto por nombre corto. */
+export function personalSIOrdenado(lista: PersonalSI[], prestamos: PrestamoEquipo[]): PersonalSI[] {
+  const ultimo = new Map<string, string>()
+  const marca = (id: string | undefined, ts: string | undefined) => {
+    if (id && ts && (ultimo.get(id) ?? '') < ts) ultimo.set(id, ts)
+  }
+  for (const p of prestamos) {
+    if (p.estatus === 'ANULADO') continue
+    marca(p.entregoSI?.id, p.ts)
+    marca(p.regreso?.recibioSI?.id, p.regreso?.ts)
+  }
+  return lista.filter((x) => x.activo).sort((a, b) => (ultimo.get(b.id) ?? '').localeCompare(ultimo.get(a.id) ?? '') || a.corto.localeCompare(b.corto))
+}
+
+/** Observaciones rápidas: las más usadas primero. */
+export function obsOrdenadas(catalogo: ObsEquipo[], prestamos: PrestamoEquipo[]): ObsEquipo[] {
+  const usos = new Map<string, number>()
+  const cuenta = (textos: string[] | undefined) => {
+    for (const t of textos ?? []) usos.set(normalizar(t), (usos.get(normalizar(t)) ?? 0) + 1)
+  }
+  for (const p of prestamos) {
+    cuenta(p.obsRapidas)
+    cuenta(p.regreso?.obsRapidas)
+  }
+  const rango = { ok: 0, detalle: 1, dano: 2 }
+  return catalogo
+    .filter((o) => o.activo)
+    .sort((a, b) => (usos.get(normalizar(b.texto)) ?? 0) - (usos.get(normalizar(a.texto)) ?? 0) || rango[a.tipo] - rango[b.tipo] || a.texto.localeCompare(b.texto))
+}
+
+/** Actividades que se han anotado, de la más reciente a la más antigua, sin repetir. */
+export function actividadesRecientes(prestamos: PrestamoEquipo[], limite = 6): string[] {
+  const vistas = new Set<string>()
+  const r: string[] = []
+  for (let i = prestamos.length - 1; i >= 0 && r.length < limite; i--) {
+    const u = prestamos[i].uso?.trim()
+    if (!u || prestamos[i].estatus === 'ANULADO' || vistas.has(normalizar(u))) continue
+    vistas.add(normalizar(u))
+    r.push(u)
+  }
+  return r
+}
+
+/** Quienes han pedido equipos más recientemente (para elegirlos con un toque). */
+export function solicitantesRecientes(prestamos: PrestamoEquipo[], limite = 6): { rpe: string; nombre: string; area: string }[] {
+  const vistos = new Set<string>()
+  const r: { rpe: string; nombre: string; area: string }[] = []
+  for (let i = prestamos.length - 1; i >= 0 && r.length < limite; i--) {
+    const p = prestamos[i]
+    if (p.estatus === 'ANULADO' || vistos.has(p.rpe)) continue
+    vistos.add(p.rpe)
+    r.push({ rpe: p.rpe, nombre: p.nombre, area: p.area })
+  }
+  return r
+}
+
+const RANGO_OBS: Record<TipoObsEquipo, number> = { ok: 0, detalle: 1, dano: 2 }
+
+/** Condición del equipo según lo más grave que se haya elegido. */
+export function condicionDe(obs: ObsElegida[]): CondicionRegreso {
+  const peor = obs.reduce((m, o) => Math.max(m, RANGO_OBS[o.tipo]), 0)
+  return peor === 2 ? 'danado' : peor === 1 ? 'detalle' : 'bueno'
+}
+
+/** Limpia y quita repetidas las observaciones elegidas. */
+function limpiarObs(obs: ObsElegida[] | undefined): ObsElegida[] {
+  const vistas = new Set<string>()
+  const r: ObsElegida[] = []
+  for (const o of obs ?? []) {
+    const texto = o.texto.trim().replace(/\s+/g, ' ')
+    if (!texto || vistas.has(normalizar(texto))) continue
+    if (texto.length > 80) throw new ErrorNegocio('Cada observación debe tener 80 letras o menos.')
+    vistas.add(normalizar(texto))
+    r.push({ texto, tipo: o.tipo })
+  }
+  return r
+}
+
+/**
+ * Las observaciones nuevas que se escriben quedan como opción rápida para la próxima vez
+ * (dentro de la transacción de quien llama, con la tabla db.obsEquipo).
+ */
+async function guardarObsNuevas(obs: ObsElegida[]): Promise<void> {
+  const ahora = new Date().toISOString()
+  for (const o of obs) {
+    const existente = S.obsEquipo.value.find((x) => normalizar(x.texto) === normalizar(o.texto))
+    if (!existente) await db.obsEquipo.put({ id: nuevoId('OB'), texto: o.texto, tipo: o.tipo, activo: true, actualizado: ahora })
+    else if (!existente.activo) await db.obsEquipo.put({ ...existente, activo: true, actualizado: ahora })
+  }
+}
+
+/** Quién de Seguridad Industrial atiende. Si la oficina aún no tiene lista, queda a nombre de quien tiene la sesión. */
+function resolverSI(id: string | undefined, accion: string): RefSI {
+  const { sesion } = actor()
+  const activos = S.personalSI.value.filter((x) => x.activo)
+  if (id) {
+    const x = activos.find((y) => y.id === id)
+    if (!x) throw new ErrorNegocio('Esa persona de Seguridad Industrial ya no está en la lista.')
+    return { id: x.id, nombre: x.nombre, corto: x.corto }
+  }
+  if (activos.length) throw new ErrorNegocio(`Elija quién de Seguridad Industrial ${accion}.`)
+  return { id: sesion.usuarioId, nombre: sesion.usuarioNombre }
+}
+
+/**
+ * Momento del movimiento. Normalmente es ahora; el administrador o el encargado de almacén
+ * pueden indicar otra hora (por ejemplo, para capturar algo que ya ocurrió).
+ */
+function momento(fechaHora: string | undefined, noAntesDe?: string): { ts: string; capturada?: string } {
+  const { sesion } = actor()
+  const ahora = new Date()
+  if (!fechaHora) return { ts: ahora.toISOString() }
+  const d = new Date(fechaHora)
+  if (isNaN(d.getTime())) throw new ErrorNegocio('La fecha y hora no son válidas.')
+  // El campo de fecha y hora solo llega al minuto: dentro del mismo minuto es «ahora»
+  if (Math.abs(d.getTime() - ahora.getTime()) < 60000) return { ts: ahora.toISOString() }
+  if (sesion.rol !== 'admin' && sesion.rol !== 'almacen') throw new ErrorNegocio('Solo un administrador o el encargado de almacén puede cambiar la fecha y la hora.')
+  if (d.getTime() > ahora.getTime()) throw new ErrorNegocio('La fecha y hora no pueden ser posteriores a ahora.')
+  if (noAntesDe && d.toISOString() < noAntesDe) throw new ErrorNegocio('La devolución no puede ser anterior a la salida del equipo.')
+  return { ts: d.toISOString(), capturada: ahora.toISOString() }
+}
+
+// ---------- Préstamo, devolución y transferencia ----------
 
 export interface DatosSalida {
   equipoId: string
   trabajador: Pick<Trabajador, 'rpe' | 'nombre' | 'area'>
-  contacto: string
-  uso: string
-  vence: string // YYYY-MM-DDTHH:mm
+  /** Para qué actividad se usará. */
+  actividad?: string
   accesorios: string[]
+  /** Se lleva su libreta de bitácora. */
   bitacora: boolean
-  observaciones: string
+  obs?: ObsElegida[]
+  /** Fotos del equipo al entregarlo (data URL), p. ej. de un daño previo. */
+  fotos?: string[]
+  /** Quién de Seguridad Industrial lo entrega. */
+  entregoSIId?: string
+  /** Solo administrador o encargado de almacén: fecha y hora real (YYYY-MM-DDTHH:mm) si no es ahora. */
+  fechaHora?: string
 }
 
-export async function prestarEquipo(d: DatosSalida): Promise<PrestamoEquipo> {
+function armarPrestamo(
+  eq: Equipo,
+  d: Pick<DatosSalida, 'trabajador' | 'actividad' | 'accesorios' | 'bitacora'>,
+  extra: { folios: string[]; ts: string; capturada?: string; entregoSI: RefSI; obs: ObsElegida[]; fotosIds?: string[]; origenId?: string },
+): PrestamoEquipo {
   const { sesion, dispositivo } = actor()
-  const eq = S.equipos.value.find((e) => e.id === d.equipoId)
-  if (!eq) throw new ErrorNegocio('Elija el equipo.')
-  const estado = disponibilidad(eq, S.prestamosEquipoActivos.value)
-  if (estado === 'prestado') {
-    const p = S.prestamosEquipoActivos.value.find((x) => x.equipoId === eq.id)
-    throw new ErrorNegocio(`${eq.codigo} ya está prestado a ${p?.nombre ?? 'otra persona'}. Registre primero su regreso.`)
-  }
-  if (estado !== 'disponible') throw new ErrorNegocio(`${eq.codigo} no se puede prestar: ${TEXTO_DISPONIBILIDAD[estado].toLowerCase()}.`)
-  if (!d.trabajador.rpe) throw new ErrorNegocio('Indique quién recibe el equipo.')
-  if (!d.contacto.trim()) throw new ErrorNegocio('Anote una extensión o teléfono para localizar a quien lo lleva.')
-  if (!d.vence) throw new ErrorNegocio('Indique cuándo debe regresar el equipo.')
-  const ahora = new Date()
-  if (d.vence <= ahoraLocal(ahora)) throw new ErrorNegocio('La fecha de regreso debe ser posterior a ahora.')
+  const textos = extra.obs.map((o) => o.texto)
   const p: PrestamoEquipo = {
     id: nuevoId('PE'),
-    folio: siguienteFolioEquipo(dispositivo.codigo, S.prestamosEquipo.value.map((x) => x.folio)),
+    folio: siguienteFolioEquipo(dispositivo.codigo, extra.folios),
     equipoId: eq.id,
     equipoCodigo: eq.codigo,
     equipoNombre: [eq.nombre, eq.marca, eq.modelo].filter(Boolean).join(' '),
     rpe: d.trabajador.rpe,
     nombre: d.trabajador.nombre,
     area: d.trabajador.area,
-    contacto: d.contacto.trim(),
-    uso: d.uso.trim(),
-    ts: ahora.toISOString(),
+    contacto: '',
+    uso: (d.actividad ?? '').trim(),
+    ts: extra.ts,
     usuarioId: sesion.usuarioId,
     usuarioNombre: sesion.usuarioNombre,
     equipo: dispositivo.codigo,
-    vence: d.vence,
+    vence: '',
     accesorios: d.accesorios,
     bitacora: d.bitacora,
-    observaciones: d.observaciones.trim(),
+    observaciones: textos.join(' · '),
     estatus: 'ACTIVO',
+    entregoSI: extra.entregoSI,
     ver: 1,
-    actualizado: ahora.toISOString(),
+    actualizado: new Date().toISOString(),
   }
-  await db.prestamosEquipo.add(p)
-  await S.recargar('prestamosEquipo')
+  if (textos.length) {
+    p.obsRapidas = textos
+    p.condicionSalida = condicionDe(extra.obs)
+  }
+  if (extra.fotosIds?.length) p.fotos = extra.fotosIds
+  if (extra.origenId) p.origenId = extra.origenId
+  if (extra.capturada) p.capturada = extra.capturada
+  return p
+}
+
+export async function prestarEquipo(d: DatosSalida): Promise<PrestamoEquipo> {
+  const eq = S.equipos.value.find((e) => e.id === d.equipoId)
+  if (!eq) throw new ErrorNegocio('Elija el equipo.')
+  const estado = disponibilidad(eq, S.prestamosEquipoActivos.value)
+  if (estado === 'prestado') {
+    const p = S.prestamosEquipoActivos.value.find((x) => x.equipoId === eq.id)
+    throw new ErrorNegocio(`${eq.codigo} ya está prestado a ${p?.nombre ?? 'otra persona'}. Registre primero su devolución o transfiéralo.`)
+  }
+  if (estado !== 'disponible') throw new ErrorNegocio(`${eq.codigo} no se puede prestar: ${TEXTO_DISPONIBILIDAD[estado].toLowerCase()}.`)
+  if (!d.trabajador.rpe) throw new ErrorNegocio('Indique quién recibe el equipo.')
+  const entregoSI = resolverSI(d.entregoSIId, 'entrega el equipo')
+  const { ts, capturada } = momento(d.fechaHora)
+  const obs = limpiarObs(d.obs)
+  const p = armarPrestamo(eq, d, { folios: S.prestamosEquipo.value.map((x) => x.folio), ts, capturada, entregoSI, obs })
+  await db.transaction('rw', [db.prestamosEquipo, db.fotos, db.obsEquipo], async () => {
+    const ids = await guardarFotosEvidencia(d.fotos ?? [])
+    if (ids) p.fotos = ids
+    await guardarObsNuevas(obs)
+    await db.prestamosEquipo.add(p)
+  })
+  await S.recargar('prestamosEquipo', 'fotos', 'obsEquipo')
   avisarCambioLocal()
   return p
 }
 
 export interface DatosRegreso {
   prestamoId: string
+  /** Quien devuelve (o, en una transferencia, quien lo tenía y lo pasa). */
   devolvio: Pick<Trabajador, 'rpe' | 'nombre'>
-  condicion: CondicionRegreso
+  /** Accesorios que regresan o pasan a la otra persona. */
   accesorios: string[]
   bitacora: boolean
-  comentarios: string
-  /** Fotos del equipo al regresar (data URL), p. ej. del daño. */
+  obs?: ObsElegida[]
+  /** Fotos del equipo al recibirlo (data URL), p. ej. del daño. */
   fotos?: string[]
+  /** Quién de Seguridad Industrial lo recibe o registra la transferencia. */
+  recibioSIId?: string
+  /** Solo administrador o encargado de almacén: fecha y hora real (YYYY-MM-DDTHH:mm) si no es ahora. */
+  fechaHora?: string
+  /** Si se indica, el equipo pasa directo a esa persona en lugar de volver a la oficina. */
+  transferirA?: { trabajador: Pick<Trabajador, 'rpe' | 'nombre' | 'area'>; actividad?: string }
 }
 
-export async function registrarRegreso(d: DatosRegreso): Promise<void> {
+export async function registrarRegreso(d: DatosRegreso): Promise<{ siguiente?: PrestamoEquipo }> {
   const { sesion } = actor()
   const p = S.prestamosEquipo.value.find((x) => x.id === d.prestamoId)
   if (!p || p.estatus !== 'ACTIVO') throw new ErrorNegocio('Ese préstamo ya no está activo.')
+  const transfiere = !!d.transferirA
+  if (d.transferirA && !d.transferirA.trabajador.rpe) throw new ErrorNegocio('Indique quién recibe el equipo.')
+  if (d.transferirA && d.transferirA.trabajador.rpe === d.devolvio.rpe) throw new ErrorNegocio('Elija a otra persona: quien lo transfiere no puede ser también quien lo recibe.')
+  const recibioSI = resolverSI(d.recibioSIId, transfiere ? 'registra la transferencia' : 'recibe el equipo')
+  const { ts, capturada } = momento(d.fechaHora, p.ts)
+  const obs = limpiarObs(d.obs)
+
+  // Lo que falta se anota solo, sin tener que escribirlo
   const faltan = p.accesorios.filter((a) => !d.accesorios.includes(a))
-  const conDetalle = d.condicion !== 'bueno' || faltan.length > 0 || (p.bitacora && !d.bitacora)
-  if (conDetalle && !d.comentarios.trim()) throw new ErrorNegocio('Describa el detalle, el daño o lo que falta.')
-  const ahora = new Date().toISOString()
+  const faltaLibreta = p.bitacora && !d.bitacora
+  const notasFalta: string[] = []
+  if (faltan.length) notasFalta.push(`Falta: ${faltan.join(', ')}`)
+  if (faltaLibreta) notasFalta.push('No regresó la libreta de bitácora')
+  let condicion = condicionDe(obs)
+  if (condicion === 'bueno' && notasFalta.length) condicion = 'detalle'
+  const textos = obs.map((o) => o.texto)
+
+  const siguiente = d.transferirA
+    ? armarPrestamo(
+        S.equipos.value.find((e) => e.id === p.equipoId) ?? ({ id: p.equipoId, codigo: p.equipoCodigo, nombre: p.equipoNombre, marca: '', modelo: '' } as Equipo),
+        { trabajador: d.transferirA.trabajador, actividad: d.transferirA.actividad ?? p.uso, accesorios: d.accesorios, bitacora: d.bitacora },
+        { folios: [...S.prestamosEquipo.value.map((x) => x.folio), p.folio], ts, capturada, entregoSI: recibioSI, obs, origenId: p.id },
+      )
+    : undefined
+  // El préstamo nuevo conserva el nombre completo del equipo del anterior
+  if (siguiente) siguiente.equipoNombre = p.equipoNombre
+
   const actualizado: PrestamoEquipo = {
     ...p,
     estatus: 'DEVUELTO',
     regreso: {
-      ts: ahora,
+      ts,
+      tipo: transfiere ? 'transferencia' : 'devolucion',
+      recibioSI,
       devolvioRpe: d.devolvio.rpe,
       devolvioNombre: d.devolvio.nombre,
       usuarioId: sesion.usuarioId,
       usuarioNombre: sesion.usuarioNombre,
-      condicion: d.condicion,
+      condicion,
       accesorios: d.accesorios,
       bitacora: d.bitacora,
-      comentarios: d.comentarios.trim(),
+      comentarios: [...textos, ...notasFalta].join(' · '),
+      ...(textos.length ? { obsRapidas: textos } : {}),
+      ...(siguiente ? { siguienteId: siguiente.id } : {}),
+      ...(capturada ? { capturada } : {}),
     },
     ver: p.ver + 1,
-    actualizado: ahora,
+    actualizado: new Date().toISOString(),
   }
   const eq = S.equipos.value.find((e) => e.id === p.equipoId)
-  await db.transaction('rw', [db.prestamosEquipo, db.equipos, db.fotos], async () => {
+  await db.transaction('rw', [db.prestamosEquipo, db.equipos, db.fotos, db.obsEquipo], async () => {
     actualizado.regreso!.fotos = await guardarFotosEvidencia(d.fotos ?? [])
+    await guardarObsNuevas(obs)
     await db.prestamosEquipo.put(actualizado)
-    // Un equipo dañado no se vuelve a prestar hasta que alguien lo revise
-    if (eq && d.condicion === 'danado' && eq.estado === 'operativo') await db.equipos.put({ ...eq, estado: 'revision', actualizado: ahora })
+    if (siguiente) await db.prestamosEquipo.add(siguiente)
+    // Un equipo dañado no se vuelve a prestar hasta que alguien lo revise (si pasa a otra persona sigue en uso)
+    if (!siguiente && eq && condicion === 'danado' && eq.estado === 'operativo') await db.equipos.put({ ...eq, estado: 'revision', actualizado: actualizado.actualizado })
   })
-  await S.recargar('prestamosEquipo', 'equipos', 'fotos')
+  await S.recargar('prestamosEquipo', 'equipos', 'fotos', 'obsEquipo')
   avisarCambioLocal()
+  return { siguiente }
 }
 
 /** Corrige una salida registrada por error (no borra: queda en la bitácora como anulada). */

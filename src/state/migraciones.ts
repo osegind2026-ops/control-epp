@@ -2,7 +2,7 @@ import { db, guardarConfig, leerConfig } from '../db/db'
 import { fechaLocal } from '../lib/util'
 import { tipoPorRpe } from '../domain/logica'
 import type { Kit, Material, Resguardo, Trabajador } from '../domain/types'
-import { CATEGORIAS, FICHAS, materialesSemilla } from '../db/semilla'
+import { CATEGORIAS, FICHAS, materialesSemilla, obsEquipoSemilla } from '../db/semilla'
 import * as S from './store'
 
 // Cambios de datos que acompañan a nuevas versiones de la app. Cada migración
@@ -123,11 +123,22 @@ async function v6(): Promise<void> {
   if (cambios.length) await db.personal.bulkPut(cambios)
 }
 
+/**
+ * v7: opciones rápidas de observaciones para el préstamo de equipos. Solo agrega las que
+ * faltan (por id); no cambia equipos, préstamos ni ningún otro dato guardado.
+ */
+async function v7(): Promise<void> {
+  const existentes = new Set((await db.obsEquipo.toArray()).map((o) => o.id))
+  const faltan = obsEquipoSemilla().filter((o) => !existentes.has(o.id))
+  if (faltan.length) await db.obsEquipo.bulkPut(faltan)
+}
+
 const MIGRACIONES: [number, () => Promise<void>][] = [
   [3, v3],
   [4, v4],
   [5, v5],
   [6, v6],
+  [7, v7],
 ]
 
 export async function migrar(): Promise<void> {

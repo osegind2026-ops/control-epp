@@ -1,4 +1,4 @@
-import type { Categoria, Kit, Material, Motivo, Ubicacion, Variante } from '../domain/types'
+import type { Categoria, Kit, Material, Motivo, ObsEquipo, Ubicacion, Variante } from '../domain/types'
 
 // Catálogo inicial de la Oficina de Seguridad Industrial. Todo se puede editar
 // después desde Catálogo; esto solo evita arrancar con la app vacía.
@@ -205,6 +205,27 @@ export function motivosSemilla(): Motivo[] {
     { id: 'entr_otro', tipo: 'entrada', texto: 'Otro' },
   ]
   return lista.map((m, i) => ({ ...m, orden: i + 1, activo: true }))
+}
+
+/**
+ * Opciones rápidas iniciales para anotar la condición de un equipo. Llevan id fijo y fecha
+ * antigua: si dos equipos las crean, al sincronizar quedan una sola vez y cualquier cambio posterior gana.
+ */
+export function obsEquipoSemilla(): ObsEquipo[] {
+  const t = '2026-10-01T00:00:00.000Z'
+  const lista: [string, string, ObsEquipo['tipo']][] = [
+    ['obs_sin_novedad', 'Sin novedad', 'ok'],
+    ['obs_rayones', 'Rayones o golpes leves', 'detalle'],
+    ['obs_sucio', 'Sucio', 'detalle'],
+    ['obs_bateria_baja', 'Batería baja', 'detalle'],
+    ['obs_falta_accesorio', 'Falta un accesorio', 'detalle'],
+    ['obs_pantalla', 'Pantalla dañada', 'dano'],
+    ['obs_carcasa', 'Carcasa rota', 'dano'],
+    ['obs_no_enciende', 'No enciende', 'dano'],
+    ['obs_calibracion', 'Falla de calibración o lecturas', 'dano'],
+    ['obs_mojado', 'Mojado o con humedad', 'dano'],
+  ]
+  return lista.map(([id, texto, tipo]) => ({ id, texto, tipo, activo: true, actualizado: t }))
 }
 
 export function ubicacionesSemilla(): Ubicacion[] {

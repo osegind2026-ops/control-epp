@@ -234,7 +234,7 @@ tr.clic:hover td { background: var(--sunk); }
   .pagina { padding: 12px 12px calc(var(--nav-h) + 20px + env(safe-area-inset-bottom, 0px)); }
   .bottomnav {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     position: fixed;
     left: 0;
     right: 0;
@@ -252,9 +252,10 @@ tr.clic:hover td { background: var(--sunk); }
     place-items: center;
     align-content: center;
     gap: 3px;
-    font: 600 12px/1 var(--body);
+    font: 600 11px/1 var(--body);
     color: var(--muted);
     position: relative;
+    min-width: 0;
   }
   .bottomnav svg { width: 24px; height: 24px; }
   .bottomnav button[aria-current='page'] { color: var(--accent); }
@@ -1496,3 +1497,16 @@ details > summary { list-style: revert; }
   margin-bottom: 2px;
 }
 
+
+/* ---------- Equipos: préstamo rápido ---------- */
+.mosaico.grande { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+@media (max-width: 560px) { .mosaico.grande { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tile.equipo { border-top: 3px solid var(--accent); }
+.tile-codigo { font-size: 18px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.1; }
+.chip-si { min-height: 44px; padding: 0 20px; font-size: 16px; font-weight: 600; }
+.chip.obs-detalle { border-color: var(--warn); }
+.chip.obs-dano { border-color: var(--bad); color: var(--bad); }
+.chip.obs-ok[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.chip.obs-detalle[aria-pressed='true'] { background: var(--warn); border-color: var(--warn); color: #fff; }
+.chip.obs-dano[aria-pressed='true'] { background: var(--bad); border-color: var(--bad); color: #fff; }
+.modal-acciones .grow { align-self: center; }

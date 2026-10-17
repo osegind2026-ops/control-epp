@@ -11,7 +11,7 @@
  * No edite las pestañas a mano: los cambios se hacen desde la app.
  */
 
-var VERSION_SERVIDOR = '2.3.0'
+var VERSION_SERVIDOR = '2.4.0'
 var ZONA = 'America/Mexico_City'
 var LIMITE_FILAS = 800
 var LIMITE_CARACTERES = 3000000
@@ -103,17 +103,36 @@ TABLAS.equipos = {
 }
 TABLAS.prestamosEquipo = {
   hoja: 'Bitácora equipos',
-  cols: ['Folio', 'Código', 'Equipo', 'Salida', 'Recibió RPE', 'Recibió', 'Área', 'Contacto', 'Uso / lugar', 'Entregó', 'Devolver antes de', 'Accesorios', 'Bitácora', 'Estatus', 'Regreso', 'Devolvió', 'Revisó', 'Condición', 'Faltantes', 'Comentarios'],
+  cols: ['Folio', 'Código', 'Equipo', 'Salida', 'Recibió RPE', 'Recibió', 'Área', 'Contacto', 'Uso / lugar', 'Entregó', 'Devolver antes de', 'Accesorios', 'Bitácora', 'Estatus', 'Regreso', 'Devolvió', 'Revisó', 'Condición', 'Faltantes', 'Comentarios', 'Entregó (SI)', 'Recibió (SI)', 'Tipo de cierre', 'Observaciones al entregar', 'Transferencia', 'Fotos'],
   fila: function (d) {
     var r = d.regreso || {}
+    var refSI = function (x) { return x ? x.corto || x.nombre || '' : '' }
     var faltan = d.regreso ? (d.accesorios || []).filter(function (a) { return (r.accesorios || []).indexOf(a) < 0 }) : []
     return [
       d.folio, d.equipoCodigo, d.equipoNombre, fechaTs(d.ts, 'yyyy-MM-dd HH:mm'), d.rpe, d.nombre, d.area, d.contacto, d.uso, d.usuarioNombre,
       String(d.vence || '').replace('T', ' '), (d.accesorios || []).join(' · '), d.bitacora ? 'SI' : 'NO', d.estatus,
       d.regreso ? fechaTs(r.ts, 'yyyy-MM-dd HH:mm') : '', d.regreso ? r.devolvioNombre + ' · ' + r.devolvioRpe : '', r.usuarioNombre || '',
       d.regreso ? CONDICIONES[r.condicion] || r.condicion : '', faltan.join(' · '), r.comentarios || d.observaciones || '',
+      refSI(d.entregoSI) || d.usuarioNombre, d.regreso ? refSI(r.recibioSI) || r.usuarioNombre || '' : '',
+      d.regreso ? (r.tipo === 'transferencia' ? 'Transferencia' : 'Devolución') : '', (d.obsRapidas || []).join(' · '),
+      d.origenId ? 'Recibido en transferencia' : r.siguienteId ? 'Pasó a otra persona' : '', ((d.fotos || []).length + (r.fotos || []).length) || '',
     ]
   },
+}
+TABLAS.personalSI = {
+  hoja: 'Personal SI',
+  cols: ['RPE', 'Nombre', 'Nombre corto', 'Activo'],
+  fila: function (d) { return [d.rpe || '', d.nombre, d.corto, d.activo ? 'SI' : 'NO'] },
+}
+TABLAS.obsEquipo = {
+  hoja: 'Observaciones equipos',
+  cols: ['Observación', 'Gravedad', 'Activo'],
+  fila: function (d) { return [d.texto, { ok: 'Sin novedad', detalle: 'Detalle', dano: 'Daño' }[d.tipo] || d.tipo, d.activo ? 'SI' : 'NO'] },
+}
+TABLAS.ajustes = {
+  hoja: 'Ajustes',
+  cols: ['Ajuste', 'Valor'],
+  fila: function (d) { return [d.id, String(d.valor)] },
 }
 var TIPOS_TRABAJADOR = { permanente: 'Permanente', planta: 'Permanente', temporal: 'Temporal', eventual: 'Eventual' }
 var ROLES = { admin: 'Administrador', almacen: 'Encargado de almacén', despachador: 'Despachador' }
@@ -601,7 +620,14 @@ function resumenAvisos() {
   var hoy = Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd')
   var ctx = contexto()
   var ahoraLocal = Utilities.formatDate(new Date(), ZONA, "yyyy-MM-dd'T'HH:mm")
-  var prestamosEq = datosTabla('prestamosEquipo').filter(function (p) { return p.estatus === 'ACTIVO' && p.vence && p.vence < ahoraLocal })
+  // Préstamos anteriores: con fecha de regreso. Los nuevos: más horas fuera que el límite de Ajustes (24 por defecto; 0 = sin alerta)
+  var horasLimite = 24
+  datosTabla('ajustes').forEach(function (a) { if (a.id === 'horasAlertaEquipo' && typeof a.valor === 'number') horasLimite = a.valor })
+  var prestamosEq = datosTabla('prestamosEquipo').filter(function (p) {
+    if (p.estatus !== 'ACTIVO') return false
+    if (p.vence) return p.vence < ahoraLocal
+    return horasLimite > 0 && (Date.now() - new Date(p.ts).getTime()) / 36e5 > horasLimite
+  })
   var en30 = Utilities.formatDate(new Date(Date.now() + 30 * 864e5), ZONA, 'yyyy-MM-dd')
   var calibrar = datosTabla('equipos').filter(function (e) { return e.activo !== false && e.estado !== 'baja' && e.calibracion && e.calibracion <= en30 })
   var resguardos = datosTabla('resguardos').filter(function (r) { return r.estatus === 'ACTIVO' })
@@ -645,8 +671,8 @@ function resumenAvisos() {
   var html = '<p style="font-family:Arial">Resumen de Control EPP al ' + hoy + '.</p>' +
     tablaHtml('Préstamos vencidos (' + vencidos.length + ')', ['Equipo', 'Trabajador', 'Prestado', 'Debía volver', 'Supervisor'],
       vencidos.map(function (r) { return fila([nombreMat(ctx, r.materialId), r.nombre + ' · ' + r.rpe, r.fechaEntrega, '<b>' + r.vence + '</b>', sup(r)]) })) +
-    tablaHtml('Equipos de medición sin devolver (' + prestamosEq.length + ')', ['Equipo', 'Lo tiene', 'Contacto', 'Uso / lugar', 'Debía volver', 'Entregó'],
-      prestamosEq.map(function (p) { return fila([p.equipoCodigo + ' · ' + p.equipoNombre, p.nombre + ' · ' + p.rpe + ' (' + p.area + ')', p.contacto || '', p.uso || '', '<b>' + String(p.vence).replace('T', ' ') + '</b>', p.usuarioNombre]) })) +
+    tablaHtml('Equipos de medición sin devolver (' + prestamosEq.length + ')', ['Equipo', 'Lo tiene', 'Actividad', 'Fuera desde', 'Entregó'],
+      prestamosEq.map(function (p) { return fila([p.equipoCodigo + ' · ' + p.equipoNombre, p.nombre + ' · ' + p.rpe + ' (' + p.area + ')', p.uso || '', '<b>' + fechaTs(p.ts, 'yyyy-MM-dd HH:mm') + '</b>', (p.entregoSI && (p.entregoSI.corto || p.entregoSI.nombre)) || p.usuarioNombre]) })) +
     tablaHtml('Calibraciones vencidas o próximas (' + calibrar.length + ')', ['Equipo', 'Serie', 'Calibración'],
       calibrar.map(function (e) { return fila([e.codigo + ' · ' + e.nombre, e.serie || '', (e.calibracion < hoy ? '<b>VENCIDA</b> ' : '') + e.calibracion]) })) +
     tablaHtml('Préstamos que vencen hoy (' + venceHoy.length + ')', ['Equipo', 'Trabajador', 'Supervisor'],

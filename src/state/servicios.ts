@@ -4,6 +4,7 @@ import {
   kitsSemilla,
   materialesSemilla,
   motivosSemilla,
+  obsEquipoSemilla,
   CATEGORIAS,
   ubicacionesSemilla,
 } from '../db/semilla'
@@ -104,12 +105,13 @@ export async function inicializarSistema(datos: DatosInicio): Promise<void> {
   const equipo: Dispositivo = { id: nuevoId('D'), codigo: datos.equipo.codigo, nombre: datos.equipo.nombre.trim() }
   const ubis = ubicacionesSemilla()
 
-  await db.transaction('rw', [db.materiales, db.categorias, db.kits, db.ubicaciones, db.motivos, db.usuarios, db.personal, db.movimientos, db.config], async () => {
+  await db.transaction('rw', [db.materiales, db.categorias, db.kits, db.ubicaciones, db.motivos, db.obsEquipo, db.usuarios, db.personal, db.movimientos, db.config], async () => {
     if ((await db.materiales.count()) === 0) await db.materiales.bulkPut(materialesSemilla())
     if ((await db.categorias.count()) === 0) await db.categorias.bulkPut(CATEGORIAS)
     if ((await db.kits.count()) === 0) await db.kits.bulkPut(kitsSemilla())
     if ((await db.ubicaciones.count()) === 0) await db.ubicaciones.bulkPut(ubis)
     if ((await db.motivos.count()) === 0) await db.motivos.bulkPut(motivosSemilla())
+    if ((await db.obsEquipo.count()) === 0) await db.obsEquipo.bulkPut(obsEquipoSemilla())
     await db.usuarios.put(admin)
     if (datos.padron.length) await db.personal.bulkPut(datos.padron)
     if (datos.demo && (await db.movimientos.count()) === 0) {

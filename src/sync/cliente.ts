@@ -220,6 +220,6 @@ export async function sincronizar(base: BaseEPP, cfg: ConfigNube, t: Transporte,
     if (!d.hayMas && (await contarPendientes(base, desconocidas)) === 0) break
     if (!d.hayMas && !cambios.length) break
   }
-  if (desconocidas.size) r.errores.push('El servidor de Google necesita actualizarse (versión 2.2) para guardar los equipos a resguardo; mientras tanto quedan en este equipo.')
+  if (desconocidas.size) r.errores.push('El servidor de Google necesita actualizarse (versión 2.4) para guardar los equipos a resguardo y el personal de Seguridad Industrial; mientras tanto quedan en este equipo.')
   return r
 }

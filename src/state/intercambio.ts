@@ -32,6 +32,9 @@ const NOMBRES: Partial<Record<NombreTabla, [string, string]>> = {
   materiales: ['material', 'materiales'],
   equipos: ['equipo a resguardo', 'equipos a resguardo'],
   prestamosEquipo: ['préstamo de equipo', 'préstamos de equipo'],
+  personalSI: ['integrante de Seguridad Industrial', 'integrantes de Seguridad Industrial'],
+  obsEquipo: ['observación rápida de equipos', 'observaciones rápidas de equipos'],
+  ajustes: ['ajuste', 'ajustes'],
   usuarios: ['usuario', 'usuarios'],
   fotos: ['foto', 'fotos'],
 }

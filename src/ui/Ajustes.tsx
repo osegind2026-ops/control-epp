@@ -6,6 +6,7 @@ import { armarRespaldo, importarRespaldo, leerRespaldo, marcarRespaldado, nombre
 import { guardarBloqueo, guardarDispositivo, guardarRegistro, nuevoId } from '../state/servicios'
 import * as S from '../state/store'
 import { avisar, confirmar, intentar, Modal } from './comunes'
+import { AjustesEquipos } from './AjustesEquipos'
 import { Icono } from './iconos'
 import { TarjetaNube } from './Nube'
 import { PlantillaReportes } from './PlantillaReportes'
@@ -268,6 +269,7 @@ export function PantallaAjustes() {
       <Intercambio />
       <Respaldos />
       <RespaldoCompleto />
+      <AjustesEquipos />
       <Equipo />
       <SeccionUsuarios />
       <Ubicaciones />

@@ -305,8 +305,64 @@ export interface Equipo {
 
 export type CondicionRegreso = 'bueno' | 'detalle' | 'danado'
 
+/** Quién de Seguridad Industrial atendió el movimiento (instantánea: sobrevive a cambios en la lista). */
+export interface RefSI {
+  id: string
+  nombre: string
+  /** Nombre corto con que aparecía el botón. */
+  corto?: string
+}
+
+/** Integrante de Seguridad Industrial que aparece como botón al prestar, recibir o transferir equipos. */
+export interface PersonalSI {
+  id: string
+  /** RPE del trabajador en el padrón (de ahí salen el nombre completo y el área). */
+  rpe?: string
+  nombre: string
+  /** Nombre corto del botón (configurable por el administrador). */
+  corto: string
+  /** Usuario de la app al que corresponde: queda preseleccionado cuando ese usuario tiene la sesión abierta. */
+  usuarioId?: string
+  activo: boolean
+  actualizado: string
+}
+
+export type TipoObsEquipo = 'ok' | 'detalle' | 'dano'
+
+/** Opción rápida para anotar la condición de un equipo al entregarlo o recibirlo. */
+export interface ObsEquipo {
+  id: string
+  texto: string
+  tipo: TipoObsEquipo
+  activo: boolean
+  actualizado: string
+}
+
+/** Observación elegida en un movimiento. */
+export interface ObsElegida {
+  texto: string
+  tipo: TipoObsEquipo
+}
+
+/** Ajuste compartido entre todos los equipos de la oficina (p. ej. horas para alertar un equipo sin devolver). */
+export interface Ajuste {
+  id: string
+  valor: unknown
+  actualizado: string
+}
+
 export interface RegresoEquipo {
   ts: string
+  /** Cierre del préstamo: devolución a la oficina o paso directo a otra persona. */
+  tipo?: 'devolucion' | 'transferencia'
+  /** Quién de Seguridad Industrial lo recibió o registró la transferencia. */
+  recibioSI?: RefSI
+  /** Observaciones rápidas elegidas al cerrar el préstamo. */
+  obsRapidas?: string[]
+  /** En una transferencia: id del préstamo nuevo a nombre de quien lo recibe. */
+  siguienteId?: string
+  /** Si se corrigió la hora: momento real de la captura. */
+  capturada?: string
   devolvioRpe: string
   devolvioNombre: string
   usuarioId: string // revisó
@@ -340,6 +396,17 @@ export interface PrestamoEquipo {
   observaciones: string
   estatus: 'ACTIVO' | 'DEVUELTO' | 'ANULADO'
   regreso?: RegresoEquipo
+  /** Quién de Seguridad Industrial entregó el equipo. */
+  entregoSI?: RefSI
+  /** Observaciones rápidas elegidas al entregar y su gravedad más alta. */
+  obsRapidas?: string[]
+  condicionSalida?: CondicionRegreso
+  /** Fotos del equipo al entregarlo (ids de la tabla fotos), p. ej. de un daño previo. */
+  fotos?: string[]
+  /** En una transferencia: id del préstamo anterior de este mismo equipo. */
+  origenId?: string
+  /** Si se corrigió la hora de salida: momento real de la captura. */
+  capturada?: string
   ver: number
   actualizado: string
 }

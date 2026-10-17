@@ -26,8 +26,8 @@ import { PantallaFormatos } from './ui/Formatos'
 
 const NAV: { id: Pantalla; texto: string; icono: string }[] = [
   { id: 'despacho', texto: 'Despacho', icono: 'despacho' },
-  { id: 'devolucion', texto: 'Devolución', icono: 'devolucion' },
   { id: 'equipos', texto: 'Equipos', icono: 'equipo' },
+  { id: 'devolucion', texto: 'Devolución', icono: 'devolucion' },
   { id: 'inventario', texto: 'Inventario', icono: 'inventario' },
   { id: 'historial', texto: 'Historial', icono: 'historial' },
   { id: 'reportes', texto: 'Reportes', icono: 'reportes' },
@@ -36,7 +36,7 @@ const NAV: { id: Pantalla; texto: string; icono: string }[] = [
   { id: 'personal', texto: 'Personal', icono: 'personal' },
   { id: 'ajustes', texto: 'Ajustes', icono: 'ajustes' },
 ]
-const NAV_MOVIL: Pantalla[] = ['despacho', 'devolucion', 'inventario', 'historial']
+const NAV_MOVIL: Pantalla[] = ['despacho', 'equipos', 'devolucion', 'inventario', 'historial']
 
 function requiereRespaldo(): boolean {
   // Con la nube conectada y al día, el respaldo manual no hace falta
@@ -185,12 +185,13 @@ function Shell() {
             <Icono n={n.icono} />
             {n.texto}
             {n.id === 'devolucion' && vencidos > 0 && <span class="punto" />}
+            {n.id === 'equipos' && eqVencidos > 0 && <span class="punto" />}
           </button>
         ))}
         <button aria-current={!NAV_MOVIL.includes(pantalla.value) ? 'page' : undefined} onClick={() => setMas(true)}>
           <Icono n="mas" />
           Más
-          {(alerta || eqVencidos > 0) && <span class="punto" />}
+          {alerta && <span class="punto" />}
         </button>
       </nav>
       {mas && <MenuMas onCerrar={() => setMas(false)} />}
