@@ -691,6 +691,14 @@ details > summary { list-style: revert; }
 .recurrencia { display: block; }
 .recurrencia svg { width: 16px; height: 16px; vertical-align: -3px; }
 .recurrencia .input { min-height: 40px; background: var(--surface); }
+
+/* ---------- EPP contaminado en el ticket ---------- */
+.contaminado-casilla { gap: 8px; align-items: center; flex-wrap: nowrap; cursor: pointer; color: var(--muted); }
+.contaminado-casilla svg { width: 16px; height: 16px; vertical-align: -3px; }
+.contaminado-casilla input, .contaminado input[type='checkbox'] { width: 18px; height: 18px; flex: none; accent-color: var(--warn); }
+.contaminado { display: block; }
+.contaminado .row { align-items: center; }
+.contaminado .input { min-height: 40px; background: var(--surface); }
 .rp-tabla.rp-izq td, .rp-tabla.rp-izq th { text-align: left; } .rp-tabla.rp-izq td.rp-total, .rp-tabla.rp-izq th.rp-guinda { text-align: center; }
 .etiqueta-vista { width: 100%; border: 1px solid var(--rule); border-radius: 6px; background: #fff; }
 

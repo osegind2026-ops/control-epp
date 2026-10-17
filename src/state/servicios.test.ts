@@ -174,3 +174,19 @@ describe('roles', () => {
     S.sesion.value = antes
   })
 })
+
+describe('EPP contaminado', () => {
+  it('registra el cambio de EPP contaminado con su folio y no lo repite', async () => {
+    const lineas = [
+      { materialId: 'g_hyflex', varianteId: '8', cantidad: 1 },
+      { materialId: 'lentes_claros', varianteId: '', cantidad: 1 },
+    ]
+    const { entrega } = await registrarEntrega(persona(), lineas, '', undefined, '', '', { folio: 'U1-SI-2026-001', materiales: ['g_hyflex', 'casco'], actividad: ' Mantenimiento ', supervisor: '' })
+    expect(entrega.contaminado).toEqual({ folio: 'U1-SI-2026-001', materiales: ['g_hyflex'], actividad: 'Mantenimiento' })
+    expect(S.movimientos.value.find((m) => m.ref === entrega.folio && m.materialId === 'g_hyflex')?.nota).toMatch(/EPP contaminado U1-SI-2026-001/)
+    await expect(registrarEntrega(persona(), lineas, '', undefined, '', '', { folio: 'U1-SI-2026-001', materiales: ['g_hyflex'] })).rejects.toThrow(/ya se capturó/)
+    await expect(registrarEntrega(persona(), lineas, '', undefined, '', '', { folio: '7', materiales: ['g_hyflex'] })).rejects.toThrow(/folio/)
+    await expect(registrarEntrega(persona(), lineas, '', undefined, '', '', { folio: 'U1-SI-2026-002', materiales: ['casco'] })).rejects.toThrow(/Marque/)
+    await anularEntrega(entrega.id, 'anu_error', '')
+  })
+})

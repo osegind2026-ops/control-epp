@@ -1,7 +1,7 @@
 import { calcularExistencias, ETIQUETA_NIVEL, existencia, nivelStock, variantesDe } from '../domain/logica'
 import { fechaDeTs, horaLocal } from '../lib/util'
 import type { DatosReporte, Fuentes } from './datos'
-import { pct, titulo } from './datos'
+import { entregasContaminadas, pct, titulo } from './datos'
 
 // Libro de Excel del reporte: una hoja por tema, con encabezados fijos y
 // columnas con ancho adecuado para filtrar o hacer tablas dinámicas.
@@ -111,6 +111,16 @@ export async function generarExcel(d: DatosReporte, f: Fuentes): Promise<Blob> {
     ...d.recurrentes.map((r) => [v(r.area), v(r.material), v(r.rpe), v(r.nombre), v(r.tipo), n(r.veces), n(r.piezas), v(r.primera), v(r.ultima), { value: r.notas.join(' · '), wrap: true }]),
   ]
 
+  // Cambios de EPP contaminado (con el folio del formato en papel)
+  const contaminadas = entregasContaminadas(d.entregas, mats, f.personal)
+  const contaminado: Fila[] = [
+    enc('Folio formato', 'Fecha', 'Hora', 'RPE', 'Nombre', 'Área', 'Material contaminado', 'Piezas', 'Actividad', 'Supervisor', 'Vo. Bo. PR', 'Entrega', 'Despachó'),
+    ...contaminadas.map((c) => [
+      v(c.folioFormato || 'sin folio'), v(c.entrega.fecha), v(c.hora), v(c.entrega.rpe), v(c.entrega.nombre), v(c.entrega.area), { value: c.materiales.join(' · '), wrap: true }, n(c.piezas),
+      v(c.actividad), v(c.supervisor), v(c.vistoBueno), v(c.entrega.folio), v(c.entrega.usuarioNombre),
+    ]),
+  ]
+
   const ancho = (...w: number[]) => w.map((width) => ({ width }))
   const hojas = [
     { data: resumen, sheet: 'Resumen', columns: ancho(70, 14) },
@@ -118,6 +128,7 @@ export async function generarExcel(d: DatosReporte, f: Fuentes): Promise<Blob> {
     { data: porArea, sheet: 'Por área', columns: ancho(34, 10, 10, 10, 10, ...columnasMat.map(() => 14)), stickyRowsCount: 1, stickyColumnsCount: 1 },
     { data: detalle, sheet: 'Entregas', columns: ancho(16, 11, 7, 9, 34, 30, 28, 7, 9, 12, 28, 20, 8, 30), stickyRowsCount: 1 },
     { data: recurrentes, sheet: 'Solicitantes recurrentes', columns: ancho(30, 30, 9, 34, 12, 8, 8, 11, 11, 50), stickyRowsCount: 1 },
+    ...(contaminadas.length ? [{ data: contaminado, sheet: 'EPP contaminado', columns: ancho(16, 11, 7, 9, 34, 30, 40, 8, 30, 26, 26, 16, 20), stickyRowsCount: 1 }] : []),
     { data: existencias, sheet: 'Existencias', columns: ancho(30, 7, ...ubis.map(() => 18), 9, 9, 11), stickyRowsCount: 1 },
     { data: resguardos, sheet: 'Resguardos y préstamos', columns: ancho(20, 11, 9, 34, 30, 28, 7, 9, 11, 16, 30, 12, 12), stickyRowsCount: 1 },
     { data: kardex, sheet: 'Movimientos', columns: ancho(11, 7, 12, 28, 7, 22, 9, 22, 28, 30, 20, 8), stickyRowsCount: 1 },

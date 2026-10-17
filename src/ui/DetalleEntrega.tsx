@@ -52,6 +52,7 @@ export function DetalleEntrega({ e, onCerrar }: { e: Entrega; onCerrar: () => vo
       <div class="row">
         {e.estado === 'anulada' ? <span class="badge bad">Anulada</span> : <span class="badge ok">Registrada</span>}
         {e.capturada && <span class="badge warn">Captura posterior</span>}
+        {e.contaminado && <span class="badge bad">EPP contaminado</span>}
         <span class="muted small">
           {e.fecha} {e.hora} · despachó {e.usuarioNombre} · equipo {e.equipo} · {ubi}
         </span>
@@ -107,6 +108,18 @@ export function DetalleEntrega({ e, onCerrar }: { e: Entrega; onCerrar: () => vo
         <p class="small muted">
           Entrega del {e.fecha}, capturada después: el {fechaLocal(new Date(e.capturada))} a las {horaLocal(new Date(e.capturada))} por {e.usuarioNombre}.
         </p>
+      )}
+      {e.contaminado && (
+        <div class="aviso warn small">
+          <Icono n="alerta" />
+          <span>
+            <strong>EPP contaminado</strong> · formato <span class="mono">{e.contaminado.folio}</span>: {e.contaminado.materiales.map((m) => S.nombreMaterial(m)).join(', ')}.
+            {e.contaminado.actividad && ` Actividad: ${e.contaminado.actividad}.`}
+            {e.contaminado.supervisor && ` Supervisor: ${e.contaminado.supervisor}.`}
+            {e.contaminado.hora && ` Hora: ${e.contaminado.hora}.`}
+            {e.contaminado.vistoBueno && ` Vo. Bo. PR: ${e.contaminado.vistoBueno}.`}
+          </span>
+        </div>
       )}
       {e.observaciones && <p class="small">Observaciones: {e.observaciones}</p>}
       {e.recurrencia && (

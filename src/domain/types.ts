@@ -190,6 +190,20 @@ export interface Entrega {
    * cuadrar el inventario): momento real en que se capturó. `fecha` y `ts` llevan el día de la entrega.
    */
   capturada?: string
+  /** Cambio de EPP contaminado, respaldado con el formato en papel de ese folio. */
+  contaminado?: EppContaminado
+}
+
+export interface EppContaminado {
+  /** Folio impreso del formato (U1-SI-2026-003). */
+  folio: string
+  /** Materiales de la entrega que se cambiaron por contaminación. */
+  materiales: string[]
+  /** Datos opcionales copiados del formato. */
+  actividad?: string
+  supervisor?: string
+  hora?: string
+  vistoBueno?: string
 }
 
 export interface Recurrencia {

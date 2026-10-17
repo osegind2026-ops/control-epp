@@ -147,6 +147,11 @@ export function PantallaHistorial() {
                   <td>
                     {e.estado === 'anulada' ? <span class="badge bad">Anulada</span> : <span class="badge ok">OK</span>}
                     {duplicadas.has(e.id) && <span class="badge warn">Posible duplicada</span>}
+                    {e.contaminado && (
+                      <span class="badge bad" title={`Formato ${e.contaminado.folio}`}>
+                        Contaminado
+                      </span>
+                    )}
                     {e.capturada && (
                       <span class="badge warn" title={`Capturada después, el ${fechaLocal(new Date(e.capturada))}`}>
                         Captura posterior

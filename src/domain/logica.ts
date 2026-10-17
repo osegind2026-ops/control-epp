@@ -1,6 +1,7 @@
 import type { Entrega, Kit, Material, Movimiento, Resguardo, Trabajador } from './types'
 import { SIN_TALLA } from './types'
 import { normalizar } from '../lib/util'
+import { contaminadoEn } from './contaminado'
 
 // ---------------- Existencias ----------------
 
@@ -195,7 +196,8 @@ export function materialesRecurrentes(entregas: Entrega[], rpe: string, material
   const r: MaterialRecurrente[] = []
   for (const materialId of new Set(materialIds)) {
     // Solo cuentan las entregas de la ventana anterior a ese día (importa al capturar días pasados)
-    const previas = entregasPrevias(entregas, rpe, materialId).filter((p) => p.entrega.fecha >= desde && p.entrega.fecha <= hoy)
+    // Los cambios por EPP contaminado (con su formato) no cuentan como sobreconsumo
+    const previas = entregasPrevias(entregas, rpe, materialId).filter((p) => p.entrega.fecha >= desde && p.entrega.fecha <= hoy && !contaminadoEn(p.entrega, materialId))
     if (previas.length >= regla.veces) r.push({ materialId, previas })
   }
   return r

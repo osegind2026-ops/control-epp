@@ -1,4 +1,5 @@
 import { calcularExistencias, existencia, nivelStock, prestamosVencidos, tipoDe, TIPOS_TRABAJADOR, variantesDe } from '../domain/logica'
+import { esContaminada, materialesContaminados, contaminadoEn } from '../domain/contaminado'
 import type { Entrega, Material, Motivo, Movimiento, Resguardo, Trabajador, Ubicacion } from '../domain/types'
 import { fechaLocal } from '../lib/util'
 
@@ -86,7 +87,7 @@ export function solicitantesRecurrentes(entregas: Entrega[], materiales: Map<str
   for (const e of entregas) {
     if (e.estado !== 'registrada') continue
     const porMaterial = new Map<string, number>()
-    for (const l of e.lineas) if (!l.esResguardo && !l.esPrestamo) porMaterial.set(l.materialId, (porMaterial.get(l.materialId) ?? 0) + l.cantidad)
+    for (const l of e.lineas) if (!l.esResguardo && !l.esPrestamo && !contaminadoEn(e, l.materialId)) porMaterial.set(l.materialId, (porMaterial.get(l.materialId) ?? 0) + l.cantidad)
     for (const [materialId, cantidad] of porMaterial) {
       const k = `${e.area}|${materialId}|${e.rpe}`
       const p = personal.get(e.rpe)
@@ -108,37 +109,67 @@ export function solicitantesRecurrentes(entregas: Entrega[], materiales: Map<str
     .sort((a, b) => a.area.localeCompare(b.area) || a.material.localeCompare(b.material) || b.veces - a.veces || b.piezas - a.piezas)
 }
 
-/** Entrega que fue marcada como EPP contaminado (la nota de recurrencia contiene «EPP Contaminado»). */
+/** Cambio de EPP contaminado (entrega marcada con su folio de formato, o anterior marcada por comentario). */
 export interface EntregaContaminada {
   entrega: Entrega
-  materiales: string[] // nombres de los materiales contaminados
+  /** Folio del formato en papel; vacío en las marcadas antes solo con comentario. */
+  folioFormato: string
+  /** Material contaminado con sus piezas, p. ej. «Guante Hyflex M ×2». */
+  materiales: string[]
+  piezas: number
+  actividad: string
   supervisor: string
+  hora: string
+  vistoBueno: string
 }
 
-/**
- * Entregas del periodo donde el despachador indicó «EPP Contaminado» como motivo
- * de recurrencia. Sirve para el reporte de material contaminado.
- */
-export function entregasContaminadas(
-  entregas: Entrega[],
-  materiales: Map<string, Material>,
-  personal: Map<string, Trabajador>,
-): EntregaContaminada[] {
+/** Entregas del periodo que fueron cambio de EPP contaminado, de la más reciente a la más antigua. */
+export function entregasContaminadas(entregas: Entrega[], materiales: Map<string, Material>, personal: Map<string, Trabajador>): EntregaContaminada[] {
   const r: EntregaContaminada[] = []
   for (const e of entregas) {
-    if (e.estado !== 'registrada') continue
-    const esContaminado =
-      e.recurrencia?.nota === 'EPP Contaminado' ||
-      e.observaciones.toLowerCase().includes('contaminado')
-    if (!esContaminado) continue
-    const mats = e.recurrencia?.materiales.length
-      ? e.recurrencia.materiales.map((id) => materiales.get(id)?.nombre ?? id)
-      : e.lineas.map((l) => materiales.get(l.materialId)?.nombre ?? l.materialId)
+    if (e.estado !== 'registrada' || !esContaminada(e)) continue
+    const ids = materialesContaminados(e)
+    const lineas = e.lineas.filter((l) => ids.includes(l.materialId))
+    const c = e.contaminado
     const trab = personal.get(e.rpe)
-    const supervisor = trab?.supervisor ? `${trab.supervisor.nombre} (${trab.supervisor.rpe})` : ''
-    r.push({ entrega: e, materiales: mats, supervisor })
+    r.push({
+      entrega: e,
+      folioFormato: c?.folio ?? '',
+      materiales: lineas.map((l) => `${materiales.get(l.materialId)?.nombre ?? l.materialId}${l.varianteId ? ` ${l.varianteId}` : ''} ×${l.cantidad}`),
+      piezas: lineas.reduce((s, l) => s + l.cantidad, 0),
+      actividad: c?.actividad ?? '',
+      supervisor: c?.supervisor || (trab?.supervisor ? `${trab.supervisor.nombre} (${trab.supervisor.rpe})` : ''),
+      hora: c?.hora || e.hora,
+      vistoBueno: c?.vistoBueno ?? '',
+    })
   }
   return r.sort((a, b) => (a.entrega.ts < b.entrega.ts ? 1 : -1))
+}
+
+/** Totales de EPP contaminado por material y por área (piezas y eventos). */
+export function resumenContaminado(lista: EntregaContaminada[], materiales: Map<string, Material>) {
+  const porMaterial = new Map<string, { piezas: number; eventos: number }>()
+  const porArea = new Map<string, { piezas: number; eventos: number; personas: Set<string> }>()
+  for (const c of lista) {
+    const ids = materialesContaminados(c.entrega)
+    for (const id of new Set(ids)) {
+      const piezas = c.entrega.lineas.filter((l) => l.materialId === id).reduce((s, l) => s + l.cantidad, 0)
+      const nombre = materiales.get(id)?.nombre ?? id
+      const x = porMaterial.get(nombre) ?? { piezas: 0, eventos: 0 }
+      x.piezas += piezas
+      x.eventos++
+      porMaterial.set(nombre, x)
+    }
+    const a = porArea.get(c.entrega.area) ?? { piezas: 0, eventos: 0, personas: new Set<string>() }
+    a.piezas += c.piezas
+    a.eventos++
+    a.personas.add(c.entrega.rpe)
+    porArea.set(c.entrega.area, a)
+  }
+  return {
+    porMaterial: [...porMaterial].sort((a, b) => b[1].piezas - a[1].piezas),
+    porArea: [...porArea].sort((a, b) => b[1].piezas - a[1].piezas),
+  }
 }
 
 export interface DatosReporte {

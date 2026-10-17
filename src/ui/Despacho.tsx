@@ -2,7 +2,8 @@ import { signal } from '@preact/signals'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { MAS_PEDIDOS_BASE } from '../db/semilla'
 import { aplicarKit, existencia, posiblesDuplicados, lecturaEscanerValida, masPedidos, materialesRecurrentes, REGLA_RECURRENCIA, type MaterialRecurrente, nivelStock, prestamosVencidos, resolverRpe, sumarDias, tieneTallas, variantesDe } from '../domain/logica'
-import type { DatosPrestamo, Entrega, Material, Trabajador } from '../domain/types'
+import { entregaConFolio, normalizarFolioContaminado, NOTA_CONTAMINADO, UNIDADES_FOLIO, type UnidadFolio } from '../domain/contaminado'
+import type { DatosPrestamo, Entrega, EppContaminado, Material, Trabajador } from '../domain/types'
 import { fechaLocal, hace, normalizar, plural } from '../lib/util'
 import { deshacerEntrega, registrarEntrega, type LineaTicket } from '../state/servicios'
 import { pantalla } from '../state/navegacion'
@@ -24,6 +25,28 @@ const notaRecurrencia = signal('')
 /** Día de la entrega cuando se capturan registros anteriores ('' = hoy). Solo almacén o administrador. */
 const fechaCaptura = signal('')
 const diaEntrega = () => fechaCaptura.value || fechaLocal()
+
+/** Cambio de EPP contaminado: se respalda con el formato en papel; aquí solo es obligatorio su folio. */
+interface EstadoContaminado {
+  activo: boolean
+  unidad: UnidadFolio
+  folio: string
+  /** null = todo el material del ticket */
+  materiales: string[] | null
+  actividad: string
+  supervisor: string
+  hora: string
+  vistoBueno: string
+}
+const SIN_CONTAMINADO: EstadoContaminado = { activo: false, unidad: 'U1', folio: '', materiales: null, actividad: '', supervisor: '', hora: '', vistoBueno: '' }
+const contaminado = signal<EstadoContaminado>(SIN_CONTAMINADO)
+const anioDespacho = () => Number(diaEntrega().slice(0, 4))
+const folioContaminado = () => normalizarFolioContaminado(contaminado.value.folio, contaminado.value.unidad, anioDespacho())
+const materialesContaminadosTicket = () => {
+  const ids = [...new Set(ticket.value.map((l) => l.materialId))]
+  const sel = contaminado.value.materiales
+  return sel ? ids.filter((id) => sel.includes(id)) : ids
+}
 
 const fechaLarga = (fecha: string) => new Date(fecha + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
@@ -206,13 +229,133 @@ function AvisoRecurrencia({ t }: { t: Trabajador | null }) {
         />
         <div class="row" style={{ gap: '4px' }}>
           {MOTIVOS_RECURRENCIA.map((m) => (
-            <button key={m} class="chip" aria-pressed={notaRecurrencia.value === m} onClick={() => (notaRecurrencia.value = m)}>
+            <button
+              key={m}
+              class="chip"
+              aria-pressed={notaRecurrencia.value === m}
+              onClick={() => {
+                notaRecurrencia.value = m
+                if (m === NOTA_CONTAMINADO && !contaminado.value.activo) contaminado.value = { ...contaminado.value, activo: true }
+              }}
+            >
               {m}
             </button>
           ))}
         </div>
       </div>
       {detalle && <DetalleEntrega e={S.entregas.value.find((x) => x.id === detalle.id) ?? detalle} onCerrar={() => setDetalle(null)} />}
+    </div>
+  )
+}
+
+/**
+ * Casilla «EPP contaminado» del ticket. Al marcarla se pide el folio del formato en papel
+ * (obligatorio) y qué material se cambia; actividad, supervisor, hora y visto bueno de PR son opcionales.
+ */
+function PanelContaminado() {
+  const c = contaminado.value
+  const [detalles, setDetalles] = useState(false)
+  const cambiar = (x: Partial<EstadoContaminado>) => (contaminado.value = { ...contaminado.value, ...x })
+  if (!ticket.value.length && !c.activo) return null
+  if (!c.activo) {
+    return (
+      <label class="row small contaminado-casilla">
+        <input type="checkbox" id="chk-contaminado" checked={false} onChange={() => cambiar({ activo: true })} />
+        <span>
+          <Icono n="alerta" /> EPP contaminado (cambio con formato de Protección Radiológica)
+        </span>
+      </label>
+    )
+  }
+  const folio = folioContaminado()
+  const usado = folio ? entregaConFolio(S.entregas.value, folio) : undefined
+  const ids = [...new Set(ticket.value.map((l) => l.materialId))]
+  const marcados = materialesContaminadosTicket()
+  const alternar = (id: string) => {
+    const actual = new Set(marcados)
+    if (actual.has(id)) actual.delete(id)
+    else actual.add(id)
+    cambiar({ materiales: ids.filter((x) => actual.has(x)) })
+  }
+  const texto = (k: 'actividad' | 'supervisor' | 'hora' | 'vistoBueno', etiqueta: string, ph: string) => (
+    <label class="campo">
+      {etiqueta}
+      <input class="input" id={`cont-${k}`} placeholder={ph} value={c[k]} onInput={(e) => cambiar({ [k]: (e.target as HTMLInputElement).value })} />
+    </label>
+  )
+  return (
+    <div class="aviso warn contaminado">
+      <div class="stack" style={{ gap: '8px', width: '100%' }}>
+        <label class="row small" style={{ fontWeight: 600 }}>
+          <input type="checkbox" id="chk-contaminado" checked onChange={() => (contaminado.value = { ...SIN_CONTAMINADO, unidad: c.unidad })} />
+          <span>EPP contaminado</span>
+        </label>
+        <div class="row" style={{ gap: '6px', flexWrap: 'nowrap', alignItems: 'end' }}>
+          <label class="campo" style={{ width: '76px', flex: 'none' }}>
+            Unidad
+            <select class="input" id="cont-unidad" value={c.unidad} onChange={(e) => cambiar({ unidad: (e.target as HTMLSelectElement).value as UnidadFolio })}>
+              {UNIDADES_FOLIO.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="campo grow">
+            Folio del formato
+            <input
+              class={`input ${folio && !usado ? '' : 'falta'}`}
+              id="cont-folio"
+              autoComplete="off"
+              placeholder="Número, p. ej. 3"
+              value={c.folio}
+              onInput={(e) => cambiar({ folio: (e.target as HTMLInputElement).value })}
+              onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
+            />
+          </label>
+        </div>
+        <span class="small">
+          {usado ? (
+            <strong>
+              El folio {folio} ya se capturó en la entrega {usado.folio} ({usado.nombre}, {fechaCorta(usado.fecha)}).
+            </strong>
+          ) : folio ? (
+            <>
+              Se registrará con el folio <strong class="mono">{folio}</strong>
+            </>
+          ) : c.folio.trim() ? (
+            'Folio no válido: escriba el número del formato o el folio completo (U1-SI-2026-003).'
+          ) : (
+            'Escriba el número del formato en papel o léalo con el escáner.'
+          )}
+        </span>
+        {ids.length > 1 && (
+          <div class="stack" style={{ gap: '4px' }}>
+            <span class="small">Material contaminado:</span>
+            <div class="row" style={{ gap: '4px' }}>
+              {ids.map((id) => (
+                <button key={id} class="chip" aria-pressed={marcados.includes(id)} onClick={() => alternar(id)}>
+                  {S.nombreMaterial(id)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {detalles || c.actividad || c.supervisor || c.hora || c.vistoBueno ? (
+          <div class="stack" style={{ gap: '6px' }}>
+            {texto('actividad', 'Actividad que estaba realizando', 'Opcional')}
+            <div class="row" style={{ gap: '6px', flexWrap: 'nowrap' }}>
+              <div class="grow">{texto('supervisor', 'Supervisor', 'Opcional')}</div>
+              <div style={{ width: '96px', flex: 'none' }}>{texto('hora', 'Hora', 'hh:mm')}</div>
+            </div>
+            {texto('vistoBueno', 'Visto bueno de Protección Radiológica', 'Nombre o RPE (opcional)')}
+          </div>
+        ) : (
+          <button class="btn ghost sm" style={{ justifySelf: 'start' }} onClick={() => setDetalles(true)}>
+            <Icono n="nota" /> Agregar datos del formato (opcional)
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -490,6 +633,9 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
   else if (faltaMotivo) bloqueo = `Falta el motivo en ${faltaMotivo} resguardo${faltaMotivo > 1 ? 's' : ''}`
   else if (prestamoPendiente) bloqueo = 'Tiene un préstamo sin devolver'
   else if (faltaPrestamo) bloqueo = 'Faltan los datos del supervisor para el préstamo'
+  else if (contaminado.value.activo && !folioContaminado()) bloqueo = 'Falta el folio del formato de EPP contaminado'
+  else if (contaminado.value.activo && entregaConFolio(S.entregas.value, folioContaminado())) bloqueo = 'Ese folio de EPP contaminado ya se capturó'
+  else if (contaminado.value.activo && !materialesContaminadosTicket().length) bloqueo = 'Marque el material contaminado'
 
   const entregar = async () => {
     if (bloqueo || !t || enviando) return
@@ -513,7 +659,11 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
       if (!seguir) return
     }
     setEnviando(true)
-    const r = await intentar(() => registrarEntrega(t, lineas, observaciones.value, hayPrestamo ? datosPrestamo.value : undefined, notaRecurrencia.value, fechaCaptura.value))
+    const c = contaminado.value
+    const datosContaminado: EppContaminado | undefined = c.activo
+      ? { folio: folioContaminado(), materiales: materialesContaminadosTicket(), actividad: c.actividad, supervisor: c.supervisor, hora: c.hora, vistoBueno: c.vistoBueno }
+      : undefined
+    const r = await intentar(() => registrarEntrega(t, lineas, observaciones.value, hayPrestamo ? datosPrestamo.value : undefined, notaRecurrencia.value, fechaCaptura.value, datosContaminado))
     setEnviando(false)
     if (!r) return
     const { entrega, deshacer } = r
@@ -522,14 +672,16 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
     const anteriorNota = observaciones.value
     const anteriorRecurrencia = notaRecurrencia.value
     const anteriorPrestamo = datosPrestamo.value
+    const anteriorContaminado = contaminado.value
     ticket.value = []
     trabajadorSel.value = null
     observaciones.value = ''
     notaRecurrencia.value = ''
     datosPrestamo.value = { supervisor: { nombre: '', rpe: '', extension: '' }, vence: '' }
+    contaminado.value = { ...SIN_CONTAMINADO, unidad: anteriorContaminado.unidad }
     setNota(false)
     onEntregado()
-    avisar(`✓ ${entrega.folio} · ${entrega.nombre.split(' ').slice(0, 2).join(' ')} · ${piezas} pieza${piezas > 1 ? 's' : ''}${entrega.capturada ? ` · fecha ${fechaCorta(entrega.fecha)}` : ''}`, {
+    avisar(`✓ ${entrega.folio} · ${entrega.nombre.split(' ').slice(0, 2).join(' ')} · ${piezas} pieza${piezas > 1 ? 's' : ''}${entrega.capturada ? ` · fecha ${fechaCorta(entrega.fecha)}` : ''}${entrega.contaminado ? ` · contaminado ${entrega.contaminado.folio}` : ''}`, {
       ms: 12000,
       accion: {
         texto: 'Deshacer',
@@ -540,6 +692,7 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
           observaciones.value = anteriorNota
           notaRecurrencia.value = anteriorRecurrencia
           datosPrestamo.value = anteriorPrestamo
+          contaminado.value = anteriorContaminado
           avisar('Entrega deshecha')
         },
       },
@@ -569,6 +722,7 @@ function Ticket({ onEntregado }: { onEntregado: () => void }) {
         <FechaEntrega />
         {hayPrestamo && <PanelPrestamo />}
         <AvisoRecurrencia t={t} />
+        <PanelContaminado />
         {nota || observaciones.value ? (
           <input
             class="input"

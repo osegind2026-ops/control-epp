@@ -7,9 +7,11 @@ import {
   CATEGORIAS,
   ubicacionesSemilla,
 } from '../db/semilla'
+import { entregaConFolio, NOTA_CONTAMINADO, partesFolio } from '../domain/contaminado'
 import { existencia, formatoFolio, formatoFolioSI, materialesRecurrentes, siguienteFolio, tipoDe, tipoPorRpe } from '../domain/logica'
 import type {
   Dispositivo,
+  EppContaminado,
   DatosPrestamo,
   Entrega,
   LineaEntrega,
@@ -326,6 +328,8 @@ export async function registrarEntrega(
    * inventario. Solo administrador o encargado de almacén; vacío = hoy.
    */
   fechaEntrega = '',
+  /** Cambio de EPP contaminado: folio del formato en papel y materiales contaminados. */
+  contaminado?: EppContaminado,
 ): Promise<{ entrega: Entrega; deshacer: Deshacer }> {
   const { sesion, equipo } = actor()
   if (!lineas.length) throw new ErrorNegocio('Agregue al menos un material.')
@@ -396,12 +400,29 @@ export async function registrarEntrega(
     prestamo: hayPrestamo ? limpiarPrestamo(prestamo!) : undefined,
   }
   if (posterior) entrega.capturada = captura.toISOString()
+  if (contaminado) {
+    const p = partesFolio(contaminado.folio)
+    if (!p) throw new ErrorNegocio('Anote el folio del formato de EPP contaminado (por ejemplo U1-SI-2026-003).')
+    const otra = entregaConFolio(S.entregas.value, contaminado.folio)
+    if (otra) throw new ErrorNegocio(`El folio ${contaminado.folio} ya se capturó en la entrega ${otra.folio} (${otra.nombre}, ${otra.fecha}). Revise el número del formato.`)
+    const enTicket = new Set(lineasEntrega.map((l) => l.materialId))
+    const materiales = [...new Set(contaminado.materiales)].filter((m) => enTicket.has(m))
+    if (!materiales.length) throw new ErrorNegocio('Marque qué material se cambia por estar contaminado.')
+    const limpio: EppContaminado = { folio: contaminado.folio, materiales }
+    for (const k of ['actividad', 'supervisor', 'hora', 'vistoBueno'] as const) {
+      const v = contaminado[k]?.trim()
+      if (v) limpio[k] = v
+    }
+    entrega.contaminado = limpio
+  }
   // Consumibles que esta persona ya recibió varias veces en los últimos días
   const consumibles = lineasEntrega.filter((l) => !l.esResguardo && !l.esPrestamo).map((l) => l.materialId)
   const recurrentes = materialesRecurrentes(S.entregas.value, trabajador.rpe, consumibles, entrega.fecha)
-  if (recurrentes.length) entrega.recurrencia = { materiales: recurrentes.map((r) => r.materialId), nota: notaRecurrencia.trim() }
+  if (recurrentes.length) entrega.recurrencia = { materiales: recurrentes.map((r) => r.materialId), nota: notaRecurrencia.trim() || (entrega.contaminado ? NOTA_CONTAMINADO : '') }
 
   const nota = `${trabajador.rpe} · ${trabajador.nombre}`
+  // En el kardex (y en la hoja «Movimientos» de Google) queda a la vista el folio del formato
+  const notaDe = (materialId: string) => (entrega.contaminado?.materiales.includes(materialId) ? `${nota} · EPP contaminado ${entrega.contaminado.folio}` : nota)
   const movs: Movimiento[] = lineasEntrega.map((l) =>
     nuevoMovimiento('SALIDA', {
       materialId: l.materialId,
@@ -410,7 +431,7 @@ export async function registrarEntrega(
       cantidad: -l.cantidad,
       ref: folio,
       motivo: l.motivoId ? motivos.get(l.motivoId)?.texto ?? '' : '',
-      nota,
+      nota: notaDe(l.materialId),
       grupo: entrega.id,
     }),
   )

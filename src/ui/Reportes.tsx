@@ -1,7 +1,9 @@
 import { createPortal } from 'preact/compat'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { entregarArchivo, fechaLocal } from '../lib/util'
-import { calcularReporte, entregasContaminadas, type DatosReporte, type Fuentes } from '../reportes/datos'
+import { entregarArchivo, fechaLocal, plural } from '../lib/util'
+import { calcularReporte, entregasContaminadas, resumenContaminado, type DatosReporte, type Fuentes } from '../reportes/datos'
+import { claveFolioImpreso, foliosSinCapturar, ultimoFolioCapturado, UNIDADES_FOLIO } from '../domain/contaminado'
+import { leerConfig } from '../db/db'
 import { cargarPlantilla, type Plantilla } from '../reportes/plantilla'
 import { ReporteImprimible } from '../reportes/ReporteImprimible'
 import { tipoDe } from '../domain/logica'
@@ -46,51 +48,140 @@ function limites(desde: string, hasta: string): [string, string] {
 
 const nombreReporte = (d: DatosReporte, ext: string) => `Entrega de EPP ${d.titulo.replace(/[·/\\:]/g, '-')}.${ext}`
 
-/** Reporte de entregas marcadas como EPP contaminado en el periodo. */
-function ReporteContaminado({ entregas }: { entregas: Entrega[] }) {
-  const lista = useMemo(
-    () => entregasContaminadas(entregas, S.materialesPorId.value, S.personal.value),
-    [entregas, S.materiales.value, S.personal.value],
+/** Folios de EPP contaminado de este año sin capturar, por unidad (hasta el último impreso o capturado). */
+function FoliosSinCapturar() {
+  const anio = new Date().getFullYear()
+  const [impresos, setImpresos] = useState<Record<string, number>>({})
+  useEffect(() => {
+    Promise.all(UNIDADES_FOLIO.map((u) => leerConfig<number>(claveFolioImpreso(u), 0))).then((v) => setImpresos(Object.fromEntries(UNIDADES_FOLIO.map((u, i) => [u, v[i]]))))
+  }, [])
+  const filas = UNIDADES_FOLIO.map((u) => {
+    const hasta = Math.max(impresos[u] ?? 0, ultimoFolioCapturado(S.entregas.value, u, anio))
+    return { u, hasta, faltan: foliosSinCapturar(S.entregas.value, u, anio, hasta) }
+  }).filter((f) => f.hasta > 0)
+  if (!filas.length) return null
+  return (
+    <div class="stack" style={{ gap: '4px' }}>
+      {filas.map((f) => (
+        <p key={f.u} class="small">
+          <strong>
+            {f.u} · {anio}:
+          </strong>{' '}
+          {f.faltan.length ? (
+            <>
+              {plural(f.faltan.length, 'folio', 'folios')} del 1 al {f.hasta} sin capturar (en blanco, extraviados o pendientes):{' '}
+              <span class="mono">{f.faltan.slice(0, 40).map((x) => Number(x.slice(-3))).join(', ')}</span>
+              {f.faltan.length > 40 && ' …'}
+            </>
+          ) : (
+            `los ${f.hasta} folios están capturados.`
+          )}
+        </p>
+      ))}
+      <p class="muted small">El último folio impreso se conoce solo en el equipo donde se imprimieron los formatos.</p>
+    </div>
   )
+}
+
+/** Reporte de cambios de EPP contaminado en el periodo (con el folio de su formato). */
+function ReporteContaminado({ entregas }: { entregas: Entrega[] }) {
+  const lista = useMemo(() => entregasContaminadas(entregas, S.materialesPorId.value, S.personal.value), [entregas, S.materiales.value, S.personal.value])
+  const resumen = useMemo(() => resumenContaminado(lista, S.materialesPorId.value), [lista])
   if (!lista.length) return null
+  const piezas = lista.reduce((s, c) => s + c.piezas, 0)
   return (
     <div class="stack">
       <div class="spread">
-        <h2>EPP Contaminado</h2>
-        <span class="muted small">{lista.length} registro{lista.length > 1 ? 's' : ''}</span>
+        <h2>EPP contaminado</h2>
+        <span class="muted small">
+          {plural(lista.length, 'cambio', 'cambios')} · {plural(piezas, 'pieza', 'piezas')} · {plural(new Set(lista.map((c) => c.entrega.rpe)).size, 'persona', 'personas')}
+        </span>
+      </div>
+      <div class="row" style={{ alignItems: 'start', gap: '16px' }}>
+        <div class="tabla-wrap grow" style={{ minWidth: '260px' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Material</th>
+                <th class="num">Cambios</th>
+                <th class="num">Piezas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resumen.porMaterial.map(([m, x]) => (
+                <tr key={m}>
+                  <td>{m}</td>
+                  <td class="num">{x.eventos}</td>
+                  <td class="num">
+                    <strong>{x.piezas}</strong>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div class="tabla-wrap grow" style={{ minWidth: '260px' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Área</th>
+                <th class="num">Cambios</th>
+                <th class="num">Personas</th>
+                <th class="num">Piezas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resumen.porArea.map(([a, x]) => (
+                <tr key={a}>
+                  <td>{a}</td>
+                  <td class="num">{x.eventos}</td>
+                  <td class="num">{x.personas.size}</td>
+                  <td class="num">
+                    <strong>{x.piezas}</strong>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
       <div class="tabla-wrap">
         <table>
           <thead>
             <tr>
+              <th>Folio formato</th>
               <th>Fecha</th>
               <th>Hora</th>
               <th>Nombre</th>
               <th>RPE</th>
               <th>Área</th>
               <th>Material contaminado</th>
+              <th>Actividad</th>
               <th>Supervisor</th>
-              <th>Observaciones</th>
-              <th>Folio</th>
+              <th>Vo. Bo. PR</th>
+              <th>Entrega</th>
             </tr>
           </thead>
           <tbody>
             {lista.map((c) => (
               <tr key={c.entrega.id}>
+                <td class="mono small">{c.folioFormato || <span class="muted" title="Marcada antes solo con comentario">sin folio</span>}</td>
                 <td>{c.entrega.fecha}</td>
-                <td>{c.entrega.hora}</td>
+                <td>{c.hora}</td>
                 <td>{c.entrega.nombre}</td>
                 <td class="mono small">{c.entrega.rpe}</td>
                 <td>{c.entrega.area}</td>
                 <td>{c.materiales.join(', ')}</td>
+                <td class="small">{c.actividad || <span class="muted">—</span>}</td>
                 <td class="small">{c.supervisor || <span class="muted">—</span>}</td>
-                <td class="small">{c.entrega.observaciones || <span class="muted">—</span>}</td>
+                <td class="small">{c.vistoBueno || <span class="muted">—</span>}</td>
                 <td class="mono small">{c.entrega.folio}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <FoliosSinCapturar />
     </div>
   )
 }

@@ -1,6 +1,8 @@
 import { createPortal } from 'preact/compat'
 import { useEffect, useState } from 'preact/hooks'
 import { guardarConfig, leerConfig } from '../db/db'
+import { ultimoFolioCapturado } from '../domain/contaminado'
+import * as S from '../state/store'
 import { avisar } from './comunes'
 import { Icono } from './iconos'
 
@@ -394,7 +396,8 @@ export function PantallaFormatos() {
     setCargandoFolio(true)
     leerConfig<number>(claveFolioContaminado(unidad), 0).then((ultimo) => {
       if (montado) {
-        setFolioInicioContaminado(ultimo + 1)
+        // Sigue después del último impreso en este equipo o capturado en cualquier despacho (se sincroniza)
+        setFolioInicioContaminado(Math.max(ultimo, ultimoFolioCapturado(S.entregas.value, unidad, ANIO_ACTUAL)) + 1)
         setCargandoFolio(false)
       }
     })
