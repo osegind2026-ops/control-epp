@@ -146,6 +146,7 @@ const TIPOS_ARCHIVO: Record<string, string> = {
   pdf: 'application/pdf',
   csv: 'text/csv;charset=utf-8',
   json: 'application/json',
+  zip: 'application/zip',
 }
 
 export function descargarBlob(nombre: string, blob: Blob): void {

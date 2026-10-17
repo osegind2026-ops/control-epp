@@ -1,7 +1,7 @@
 {
   "name": "control-epp",
   "private": true,
-  "version": "2.11.1",
+  "version": "2.12.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/copiar-ocr.mjs && vite",
@@ -20,6 +20,7 @@
     "@zxing/browser": "^0.2.1",
     "@zxing/library": "^0.23.0",
     "dexie": "^4.4.6",
+    "jszip": "^3.10.2",
     "pptxgenjs": "^4.0.1",
     "preact": "^10.29.8",
     "qrcode-generator": "^2.0.4",

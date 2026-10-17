@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks'
 import type { Ubicacion } from '../domain/types'
-import { descargarArchivo, hace, plural } from '../lib/util'
+import { descargarArchivo, entregarArchivo, hace, plural } from '../lib/util'
+import { puedeInventario } from '../state/permisos'
 import { armarRespaldo, importarRespaldo, leerRespaldo, marcarRespaldado, nombreArchivo, type Respaldo } from '../state/respaldo'
 import { guardarBloqueo, guardarDispositivo, guardarRegistro, nuevoId } from '../state/servicios'
 import * as S from '../state/store'
@@ -224,6 +225,41 @@ function Respaldos() {
   )
 }
 
+/** Respaldo de toda la información de este equipo en un ZIP. Solo administrador y encargado de almacén. */
+function RespaldoCompleto() {
+  const [trabajando, setTrabajando] = useState(false)
+  const [ultimo, setUltimo] = useState('')
+  if (!puedeInventario()) return null
+  const crear = async () => {
+    setTrabajando(true)
+    const r = await intentar(async () => {
+      const { crearRespaldoCompleto } = await import('../state/respaldoCompleto')
+      const x = await crearRespaldoCompleto()
+      await entregarArchivo(x.nombre, x.blob)
+      await marcarRespaldado()
+      return x
+    })
+    setTrabajando(false)
+    if (!r) return
+    setUltimo(`${r.nombre} · ${(r.blob.size / 1024 / 1024).toFixed(1)} MB · ${r.resumen}`)
+    avisar('✓ Respaldo completo creado')
+  }
+  return (
+    <section class="card stack">
+      <h2>Respaldo completo</h2>
+      <p class="muted small">
+        Un solo archivo ZIP con toda la información de este equipo: el respaldo para restaurar, un Excel con todas las tablas (entregas, movimientos, personal, resguardos, equipos y bitácora, usuarios, existencias) y los CSV. Solo lo ve el administrador o el encargado de almacén. Guárdelo en un lugar seguro: incluye los datos del personal.
+      </p>
+      <div class="row">
+        <button class="btn primary" disabled={trabajando} onClick={crear}>
+          <Icono n="descarga" /> {trabajando ? 'Creando respaldo…' : 'Crear respaldo completo'}
+        </button>
+      </div>
+      {ultimo && <p class="small">Último creado ahora: {ultimo}</p>}
+    </section>
+  )
+}
+
 export function PantallaAjustes() {
   return (
     <div class="stack" style={{ maxWidth: '860px' }}>
@@ -231,6 +267,7 @@ export function PantallaAjustes() {
       <TarjetaNube />
       <Intercambio />
       <Respaldos />
+      <RespaldoCompleto />
       <Equipo />
       <SeccionUsuarios />
       <Ubicaciones />

@@ -190,3 +190,33 @@ describe('EPP contaminado', () => {
     await anularEntrega(entrega.id, 'anu_error', '')
   })
 })
+
+describe('respaldo completo', () => {
+  it('crea un ZIP con todo, sin claves de la nube, y solo para admin o almacén', async () => {
+    const { db: base, guardarConfig: guardar } = await import('../db/db')
+    const { crearRespaldoCompleto } = await import('./respaldoCompleto')
+    const { default: JSZip } = await import('jszip')
+    await guardar('nube', { url: 'https://ejemplo.invalido', clave: 'SECRETO-NO-DEBE-SALIR' })
+    await guardar('ultimo_folio_resguardo_economico', 7)
+    const { nombre, blob } = await crearRespaldoCompleto()
+    expect(nombre).toMatch(/^CFE_EPP_Respaldo_COMPLETO_T1_.*\.zip$/)
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+    const archivos = Object.keys(zip.files)
+    expect(archivos).toEqual(expect.arrayContaining(['Datos_completos.xlsx', 'Entregas_detalle.csv', 'Movimientos.csv', 'configuracion.json', 'LEEME.txt']))
+    const json = archivos.find((a) => a.endsWith('.json') && a.startsWith('CFE_EPP_Respaldo_'))!
+    const respaldo = JSON.parse(await zip.file(json)!.async('string'))
+    expect(respaldo.datos.entregas.length).toBe(S.entregas.value.length)
+    expect(respaldo.datos.personal.length).toBe(S.personal.value.size)
+    const config = JSON.parse(await zip.file('configuracion.json')!.async('string'))
+    expect(config.ultimo_folio_resguardo_economico).toBe(7)
+    for (const a of archivos) if (!a.endsWith('.xlsx')) expect(await zip.file(a)!.async('string')).not.toContain('SECRETO-NO-DEBE-SALIR')
+    await base.config.delete('nube')
+
+    const antes = S.sesion.value
+    S.sesion.value = { ...antes!, rol: 'despachador', esAdmin: false }
+    await expect(crearRespaldoCompleto()).rejects.toThrow(/administrador o el encargado/)
+    S.sesion.value = { ...antes!, rol: 'almacen', esAdmin: false }
+    await expect(crearRespaldoCompleto()).resolves.toBeTruthy()
+    S.sesion.value = antes
+  })
+})
