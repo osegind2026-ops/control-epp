@@ -172,6 +172,37 @@ export function tecladoFisico(): boolean {
 }
 
 /**
+ * Menú «Compartir» del celular con mensaje y archivo juntos (el usuario elige WhatsApp y el
+ * archivo queda adjunto). Devuelve 'enviado', 'cancelado' o 'no-disponible' (equipo sin menú de
+ * compartir) y lanza el error del navegador si pidió un gesto del usuario (NotAllowedError).
+ */
+export async function compartirConArchivo(nombre: string, blob: Blob, texto: string): Promise<'enviado' | 'cancelado' | 'no-disponible'> {
+  const tipo = TIPOS_ARCHIVO[nombre.split('.').pop()?.toLowerCase() ?? ''] ?? blob.type
+  const archivo = new File([blob], nombre, { type: tipo })
+  const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean }
+  const datos: ShareData = { files: [archivo], text: texto, title: nombre }
+  if (typeof nav.share !== 'function' || !nav.canShare?.(datos)) return 'no-disponible'
+  try {
+    await nav.share(datos)
+    return 'enviado'
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') return 'cancelado'
+    throw e
+  }
+}
+
+/** Abre WhatsApp con el mensaje escrito (sin archivo). Debe llamarse justo después de un toque. */
+export function abrirWhatsApp(texto: string): void {
+  const a = document.createElement('a')
+  a.href = `https://wa.me/?text=${encodeURIComponent(texto)}`
+  a.target = '_blank'
+  a.rel = 'noopener noreferrer'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+/**
  * En el celular abre el menú «Compartir» con el archivo (para abrirlo en PowerPoint o
  * Excel, guardarlo o enviarlo); en la computadora lo descarga.
  */

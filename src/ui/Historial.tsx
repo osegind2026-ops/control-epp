@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'preact/hooks'
 import { gruposDuplicados } from '../domain/logica'
 import type { Entrega } from '../domain/types'
-import { descargarArchivo, entregarArchivo, fechaLocal, normalizar, plural } from '../lib/util'
+import { abrirWhatsApp, compartirConArchivo, descargarArchivo, descargarBlob, entregarArchivo, fechaLocal, normalizar, plural } from '../lib/util'
 import { calcularReporte } from '../reportes/datos'
 import { csvDetalle, nombreArchivo } from '../state/respaldo'
 import * as S from '../state/store'
-import { avisar, intentar, Vacio } from './comunes'
+import { avisar, confirmar, intentar, Vacio } from './comunes'
 import { DetalleEntrega } from './DetalleEntrega'
 import { Icono } from './iconos'
 
@@ -19,10 +19,15 @@ const fuentesActuales = () => ({
   personal: S.personal.value,
 })
 
-async function excelDe(desde: string, hasta: string): Promise<void> {
+async function excelBlob(desde: string, hasta: string): Promise<{ nombre: string; blob: Blob }> {
   const { generarExcel } = await import('../reportes/excel')
   const d = calcularReporte(fuentesActuales(), desde, hasta)
-  await entregarArchivo(`Entrega de EPP ${d.titulo.replace(/[·/\\:]/g, '-')}.xlsx`, await generarExcel(d, fuentesActuales()))
+  return { nombre: `Entrega de EPP ${d.titulo.replace(/[·/\\:]/g, '-')}.xlsx`, blob: await generarExcel(d, fuentesActuales()) }
+}
+
+async function excelDe(desde: string, hasta: string): Promise<void> {
+  const { nombre, blob } = await excelBlob(desde, hasta)
+  await entregarArchivo(nombre, blob)
 }
 
 async function compartirHoy() {
@@ -36,8 +41,31 @@ async function compartirHoy() {
     `👥 Personas atendidas: ${new Set(lista.map((e) => e.rpe)).size}\n📦 Entregas: ${lista.length}\n\n` +
     top.map(([id, n]) => `• ${S.nombreMaterial(id)}: ${n}`).join('\n') +
     `\n\n_Se adjunta el Excel con el detalle del día._`
-  await intentar(() => excelDe(hoy, hoy))
-  window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank')
+  const archivo = await intentar(() => excelBlob(hoy, hoy))
+  if (!archivo) return
+  // Un solo menú «Compartir» con el mensaje y el Excel adjunto: se elige WhatsApp y el chat.
+  const enviar = () => compartirConArchivo(archivo.nombre, archivo.blob, msg)
+  let r: Awaited<ReturnType<typeof enviar>> | 'bloqueado'
+  try {
+    r = await enviar()
+  } catch {
+    r = 'bloqueado' // el navegador pide un toque nuevo porque la preparación del Excel tardó
+  }
+  if (r === 'bloqueado') {
+    const seguir = await confirmar('Excel listo para enviar', 'El resumen y el Excel del día están listos. Toque «Compartir» y elija WhatsApp.', 'Compartir')
+    if (!seguir) return
+    try {
+      r = await enviar()
+    } catch {
+      r = 'no-disponible'
+    }
+  }
+  if (r === 'no-disponible') {
+    // Computadora u otro equipo sin menú de compartir: se descarga el Excel y se abre WhatsApp con el mensaje
+    descargarBlob(archivo.nombre, archivo.blob)
+    const abrir = await confirmar('Excel descargado', 'Se descargó el Excel. ¿Abrir WhatsApp con el resumen? Adjunte el archivo descargado al chat.', 'Abrir WhatsApp')
+    if (abrir) abrirWhatsApp(msg)
+  }
 }
 
 export function PantallaHistorial() {
