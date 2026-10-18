@@ -104,7 +104,7 @@ describe('equipos a resguardo', () => {
     expect(ana.nombre).toBe('TRABAJADOR UNO')
     await expect(guardarPersonalSI({ rpe: 'T0901', corto: 'Otro', activo: true })).rejects.toThrow(/ya está en la lista/)
     const eq = S.equipos.value.find((x) => x.codigo === 'DET-01')!
-    await expect(prestarEquipo({ equipoId: eq.id, trabajador: e('T0901'), accesorios: [], bitacora: false })).rejects.toThrow(/Elija quién de Seguridad Industrial/)
+    await expect(prestarEquipo({ equipoId: eq.id, trabajador: e('T0901'), accesorios: [], bitacora: false })).rejects.toThrow(/Elija qué supervisor entrega/)
     // Sin uso previo se ordenan por nombre corto
     expect(personalSIOrdenado(S.personalSI.value, S.prestamosEquipo.value).map((x) => x.corto)).toEqual(['Dos', 'Uno'])
     const p = await prestarEquipo({ equipoId: eq.id, trabajador: e('T0901'), accesorios: [], bitacora: false, entregoSIId: ana.id })
@@ -114,6 +114,27 @@ describe('equipos a resguardo', () => {
     await registrarRegreso({ prestamoId: p.id, devolvio: e('T0901'), accesorios: [], bitacora: false, recibioSIId: beto.id })
     expect(personalSIOrdenado(S.personalSI.value, S.prestamosEquipo.value).map((x) => x.corto)).toEqual(['Dos', 'Uno'])
     await expect(registrarRegreso({ prestamoId: p.id, devolvio: e('T0901'), accesorios: [], bitacora: false })).rejects.toThrow(/ya no está activo/)
+  })
+
+  it('separa técnicos y supervisores en las filas de botones', async () => {
+    const uno = S.personalSI.value.find((x) => x.rpe === 'T0901')!
+    const dos = S.personalSI.value.find((x) => x.rpe === 'T0902')!
+    const orden = (f: 'tecnico' | 'supervisor') => personalSIOrdenado(S.personalSI.value, S.prestamosEquipo.value, f).map((x) => x.corto)
+    // Sin rol (o «ambos») salen en las dos filas; al técnico se le ordena por a quién se le prestó último
+    expect(orden('tecnico')).toEqual(['Uno', 'Dos'])
+    await guardarPersonalSI({ id: uno.id, rpe: 'T0901', corto: 'Uno', rol: 'tecnico', activo: true })
+    await guardarPersonalSI({ id: dos.id, rpe: 'T0902', corto: 'Dos', rol: 'supervisor', activo: true })
+    expect(orden('tecnico')).toEqual(['Uno'])
+    expect(orden('supervisor')).toEqual(['Dos'])
+    // Con supervisores en la lista, hay que elegir uno; con solo técnicos queda a nombre de la sesión
+    const eq = S.equipos.value.find((x) => x.codigo === 'DET-01')!
+    await expect(prestarEquipo({ equipoId: eq.id, trabajador: S.personal.value.get('T0901')!, accesorios: [], bitacora: false })).rejects.toThrow(/Elija qué supervisor/)
+    await guardarPersonalSI({ id: dos.id, rpe: 'T0902', corto: 'Dos', rol: 'tecnico', activo: true })
+    const p = await prestarEquipo({ equipoId: eq.id, trabajador: S.personal.value.get('T0901')!, accesorios: [], bitacora: false })
+    expect(p.entregoSI?.id).toBe(S.sesion.value!.usuarioId)
+    await registrarRegreso({ prestamoId: p.id, devolvio: S.personal.value.get('T0901')!, accesorios: [], bitacora: false })
+    await guardarPersonalSI({ id: uno.id, rpe: 'T0901', corto: 'Uno', rol: 'ambos', activo: true })
+    await guardarPersonalSI({ id: dos.id, rpe: 'T0902', corto: 'Dos', rol: 'ambos', activo: true })
   })
 
   it('observaciones rápidas: gravedad, orden por uso y actividades recientes', async () => {

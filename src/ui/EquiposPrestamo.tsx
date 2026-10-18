@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'preact/hooks'
-import type { Equipo, ObsElegida, PrestamoEquipo, Trabajador } from '../domain/types'
+import type { Equipo, ObsElegida, PersonalSI, PrestamoEquipo, Trabajador } from '../domain/types'
 import { fechaDeTs, hace, horaLocal } from '../lib/util'
 import {
   actividadesRecientes,
@@ -9,15 +9,14 @@ import {
   personalSIOrdenado,
   prestamoVencido,
   prestarEquipo,
+  puedeSerSupervisor,
   registrarRegreso,
-  solicitantesRecientes,
 } from '../state/equipos'
 import { puedeInventario } from '../state/permisos'
 import * as S from '../state/store'
 import { CapturaFotos } from './Evidencia'
 import { avisar, intentar, Modal } from './comunes'
 import { Icono } from './iconos'
-import { BuscadorTrabajador } from './Trabajador'
 
 export const fmtTs = (ts: string) => `${fechaDeTs(ts)} ${horaLocal(new Date(ts))}`
 /** Nombre corto de quien atendió, o de quien registró si aún no había lista de Seguridad Industrial. */
@@ -30,16 +29,22 @@ export function FotoEquipo({ e, mini }: { e: Pick<Equipo, 'fotoId'>; mini?: bool
   return <span class={`foto ${mini ? 'mini' : ''}`}>{src ? <img src={src} alt="" loading="lazy" /> : <Icono n="equipo" />}</span>
 }
 
-/** Quién de Seguridad Industrial atiende; el rol (entrega, recibe, registra) siempre va a la vista. */
-function BotonesSI({ rol, valor, onCambio }: { rol: string; valor: string; onCambio: (id: string) => void }) {
-  const lista = useMemo(() => personalSIOrdenado(S.personalSI.value, S.prestamosEquipo.value), [S.personalSI.value, S.prestamosEquipo.value])
+type Funcion = 'tecnico' | 'supervisor'
+
+/** Un botón por persona de Seguridad Industrial; el rótulo dice qué hace en este movimiento (presta a, entrega, recibe…). */
+function BotonesSI({ funcion, rol, valor, onCambio, excluirRpe }: { funcion: Funcion; rol: string; valor: string; onCambio: (id: string) => void; excluirRpe?: string }) {
+  const lista = useMemo(
+    () => personalSIOrdenado(S.personalSI.value, S.prestamosEquipo.value, funcion).filter((x) => !excluirRpe || x.rpe !== excluirRpe),
+    [S.personalSI.value, S.prestamosEquipo.value, funcion, excluirRpe],
+  )
   if (!lista.length) {
     return (
       <div class="stack" style={{ gap: '4px' }}>
         <strong class="small">{rol}</strong>
-        <span class="muted small">
-          Se registrará a nombre de {S.sesion.value?.usuarioNombre}.
-          {S.sesion.value?.rol === 'admin' && ' Para elegir entre varios nombres, agréguelos en Ajustes → Equipos a resguardo.'}
+        <span class={`small ${funcion === 'tecnico' ? '' : 'muted'}`}>
+          {funcion === 'tecnico'
+            ? 'No hay técnicos en la lista. El administrador los agrega en Ajustes → Equipos a resguardo.'
+            : `Se registrará a nombre de ${S.sesion.value?.usuarioNombre}.${S.sesion.value?.rol === 'admin' ? ' Para elegir entre varios supervisores, agréguelos en Ajustes → Equipos a resguardo.' : ''}`}
         </span>
       </div>
     )
@@ -51,7 +56,7 @@ function BotonesSI({ rol, valor, onCambio }: { rol: string; valor: string; onCam
       </strong>
       <div class="chips" role="group" aria-label={rol}>
         {lista.map((x) => (
-          <button key={x.id} class="chip chip-si" aria-pressed={valor === x.id} onClick={() => onCambio(x.id)}>
+          <button key={x.id} class="chip chip-si" aria-pressed={valor === x.id} onClick={() => onCambio(x.id)} title={x.nombre}>
             {x.corto}
           </button>
         ))}
@@ -60,11 +65,19 @@ function BotonesSI({ rol, valor, onCambio }: { rol: string; valor: string; onCam
   )
 }
 
-/** Quien tiene la sesión abierta queda preseleccionado si está en la lista de Seguridad Industrial. */
+/** Quien tiene la sesión abierta queda preseleccionado como supervisor si está en la lista. */
 function siPorDefecto(): string {
   const u = S.sesion.value?.usuarioId
-  return S.personalSI.value.find((x) => x.activo && x.usuarioId === u)?.id ?? ''
+  return S.personalSI.value.find((x) => x.activo && puedeSerSupervisor(x) && x.usuarioId === u)?.id ?? ''
 }
+
+/** Datos del técnico para el préstamo: el RPE y el área salen del padrón. */
+function trabajadorDe(x: PersonalSI): Pick<Trabajador, 'rpe' | 'nombre' | 'area'> {
+  const t = x.rpe ? S.personal.value.get(x.rpe) : undefined
+  return { rpe: x.rpe ?? x.id, nombre: t?.nombre ?? x.nombre, area: t?.area ?? 'OFICINA DE SEGURIDAD INDUSTRIAL' }
+}
+
+const haySupervisores = () => S.personalSI.value.some((x) => x.activo && puedeSerSupervisor(x))
 
 /** Hora del movimiento: se registra al guardar; administrador y almacén pueden corregirla. */
 function HoraMovimiento({ etiqueta, valor, onCambio }: { etiqueta: string; valor: string; onCambio: (v: string) => void }) {
@@ -194,45 +207,6 @@ function ObsRapidas({ titulo, obs, onObs, fotos, onFotos }: { titulo: string; ob
   )
 }
 
-function ChipTrabajador({ t, etiqueta, onQuitar }: { t: Pick<Trabajador, 'rpe' | 'nombre' | 'area'>; etiqueta?: string; onQuitar?: () => void }) {
-  return (
-    <div class="row card" style={{ padding: '10px', flexWrap: 'nowrap' }}>
-      <div class="grow">
-        {etiqueta && <div class="muted small">{etiqueta}</div>}
-        <strong>{t.nombre}</strong>
-        <div class="muted small">
-          <span class="mono">{t.rpe}</span> · {t.area}
-        </div>
-      </div>
-      {onQuitar && (
-        <button class="btn ghost sm" onClick={onQuitar} aria-label="Cambiar persona">
-          Cambiar
-        </button>
-      )}
-    </div>
-  )
-}
-
-/** Quién recibe: los últimos que pidieron equipos con un toque, o búsqueda por RPE, nombre o gafete. */
-function ElegirTrabajador({ valor, onCambio, excluir }: { valor: Trabajador | null; onCambio: (t: Trabajador | null) => void; excluir?: string }) {
-  const recientes = useMemo(() => solicitantesRecientes(S.prestamosEquipo.value, 8).filter((x) => x.rpe !== excluir).slice(0, 6), [S.prestamosEquipo.value, excluir])
-  if (valor) return <ChipTrabajador t={valor} onQuitar={() => onCambio(null)} />
-  return (
-    <div class="stack" style={{ gap: '8px' }}>
-      {recientes.length > 0 && (
-        <div class="chips" role="group" aria-label="Quienes pidieron equipos hace poco">
-          {recientes.map((x) => (
-            <button key={x.rpe} class="chip" onClick={() => onCambio(S.personal.value.get(x.rpe) ?? ({ ...x, puesto: '', casillero: '', tipo: 'eventual', tallas: {}, activo: true, alta: '', actualizado: '' } as Trabajador))}>
-              {x.nombre.split(' ').slice(0, 2).join(' ')}
-            </button>
-          ))}
-        </div>
-      )}
-      <BuscadorTrabajador autoFocus={false} onElegir={(x) => (x.rpe === excluir ? avisar('Elija a otra persona.', { tipo: 'bad' }) : onCambio(x))} />
-    </div>
-  )
-}
-
 function ActividadCampo({ valor, onCambio }: { valor: string; onCambio: (v: string) => void }) {
   const recientes = useMemo(() => actividadesRecientes(S.prestamosEquipo.value), [S.prestamosEquipo.value])
   return (
@@ -257,7 +231,7 @@ function ActividadCampo({ valor, onCambio }: { valor: string; onCambio: (v: stri
 // ---------- Prestar ----------
 
 export function ModalPrestar({ eq, onCerrar }: { eq: Equipo; onCerrar: () => void }) {
-  const [t, setT] = useState<Trabajador | null>(null)
+  const [tec, setTec] = useState('')
   const [actividad, setActividad] = useState('')
   const [accesorios, setAccesorios] = useState<string[]>(eq.accesorios)
   // Casi nadie lleva su libreta: no viene marcada
@@ -267,16 +241,16 @@ export function ModalPrestar({ eq, onCerrar }: { eq: Equipo; onCerrar: () => voi
   const [si, setSi] = useState(siPorDefecto())
   const [hora, setHora] = useState('')
   const [guardando, setGuardando] = useState(false)
-  const hayLista = S.personalSI.value.some((x) => x.activo)
-  const falta = !t ? 'Elija quién lo recibe' : hayLista && !si ? 'Elija quién entrega' : ''
+  const tecnico = S.personalSI.value.find((x) => x.id === tec)
+  const falta = !tecnico ? 'Elija a quién se presta' : haySupervisores() && !si ? 'Elija qué supervisor entrega' : ''
 
   const guardar = async () => {
-    if (!t || guardando) return
+    if (!tecnico || guardando) return
     setGuardando(true)
-    const p = await intentar(() => prestarEquipo({ equipoId: eq.id, trabajador: t, actividad, accesorios, bitacora, obs, fotos, entregoSIId: si || undefined, fechaHora: hora || undefined }))
+    const p = await intentar(() => prestarEquipo({ equipoId: eq.id, trabajador: trabajadorDe(tecnico), actividad, accesorios, bitacora, obs, fotos, entregoSIId: si || undefined, fechaHora: hora || undefined }))
     setGuardando(false)
     if (p) {
-      avisar(`✓ ${p.equipoCodigo} para ${p.nombre.split(' ').slice(0, 2).join(' ')} · ${p.folio}`)
+      avisar(`✓ ${p.equipoCodigo} para ${tecnico.corto} · ${p.folio}`)
       onCerrar()
     }
   }
@@ -305,12 +279,9 @@ export function ModalPrestar({ eq, onCerrar }: { eq: Equipo; onCerrar: () => voi
           <div class="muted small">{[eq.marca, eq.modelo, eq.serie && `Serie ${eq.serie}`].filter(Boolean).join(' · ')}</div>
         </div>
       </div>
-      <div class="stack" style={{ gap: '6px' }}>
-        <strong>Recibe el equipo</strong>
-        <ElegirTrabajador valor={t} onCambio={setT} />
-      </div>
+      <BotonesSI funcion="tecnico" rol="Se presta a (técnico)" valor={tec} onCambio={setTec} />
+      <BotonesSI funcion="supervisor" rol="Lo entrega (supervisor)" valor={si} onCambio={setSi} />
       <ActividadCampo valor={actividad} onCambio={setActividad} />
-      <BotonesSI rol="Entrega (Seguridad Industrial)" valor={si} onCambio={setSi} />
       <Accesorios lista={eq.accesorios} marcados={accesorios} onCambio={setAccesorios} titulo="Accesorios que salen con el equipo" />
       <label class="check">
         <input type="checkbox" checked={bitacora} onChange={(e) => setBitacora((e.target as HTMLInputElement).checked)} />
@@ -326,9 +297,9 @@ export function ModalPrestar({ eq, onCerrar }: { eq: Equipo; onCerrar: () => voi
 
 export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; onCerrar: () => void; onAnular: (p: PrestamoEquipo) => void }) {
   const [modo, setModo] = useState<'devolucion' | 'transferencia'>('devolucion')
-  const [otro, setOtro] = useState<Trabajador | null>(null)
-  const [mismo, setMismo] = useState(true)
-  const [nuevo, setNuevo] = useState<Trabajador | null>(null)
+  // Quien devuelve: el que lo tiene (por defecto) u otro técnico
+  const [otroId, setOtroId] = useState('')
+  const [nuevoId, setNuevoId] = useState('')
   const [actividad, setActividad] = useState(p.uso)
   const [accesorios, setAccesorios] = useState<string[]>(p.accesorios)
   const [bitacora, setBitacora] = useState(p.bitacora)
@@ -337,13 +308,16 @@ export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; on
   const [si, setSi] = useState(siPorDefecto())
   const [hora, setHora] = useState('')
   const [guardando, setGuardando] = useState(false)
-  const hayLista = S.personalSI.value.some((x) => x.activo)
   const transfiere = modo === 'transferencia'
-  const devolvio = transfiere || mismo ? { rpe: p.rpe, nombre: p.nombre } : otro
-  const falta = transfiere && !nuevo ? 'Elija quién lo recibe' : !devolvio ? 'Elija quién lo devuelve' : hayLista && !si ? `Elija quién ${transfiere ? 'registra' : 'recibe'}` : ''
+  const otro = S.personalSI.value.find((x) => x.id === otroId)
+  const nuevo = S.personalSI.value.find((x) => x.id === nuevoId)
+  const titularSI = S.personalSI.value.find((x) => x.rpe === p.rpe)
+  const nombreTitular = titularSI?.corto ?? p.nombre.split(' ').slice(0, 2).join(' ')
+  const devolvio = transfiere || !otro ? { rpe: p.rpe, nombre: p.nombre } : trabajadorDe(otro)
+  const falta = transfiere && !nuevo ? 'Elija quién lo recibe' : haySupervisores() && !si ? `Elija qué supervisor ${transfiere ? 'registra' : 'recibe'}` : ''
 
   const guardar = async () => {
-    if (!devolvio || guardando) return
+    if (guardando) return
     setGuardando(true)
     const r = await intentar(() =>
       registrarRegreso({
@@ -355,13 +329,13 @@ export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; on
         fotos,
         recibioSIId: si || undefined,
         fechaHora: hora || undefined,
-        transferirA: transfiere && nuevo ? { trabajador: nuevo, actividad } : undefined,
+        transferirA: transfiere && nuevo ? { trabajador: trabajadorDe(nuevo), actividad } : undefined,
       }),
     )
     setGuardando(false)
     if (!r) return
     const corto = (n: string) => n.split(' ').slice(0, 2).join(' ')
-    avisar(r.siguiente ? `✓ ${p.equipoCodigo} pasó de ${corto(p.nombre)} a ${corto(r.siguiente.nombre)}` : `✓ ${p.equipoCodigo} de regreso en la oficina`)
+    avisar(r.siguiente ? `✓ ${p.equipoCodigo} pasó de ${nombreTitular} a ${nuevo?.corto ?? corto(r.siguiente.nombre)}` : `✓ ${p.equipoCodigo} de regreso en la oficina`)
     onCerrar()
   }
 
@@ -385,42 +359,49 @@ export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; on
       <div class="muted small">
         {p.equipoNombre} · folio {p.folio}
         <br />
-        Lo tiene <strong>{p.nombre}</strong> desde {fmtTs(p.ts)} ({hace(p.ts)}){p.uso && ` · ${p.uso}`}
+        Lo tiene <strong>{nombreTitular}</strong> desde {fmtTs(p.ts)} ({hace(p.ts)}){p.uso && ` · ${p.uso}`}
       </div>
       <div class="row" role="group" aria-label="Qué se hace con el equipo">
         <button class="opcion grow" aria-pressed={!transfiere} onClick={() => setModo('devolucion')}>
           <Icono n="devolucion" /> Devolución a la oficina
         </button>
         <button class="opcion grow" aria-pressed={transfiere} onClick={() => setModo('transferencia')}>
-          <Icono n="repetir" /> Pasa a otra persona
+          <Icono n="repetir" /> Pasa a otro técnico
         </button>
       </div>
 
       {transfiere ? (
         <>
-          <ChipTrabajador t={p} etiqueta="Transfiere" />
           <div class="stack" style={{ gap: '6px' }}>
-            <strong>Recibe el equipo</strong>
-            <ElegirTrabajador valor={nuevo} onCambio={setNuevo} excluir={p.rpe} />
+            <strong class="small">Transfiere (técnico)</strong>
+            <div class="chips">
+              <button class="chip chip-si" aria-pressed>
+                {nombreTitular}
+              </button>
+            </div>
           </div>
+          <BotonesSI funcion="tecnico" rol="Recibe (técnico)" valor={nuevoId} onCambio={setNuevoId} excluirRpe={p.rpe} />
           <ActividadCampo valor={actividad} onCambio={setActividad} />
         </>
       ) : (
         <div class="stack" style={{ gap: '6px' }}>
-          <strong>Devuelve</strong>
-          <div class="row" role="group">
-            <button class="chip" aria-pressed={mismo} onClick={() => setMismo(true)}>
-              {p.nombre.split(' ').slice(0, 2).join(' ')}
+          <strong class="small">Devuelve (técnico)</strong>
+          <div class="chips" role="group" aria-label="Quién devuelve">
+            <button class="chip chip-si" aria-pressed={!otroId} onClick={() => setOtroId('')}>
+              {nombreTitular}
             </button>
-            <button class="chip" aria-pressed={!mismo} onClick={() => setMismo(false)}>
-              Otra persona
-            </button>
+            {personalSIOrdenado(S.personalSI.value, S.prestamosEquipo.value, 'tecnico')
+              .filter((x) => x.rpe !== p.rpe)
+              .map((x) => (
+                <button key={x.id} class="chip chip-si" aria-pressed={otroId === x.id} onClick={() => setOtroId(x.id)} title={x.nombre}>
+                  {x.corto}
+                </button>
+              ))}
           </div>
-          {!mismo && (otro ? <ChipTrabajador t={otro} onQuitar={() => setOtro(null)} /> : <BuscadorTrabajador autoFocus={false} onElegir={setOtro} />)}
         </div>
       )}
 
-      <BotonesSI rol={transfiere ? 'Registra la transferencia (Seguridad Industrial)' : 'Recibe (Seguridad Industrial)'} valor={si} onCambio={setSi} />
+      <BotonesSI funcion="supervisor" rol={transfiere ? 'Registra la transferencia (supervisor)' : 'Recibe (supervisor)'} valor={si} onCambio={setSi} />
       <Accesorios lista={p.accesorios} marcados={accesorios} onCambio={setAccesorios} titulo={transfiere ? 'Accesorios que pasan con el equipo' : 'Accesorios que regresan'} />
       {p.bitacora && (
         <label class="check">

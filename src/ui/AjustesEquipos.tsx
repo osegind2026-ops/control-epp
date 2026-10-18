@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks'
-import type { ObsEquipo, PersonalSI, TipoObsEquipo } from '../domain/types'
+import type { ObsEquipo, PersonalSI, RolSI, TipoObsEquipo } from '../domain/types'
 import { normalizar, plural } from '../lib/util'
 import { AJUSTE_HORAS_ALERTA, cortoSugerido, guardarAjuste, guardarObsEquipo, guardarPersonalSI, horasAlerta } from '../state/equipos'
 import { esAdmin, puedeInventario } from '../state/permisos'
@@ -7,6 +7,12 @@ import * as S from '../state/store'
 import { avisar, intentar, Modal } from './comunes'
 import { Icono } from './iconos'
 import { BuscadorTrabajador } from './Trabajador'
+
+const ROLES_SI: Record<RolSI, { corto: string; texto: string; ayuda: string }> = {
+  tecnico: { corto: 'Téc.', texto: 'Técnico', ayuda: 'A él se le presta el equipo' },
+  supervisor: { corto: 'Sup.', texto: 'Supervisor', ayuda: 'Entrega el equipo y lo recibe de regreso' },
+  ambos: { corto: 'Téc./Sup.', texto: 'Ambos', ayuda: 'Sale en las dos filas de botones' },
+}
 
 const TIPOS: Record<TipoObsEquipo, string> = { ok: 'Sin novedad', detalle: 'Detalle', dano: 'Daño (pide foto)' }
 
@@ -16,12 +22,13 @@ function EditorSI({ inicial, rpe, onCerrar }: { inicial?: PersonalSI; rpe?: stri
   const trabajador = rpeFinal ? S.personal.value.get(rpeFinal) : undefined
   const [corto, setCorto] = useState(inicial?.corto ?? (trabajador ? cortoSugerido(trabajador.nombre) : ''))
   const [usuarioId, setUsuarioId] = useState(inicial?.usuarioId ?? '')
+  const [rol, setRol] = useState<RolSI>(inicial?.rol ?? 'tecnico')
   const [activo, setActivo] = useState(inicial?.activo ?? true)
   const nombre = trabajador?.nombre ?? inicial?.nombre ?? ''
 
   const guardar = async () => {
     const ok = await intentar(async () => {
-      await guardarPersonalSI({ id: inicial?.id, rpe: rpeFinal, corto, usuarioId, activo })
+      await guardarPersonalSI({ id: inicial?.id, rpe: rpeFinal, corto, rol, usuarioId, activo })
       return true
     })
     if (ok) {
@@ -54,6 +61,17 @@ function EditorSI({ inicial, rpe, onCerrar }: { inicial?: PersonalSI; rpe?: stri
         Nombre corto del botón
         <input class="input" id="si-corto" maxLength={18} value={corto} onInput={(e) => setCorto((e.target as HTMLInputElement).value)} />
       </label>
+      <div class="stack" style={{ gap: '6px' }}>
+        <strong class="small">Función en el préstamo de equipos</strong>
+        <div class="chips" role="group" aria-label="Función">
+          {(Object.keys(ROLES_SI) as RolSI[]).map((r) => (
+            <button key={r} class="chip chip-si" aria-pressed={rol === r} onClick={() => setRol(r)}>
+              {ROLES_SI[r].texto}
+            </button>
+          ))}
+        </div>
+        <span class="muted small">{ROLES_SI[rol].ayuda}.</span>
+      </div>
       <label class="campo">
         Usuario de la app (opcional)
         <select class="input" id="si-usuario" value={usuarioId} onChange={(e) => setUsuarioId((e.target as HTMLSelectElement).value)}>
@@ -64,7 +82,7 @@ function EditorSI({ inicial, rpe, onCerrar }: { inicial?: PersonalSI; rpe?: stri
             </option>
           ))}
         </select>
-        <span class="muted small" style={{ fontWeight: 400 }}>Si esa persona tiene la sesión abierta, su botón sale ya marcado.</span>
+        <span class="muted small" style={{ fontWeight: 400 }}>Si esa persona tiene la sesión abierta, su botón sale ya marcado como supervisor.</span>
       </label>
       <label class="check">
         <input type="checkbox" checked={activo} onChange={(e) => setActivo((e.target as HTMLInputElement).checked)} />
@@ -86,16 +104,17 @@ function PersonalSeguridad() {
     <div class="stack" style={{ gap: '10px' }}>
       <h3>Personal de Seguridad Industrial</h3>
       <p class="muted small">
-        Son los botones con nombre corto que aparecen al prestar, recibir o transferir un equipo (los usados más recientemente salen primero). Las personas se toman del padrón; si alguien no está, búsquelo o dé de alta al trabajador.
+        Son los botones con nombre corto del préstamo de equipos: el equipo se presta a un <strong>técnico</strong> y lo entrega un <strong>supervisor</strong> (quien también lo recibe de regreso). Marque la función de cada persona; los usados más recientemente salen primero. Las personas se toman del padrón; si alguien no está, búsquelo o dé de alta al trabajador.
       </p>
       <div class="chips">
         {lista.map((x) => (
           <button key={x.id} class="chip chip-si" style={{ opacity: x.activo ? 1 : 0.5 }} onClick={() => setEditar(x)} title={x.nombre}>
-            {x.corto}
+            {x.corto} <small class="muted">{ROLES_SI[x.rol ?? 'ambos'].corto}</small>
             {!x.activo && ' (oculto)'} <Icono n="editar" />
           </button>
         ))}
-        {!lista.length && <span class="muted small">Aún no hay botones: sin lista, los movimientos quedan a nombre de quien tiene la sesión abierta.</span>}
+        {!lista.length && <span class="muted small">Aún no hay botones: sin técnicos en la lista no se puede registrar un préstamo.</span>}
+        {lista.some((x) => !x.rol) && <span class="muted small">Los botones sin función definida salen como técnico y supervisor; ábralos para asignarles una.</span>}
       </div>
       {sugeridos.length > 0 && (
         <div class="stack" style={{ gap: '6px' }}>

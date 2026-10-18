@@ -1,6 +1,6 @@
 import { db } from '../db/db'
 import { soloAlfanumerico } from '../domain/equipoQr'
-import type { CondicionRegreso, Equipo, ObsElegida, ObsEquipo, PersonalSI, PrestamoEquipo, RefSI, TipoObsEquipo, Trabajador } from '../domain/types'
+import type { CondicionRegreso, Equipo, ObsElegida, ObsEquipo, PersonalSI, PrestamoEquipo, RefSI, RolSI, TipoObsEquipo, Trabajador } from '../domain/types'
 import { fechaLocal, horaLocal, normalizar, nuevoId } from '../lib/util'
 import { avisarCambioLocal } from './nube'
 import { ErrorNegocio, guardarFotosEvidencia } from './servicios'
@@ -145,7 +145,7 @@ export const cortoSugerido = (nombre: string) => {
 }
 
 /** El integrante sale del padrón de trabajadores: de ahí vienen el nombre completo y el área. */
-export async function guardarPersonalSI(d: { id?: string; rpe: string; corto: string; usuarioId?: string; activo: boolean }): Promise<PersonalSI> {
+export async function guardarPersonalSI(d: { id?: string; rpe: string; corto: string; rol?: RolSI; usuarioId?: string; activo: boolean }): Promise<PersonalSI> {
   exigirRol('admin')
   const trabajador = S.personal.value.get(d.rpe)
   if (!trabajador) throw new ErrorNegocio('Elija a la persona del padrón (o dé de alta al trabajador primero).')
@@ -157,7 +157,7 @@ export async function guardarPersonalSI(d: { id?: string; rpe: string; corto: st
   if (corto.length > 18) throw new ErrorNegocio('El nombre corto debe tener 18 letras o menos.')
   const repetido = S.personalSI.value.find((x) => x.id !== d.id && x.activo && normalizar(x.corto) === normalizar(corto))
   if (d.activo && repetido) throw new ErrorNegocio(`Ya hay un botón «${repetido.corto}». Use otro nombre corto.`)
-  const reg: PersonalSI = { id: d.id ?? nuevoId('SI'), rpe: d.rpe, nombre, corto, usuarioId: d.usuarioId || undefined, activo: d.activo, actualizado: new Date().toISOString() }
+  const reg: PersonalSI = { id: d.id ?? nuevoId('SI'), rpe: d.rpe, nombre, corto, rol: d.rol ?? 'ambos', usuarioId: d.usuarioId || undefined, activo: d.activo, actualizado: new Date().toISOString() }
   await db.personalSI.put(reg)
   await S.recargar('personalSI')
   avisarCambioLocal()
@@ -186,18 +186,29 @@ export async function guardarAjuste(id: string, valor: unknown): Promise<void> {
   avisarCambioLocal()
 }
 
-/** Botones de Seguridad Industrial: primero a quien se usó más recientemente, después el resto por nombre corto. */
-export function personalSIOrdenado(lista: PersonalSI[], prestamos: PrestamoEquipo[]): PersonalSI[] {
+/** ¿Puede ser técnico (recibe el equipo) o supervisor (lo entrega y lo recibe de regreso)? Sin rol = ambos. */
+export const puedeSerTecnico = (x: Pick<PersonalSI, 'rol'>) => x.rol !== 'supervisor'
+export const puedeSerSupervisor = (x: Pick<PersonalSI, 'rol'>) => x.rol !== 'tecnico'
+
+/**
+ * Botones de Seguridad Industrial de una fila (técnicos o supervisores): primero a quien se usó
+ * más recientemente en esa función, después el resto por nombre corto.
+ */
+export function personalSIOrdenado(lista: PersonalSI[], prestamos: PrestamoEquipo[], funcion: 'supervisor' | 'tecnico' = 'supervisor'): PersonalSI[] {
   const ultimo = new Map<string, string>()
   const marca = (id: string | undefined, ts: string | undefined) => {
     if (id && ts && (ultimo.get(id) ?? '') < ts) ultimo.set(id, ts)
   }
+  const porRpe = new Map(lista.filter((x) => x.rpe).map((x) => [x.rpe as string, x.id]))
   for (const p of prestamos) {
     if (p.estatus === 'ANULADO') continue
-    marca(p.entregoSI?.id, p.ts)
-    marca(p.regreso?.recibioSI?.id, p.regreso?.ts)
+    if (funcion === 'tecnico') marca(porRpe.get(p.rpe), p.ts)
+    else {
+      marca(p.entregoSI?.id, p.ts)
+      marca(p.regreso?.recibioSI?.id, p.regreso?.ts)
+    }
   }
-  return lista.filter((x) => x.activo).sort((a, b) => (ultimo.get(b.id) ?? '').localeCompare(ultimo.get(a.id) ?? '') || a.corto.localeCompare(b.corto))
+  return lista.filter((x) => x.activo && (funcion === 'tecnico' ? puedeSerTecnico(x) : puedeSerSupervisor(x))).sort((a, b) => (ultimo.get(b.id) ?? '').localeCompare(ultimo.get(a.id) ?? '') || a.corto.localeCompare(b.corto))
 }
 
 /** Observaciones rápidas: las más usadas primero. */
@@ -286,7 +297,7 @@ function resolverSI(id: string | undefined, accion: string): RefSI {
     if (!x) throw new ErrorNegocio('Esa persona de Seguridad Industrial ya no está en la lista.')
     return { id: x.id, nombre: x.nombre, corto: x.corto }
   }
-  if (activos.length) throw new ErrorNegocio(`Elija quién de Seguridad Industrial ${accion}.`)
+  if (activos.some(puedeSerSupervisor)) throw new ErrorNegocio(`Elija qué supervisor ${accion}.`)
   return { id: sesion.usuarioId, nombre: sesion.usuarioNombre }
 }
 

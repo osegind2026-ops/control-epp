@@ -313,6 +313,9 @@ export interface RefSI {
   corto?: string
 }
 
+/** Función del integrante en el préstamo de equipos: el equipo se presta a un técnico y lo entrega un supervisor. */
+export type RolSI = 'tecnico' | 'supervisor' | 'ambos'
+
 /** Integrante de Seguridad Industrial que aparece como botón al prestar, recibir o transferir equipos. */
 export interface PersonalSI {
   id: string
@@ -321,6 +324,8 @@ export interface PersonalSI {
   nombre: string
   /** Nombre corto del botón (configurable por el administrador). */
   corto: string
+  /** Sin valor = ambos (así quedaron los botones creados antes de existir los roles). */
+  rol?: RolSI
   /** Usuario de la app al que corresponde: queda preseleccionado cuando ese usuario tiene la sesión abierta. */
   usuarioId?: string
   activo: boolean
