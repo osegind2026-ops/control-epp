@@ -189,3 +189,23 @@ describe('sincronización entre dos equipos', () => {
     expect(await contarPendientes(db)).toBe(0)
   })
 })
+
+describe('panel de equipos del administrador', () => {
+  it('lista los equipos, no deja darse de baja a sí mismo y permite reemplazar un código ocupado', async () => {
+    const { listarEquipos, cambiarEquipo } = await import('./cliente')
+    const lista = await listarEquipos(servidor.transporte, cfgA)
+    expect(lista.map((e) => e.codigo)).toEqual(expect.arrayContaining(['A1', 'B2']))
+    await expect(cambiarEquipo(servidor.transporte, cfgA, cfgA.equipoId, { activo: false })).rejects.toThrow(/a sí mismo/)
+    // Código ocupado: sin confirmar falla; con «reemplazar» el registro anterior queda de baja
+    await expect(registrarEquipo(servidor.transporte, URL_FALSA, clave, { id: 'D-c', codigo: 'B2', nombre: 'Nuevo' })).rejects.toThrow(/ya lo usa/)
+    await registrarEquipo(servidor.transporte, URL_FALSA, clave, { id: 'D-c', codigo: 'B2', nombre: 'Nuevo' }, true)
+    const despues = await listarEquipos(servidor.transporte, cfgA)
+    expect(despues.find((e) => e.id === 'D-b')?.activo).toBe(false)
+    expect(despues.find((e) => e.id === 'D-c')?.activo).toBe(true)
+    // Reactivar el viejo choca con el código que ya está activo
+    await expect(cambiarEquipo(servidor.transporte, cfgA, 'D-b', { activo: true })).rejects.toThrow(/ya lo usa otro/)
+    await cambiarEquipo(servidor.transporte, cfgA, 'D-c', { activo: false })
+    await cambiarEquipo(servidor.transporte, cfgA, 'D-b', { activo: true })
+    expect((await listarEquipos(servidor.transporte, cfgA)).find((e) => e.id === 'D-b')?.activo).toBe(true)
+  })
+})

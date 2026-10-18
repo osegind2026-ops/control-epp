@@ -59,7 +59,7 @@ export function PantallaInicio() {
     await intentar(() => inicializarSistema({ equipo: { codigo, nombre: equipo }, admin: { nombre: admin, pin }, demo, padron }))
     // En la carpeta de red, el primer equipo sube de una vez todo a los datos compartidos
     const error = await conectarLocalSiFalta()
-    if (error) avisar(`No se pudo conectar a la carpeta de red: ${error} Corríjalo en Ajustes → Este equipo y luego Ajustes → Carpeta de red.`, { tipo: 'bad', ms: 12000 })
+    if (error) avisar(`No se pudo conectar al servidor de la oficina: ${error} Corríjalo en Ajustes → Este equipo y luego Ajustes → Servidor de la oficina.`, { tipo: 'bad', ms: 12000 })
     setTrabajando(false)
   }
 
@@ -69,7 +69,7 @@ export function PantallaInicio() {
     if (usados.has(codigo)) return avisar(`El código ${codigo} ya lo usa otro equipo. Elija otro.`, { tipo: 'bad' })
     await intentar(() => guardarDispositivo(codigo, equipo))
     const error = await conectarLocalSiFalta()
-    if (error) avisar(`No se pudo conectar a la carpeta de red: ${error}`, { tipo: 'bad', ms: 12000 })
+    if (error) avisar(`No se pudo conectar al servidor de la oficina: ${error}`, { tipo: 'bad', ms: 12000 })
   }
 
   return (
@@ -86,7 +86,7 @@ export function PantallaInicio() {
           <>
             <div class="aviso info small">
               <span>
-                Carpeta de red de la oficina · servidor en esta PC ({servidorLocal.value.pc}).{' '}
+                Servidor de la oficina {/^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? `en esta PC (${servidorLocal.value.pc})` : `en la PC ${servidorLocal.value.pc}`}.{' '}
                 {servidorLocal.value.tieneDatos ? 'Ya hay datos de la oficina: únase con un código para este equipo.' : 'Todavía no hay datos: este será el primer equipo.'}
               </span>
             </div>

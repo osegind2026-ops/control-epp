@@ -11,7 +11,7 @@
  * No edite las pestañas a mano: los cambios se hacen desde la app.
  */
 
-var VERSION_SERVIDOR = '2.4.0'
+var VERSION_SERVIDOR = '2.5.0'
 var ZONA = 'America/Mexico_City'
 var LIMITE_FILAS = 800
 var LIMITE_CARACTERES = 3000000
@@ -164,6 +164,8 @@ function doPost(e) {
     if (pet.accion === 'ping') return respuesta({ ok: true, app: 'control-epp', version: VERSION_SERVIDOR })
     if (pet.accion === 'registrar') return respuesta(conCandado(function () { return registrar(pet) }))
     if (pet.accion === 'sync') return respuesta(conCandado(function () { return sincronizar(pet) }))
+    if (pet.accion === 'equipos') return respuesta(conCandado(function () { return listaEquipos(pet) }))
+    if (pet.accion === 'equipo') return respuesta(conCandado(function () { return cambiarEquipo(pet) }))
     return respuesta({ ok: false, error: 'Acción desconocida.' })
   } catch (err) {
     return respuesta({ ok: false, error: String((err && err.message) || err) })
@@ -319,7 +321,12 @@ function registrar(pet) {
   var filas = n > 1 ? h.getRange(2, 1, n - 1, 7).getValues() : []
   for (var i = 0; i < filas.length; i++) {
     if (String(filas[i][1]) === eq.codigo && String(filas[i][0]) !== eq.id && String(filas[i][4]) === 'SI') {
-      throw new Error('El código ' + eq.codigo + ' ya lo usa el equipo «' + filas[i][2] + '». Elija otro código.')
+      // Reemplazo confirmado por el usuario (el mismo equipo con los datos borrados, o uno que ya no se usa)
+      if (pet.reemplazar === true) {
+        h.getRange(i + 2, 5).setValue('NO')
+        continue
+      }
+      throw new Error('El código ' + eq.codigo + ' ya lo usa el equipo «' + filas[i][2] + '» (último contacto ' + filas[i][6] + ').')
     }
   }
   var token = Utilities.getUuid() + Utilities.getUuid()
@@ -330,6 +337,40 @@ function registrar(pet) {
   if (existente >= 0) h.getRange(existente + 2, 1, 1, 7).setValues([fila])
   else h.getRange(n + 1, 1, 1, 7).setValues([fila])
   return { ok: true, token: token, version: VERSION_SERVIDOR }
+}
+
+/** Equipos registrados (para el panel del administrador en la app). */
+function listaEquipos(pet) {
+  autenticar(pet)
+  var h = hojaEquipos()
+  var n = h.getLastRow()
+  var filas = n > 1 ? h.getRange(2, 1, n - 1, 7).getValues() : []
+  return {
+    ok: true,
+    equipos: filas.map(function (f) {
+      return { id: String(f[0]), codigo: String(f[1]), nombre: String(f[2]), alta: String(f[5]), ultimo: String(f[6]), activo: String(f[4]) === 'SI' }
+    }),
+  }
+}
+
+/** Baja o reactivación de un equipo. Un equipo no puede darse de baja a sí mismo. */
+function cambiarEquipo(pet) {
+  autenticar(pet)
+  var h = hojaEquipos()
+  var n = h.getLastRow()
+  var filas = n > 1 ? h.getRange(2, 1, n - 1, 7).getValues() : []
+  var pos = -1
+  for (var i = 0; i < filas.length; i++) if (String(filas[i][0]) === String(pet.objetivo)) pos = i
+  if (pos < 0) throw new Error('Ese equipo ya no está registrado.')
+  if (pet.activo === false && String(pet.objetivo) === String(pet.equipoId)) throw new Error('Este equipo no puede darse de baja a sí mismo.')
+  if (pet.activo === true) {
+    for (var j = 0; j < filas.length; j++) {
+      if (j !== pos && String(filas[j][1]) === String(filas[pos][1]) && String(filas[j][4]) === 'SI') throw new Error('El código ' + filas[pos][1] + ' ya lo usa otro equipo activo (' + filas[j][2] + ').')
+    }
+  }
+  if (pet.activo === true || pet.activo === false) h.getRange(pos + 2, 5).setValue(pet.activo ? 'SI' : 'NO')
+  if (pet.nombre) h.getRange(pos + 2, 3).setValue(String(pet.nombre).trim())
+  return { ok: true }
 }
 
 function autenticar(pet) {

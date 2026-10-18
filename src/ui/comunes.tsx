@@ -27,10 +27,17 @@ export function cerrarToast(id: number): void {
 }
 
 /** Ejecuta una operación y muestra el error de negocio como aviso. */
-export async function intentar<T>(fn: () => Promise<T>): Promise<T | undefined> {
+/** Mensaje del último error que atrapó `intentar` (para decidir qué ofrecer después). */
+export let ultimoError = ''
+
+export async function intentar<T>(fn: () => Promise<T>, opciones?: { silencioso?: (e: Error) => boolean }): Promise<T | undefined> {
   try {
+    ultimoError = ''
     return await fn()
   } catch (e) {
+    ultimoError = (e as Error).message
+    // Errores que la pantalla atiende por su cuenta (p. ej. ofreciendo una alternativa): sin aviso rojo
+    if (opciones?.silencioso?.(e as Error)) return undefined
     const msg = e instanceof ErrorNegocio ? e.message : `Ocurrió un error: ${(e as Error).message}`
     avisar(msg, { tipo: 'bad', ms: 5000 })
     if (!(e instanceof ErrorNegocio)) console.error(e)

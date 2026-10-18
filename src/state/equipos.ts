@@ -489,6 +489,147 @@ export async function registrarRegreso(d: DatosRegreso): Promise<{ siguiente?: P
   return { siguiente }
 }
 
+// ---------- Correcciones del administrador en la bitácora ----------
+
+export interface EdicionPrestamo {
+  /** Técnico que recibió el equipo. */
+  tecnico?: Pick<Trabajador, 'rpe' | 'nombre' | 'area'>
+  entregoSIId?: string
+  uso?: string
+  /** Fecha y hora de salida (YYYY-MM-DDTHH:mm). */
+  salida?: string
+  bitacora?: boolean
+  observaciones?: string
+  regreso?: {
+    /** Fecha y hora del cierre (YYYY-MM-DDTHH:mm). */
+    fecha?: string
+    devolvio?: Pick<Trabajador, 'rpe' | 'nombre'>
+    recibioSIId?: string
+    condicion?: CondicionRegreso
+    comentarios?: string
+  }
+}
+
+const textoFecha = (iso: string) => `${fechaLocal(new Date(iso))} ${horaLocal(new Date(iso))}`
+
+/** El administrador corrige un registro de la bitácora; queda anotado quién cambió qué. */
+export async function editarPrestamoEquipo(id: string, e: EdicionPrestamo): Promise<PrestamoEquipo> {
+  exigirRol('admin')
+  const { sesion } = actor()
+  const p = S.prestamosEquipo.value.find((x) => x.id === id)
+  if (!p) throw new ErrorNegocio('Ese registro ya no existe.')
+  const n: PrestamoEquipo = { ...p, regreso: p.regreso ? { ...p.regreso } : undefined }
+  const cambios: string[] = []
+  const anota = (campo: string, antes: string, despues: string) => {
+    if (antes !== despues) cambios.push(`${campo}: ${antes || '—'} → ${despues || '—'}`)
+  }
+  const ahora = new Date()
+  const aIso = (local: string, que: string) => {
+    const d = new Date(local)
+    if (isNaN(d.getTime())) throw new ErrorNegocio(`La fecha de ${que} no es válida.`)
+    if (d.getTime() > ahora.getTime() + 60000) throw new ErrorNegocio(`La fecha de ${que} no puede ser posterior a ahora.`)
+    return d.toISOString()
+  }
+  if (e.tecnico && e.tecnico.rpe !== p.rpe) {
+    anota('Recibió', `${p.nombre} (${p.rpe})`, `${e.tecnico.nombre} (${e.tecnico.rpe})`)
+    Object.assign(n, { rpe: e.tecnico.rpe, nombre: e.tecnico.nombre, area: e.tecnico.area })
+  }
+  if (e.entregoSIId !== undefined && e.entregoSIId !== p.entregoSI?.id) {
+    const ref = resolverSI(e.entregoSIId, 'entregó el equipo')
+    anota('Entregó', p.entregoSI?.corto || p.entregoSI?.nombre || p.usuarioNombre, ref.corto || ref.nombre)
+    n.entregoSI = ref
+  }
+  if (e.uso !== undefined && e.uso.trim() !== p.uso) {
+    anota('Actividad', p.uso, e.uso.trim())
+    n.uso = e.uso.trim()
+  }
+  if (e.salida) {
+    const ts = aIso(e.salida, 'salida')
+    if (ahoraLocal(new Date(ts)) !== ahoraLocal(new Date(p.ts))) {
+      anota('Salida', textoFecha(p.ts), textoFecha(ts))
+      n.ts = ts
+    }
+  }
+  if (e.bitacora !== undefined && e.bitacora !== p.bitacora) {
+    anota('Libreta', p.bitacora ? 'sí' : 'no', e.bitacora ? 'sí' : 'no')
+    n.bitacora = e.bitacora
+  }
+  if (e.observaciones !== undefined && e.observaciones.trim() !== p.observaciones) {
+    anota('Observaciones al entregar', p.observaciones, e.observaciones.trim())
+    n.observaciones = e.observaciones.trim()
+    n.obsRapidas = n.observaciones ? n.observaciones.split(' · ').filter(Boolean) : undefined
+  }
+  if (e.regreso && n.regreso) {
+    const r = n.regreso
+    if (e.regreso.fecha) {
+      const ts = aIso(e.regreso.fecha, 'regreso')
+      if (ahoraLocal(new Date(ts)) !== ahoraLocal(new Date(r.ts))) {
+        anota('Regreso', textoFecha(r.ts), textoFecha(ts))
+        r.ts = ts
+      }
+    }
+    if (e.regreso.devolvio && e.regreso.devolvio.rpe !== r.devolvioRpe) {
+      anota('Devolvió', `${r.devolvioNombre} (${r.devolvioRpe})`, `${e.regreso.devolvio.nombre} (${e.regreso.devolvio.rpe})`)
+      r.devolvioRpe = e.regreso.devolvio.rpe
+      r.devolvioNombre = e.regreso.devolvio.nombre
+    }
+    if (e.regreso.recibioSIId !== undefined && e.regreso.recibioSIId !== r.recibioSI?.id) {
+      const ref = resolverSI(e.regreso.recibioSIId, 'recibió el equipo')
+      anota('Recibió (supervisor)', r.recibioSI?.corto || r.recibioSI?.nombre || r.usuarioNombre, ref.corto || ref.nombre)
+      r.recibioSI = ref
+    }
+    if (e.regreso.condicion && e.regreso.condicion !== r.condicion) {
+      anota('Condición', CONDICIONES[r.condicion], CONDICIONES[e.regreso.condicion])
+      r.condicion = e.regreso.condicion
+    }
+    if (e.regreso.comentarios !== undefined && e.regreso.comentarios.trim() !== r.comentarios) {
+      anota('Observaciones al recibir', r.comentarios, e.regreso.comentarios.trim())
+      r.comentarios = e.regreso.comentarios.trim()
+    }
+  }
+  if (n.regreso && n.regreso.ts < n.ts) throw new ErrorNegocio('El regreso no puede ser anterior a la salida.')
+  if (!cambios.length) throw new ErrorNegocio('No hay cambios que guardar.')
+  n.ediciones = [...(p.ediciones ?? []), { ts: ahora.toISOString(), usuarioNombre: sesion.usuarioNombre, cambios: cambios.join(' · ') }]
+  n.ver = p.ver + 1
+  n.actualizado = ahora.toISOString()
+  await db.prestamosEquipo.put(n)
+  await S.recargar('prestamosEquipo')
+  avisarCambioLocal()
+  return n
+}
+
+/**
+ * El administrador borra un registro de la bitácora (se borra también en los demás equipos al sincronizar).
+ * Si era parte de una transferencia, el registro ligado queda sin la liga. Se borran sus fotos.
+ */
+export async function eliminarPrestamoEquipo(id: string): Promise<void> {
+  exigirRol('admin')
+  const p = S.prestamosEquipo.value.find((x) => x.id === id)
+  if (!p) throw new ErrorNegocio('Ese registro ya no existe.')
+  const ahora = new Date().toISOString()
+  const ligados: PrestamoEquipo[] = []
+  for (const x of S.prestamosEquipo.value) {
+    if (x.id === id) continue
+    if (x.regreso?.siguienteId === id) {
+      const { siguienteId: _s, ...regreso } = x.regreso
+      ligados.push({ ...x, regreso, ver: x.ver + 1, actualizado: ahora })
+    } else if (x.origenId === id) {
+      const { origenId: _o, ...resto } = x
+      ligados.push({ ...resto, ver: x.ver + 1, actualizado: ahora })
+    }
+  }
+  const fotos = [...(p.fotos ?? []), ...(p.regreso?.fotos ?? [])]
+  const baja = (tabla: string, registroId: string) => ({ id: `${tabla}:${registroId}`, tabla, registroId })
+  await db.transaction('rw', [db.prestamosEquipo, db.fotos, db.bajas], async () => {
+    await db.bajas.bulkPut([baja('prestamosEquipo', id), ...fotos.map((f) => baja('fotos', f))])
+    await db.prestamosEquipo.delete(id)
+    if (fotos.length) await db.fotos.bulkDelete(fotos)
+    if (ligados.length) await db.prestamosEquipo.bulkPut(ligados)
+  })
+  await S.recargar('prestamosEquipo', 'fotos')
+  avisarCambioLocal()
+}
+
 /** Corrige una salida registrada por error (no borra: queda en la bitácora como anulada). */
 export async function anularPrestamoEquipo(prestamoId: string, motivo: string): Promise<void> {
   const { sesion } = actor()

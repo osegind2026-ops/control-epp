@@ -7,6 +7,7 @@ import type { DatosPrestamo, Entrega, EppContaminado, Material, Trabajador } fro
 import { fechaLocal, hace, normalizar, plural } from '../lib/util'
 import { deshacerEntrega, registrarEntrega, type LineaTicket } from '../state/servicios'
 import { pantalla } from '../state/navegacion'
+import { registrarTrabajoEnCurso } from '../state/versionRed'
 import * as S from '../state/store'
 import { avisar, confirmar, FotoMaterial, intentar, Modal, Talla } from './comunes'
 import { puedeInventario } from '../state/permisos'
@@ -25,6 +26,7 @@ const notaRecurrencia = signal('')
 /** Día de la entrega cuando se capturan registros anteriores ('' = hoy). Solo almacén o administrador. */
 const fechaCaptura = signal('')
 const diaEntrega = () => fechaCaptura.value || fechaLocal()
+registrarTrabajoEnCurso(() => ticket.value.length > 0 || !!trabajadorSel.value)
 
 /** Cambio de EPP contaminado: se respalda con el formato en papel; aquí solo es obligatorio su folio. */
 interface EstadoContaminado {

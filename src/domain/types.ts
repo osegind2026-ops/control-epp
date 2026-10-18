@@ -380,6 +380,13 @@ export interface RegresoEquipo {
   fotos?: string[]
 }
 
+export interface EdicionRegistro {
+  ts: string
+  usuarioNombre: string
+  /** Qué cambió, en texto («Actividad: A → B»). */
+  cambios: string
+}
+
 export interface PrestamoEquipo {
   id: string
   folio: string
@@ -412,6 +419,8 @@ export interface PrestamoEquipo {
   origenId?: string
   /** Si se corrigió la hora de salida: momento real de la captura. */
   capturada?: string
+  /** Correcciones hechas por un administrador desde la bitácora. */
+  ediciones?: EdicionRegistro[]
   ver: number
   actualizado: string
 }

@@ -65,9 +65,36 @@ export async function probarServidor(t: Transporte, url: string): Promise<string
   return String(d.version)
 }
 
-export async function registrarEquipo(t: Transporte, url: string, clave: string, equipo: { id: string; codigo: string; nombre: string }): Promise<string> {
-  const d = await llamar(t, url, { accion: 'registrar', clave, equipo })
+/**
+ * Registra el equipo en el servidor. `reemplazar`: si otro registro activo tiene el mismo código,
+ * se da de baja (lo confirma el usuario; sirve cuando es el mismo equipo con los datos del navegador borrados).
+ */
+export async function registrarEquipo(t: Transporte, url: string, clave: string, equipo: { id: string; codigo: string; nombre: string }, reemplazar = false): Promise<string> {
+  const d = await llamar(t, url, { accion: 'registrar', clave, equipo, ...(reemplazar ? { reemplazar: true } : {}) })
   return String(d.token)
+}
+
+/** Equipo registrado en el servidor (PC o celular), para el panel del administrador. */
+export interface EquipoRegistrado {
+  id: string
+  codigo: string
+  nombre: string
+  pc?: string
+  ip?: string
+  alta: string
+  ultimo: string
+  activo: boolean
+  baja?: string
+}
+
+export async function listarEquipos(t: Transporte, cfg: ConfigNube): Promise<EquipoRegistrado[]> {
+  const d = await llamar(t, cfg.url, { accion: 'equipos', equipoId: cfg.equipoId, token: cfg.token })
+  return (d.equipos ?? []) as EquipoRegistrado[]
+}
+
+/** Baja o reactivación de un equipo registrado (no puede darse de baja a sí mismo). */
+export async function cambiarEquipo(t: Transporte, cfg: ConfigNube, objetivo: string, cambios: { activo?: boolean; nombre?: string }): Promise<void> {
+  await llamar(t, cfg.url, { accion: 'equipo', equipoId: cfg.equipoId, token: cfg.token, objetivo, ...cambios })
 }
 
 // ---------- Cambios locales ----------

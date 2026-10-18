@@ -3,14 +3,17 @@ import { db, guardarConfig, leerConfig } from '../db/db'
 import type { Dispositivo } from '../domain/types'
 import { nuevoId } from '../lib/util'
 import {
+  cambiarEquipo,
   contarPendientes,
   ErrorNube,
+  listarEquipos,
   marcarTodoPendiente,
   probarServidor,
   registrarEquipo,
   sincronizar,
   transporteFetch,
   type ConfigNube,
+  type EquipoRegistrado,
 } from '../sync/cliente'
 import * as S from './store'
 
@@ -31,25 +34,57 @@ const CADA_MS_LOCAL = 5000
 const TRAS_CAMBIO_MS_LOCAL = 700
 
 /** Servidor local de la carpeta de red, si la app se abrió desde él. */
-export const servidorLocal = signal<{ url: string; pc: string; tieneDatos: boolean } | null>(null)
+export interface ServidorOficina {
+  url: string
+  /** Nombre de la PC donde corre el servidor (la PC host). */
+  pc: string
+  tieneDatos: boolean
+  /** Atiende a otras PCs de la red (se habilitó con HABILITAR ACCESO EN RED). */
+  enRed: boolean
+  /** Direcciones para abrir la app desde las otras PCs. */
+  urls: string[]
+}
+/** Servidor de la oficina (PC host o carpeta de red), si la app se abrió desde él. */
+export const servidorLocal = signal<ServidorOficina | null>(null)
 
-const URL_LOCAL = /^http:\/\/(localhost|127\.0\.0\.1):\d+\/api$/
+// El servidor de la oficina se abre por http (en la misma PC o por IP / nombre de la PC host);
+// Google siempre es https
+const URL_LOCAL = /^http:\/\/[^/]+\/api$/
 export const esLocal = (url?: string) => !!url && URL_LOCAL.test(url)
 
-/** ¿La app se sirvió desde el servidor de la carpeta de red? (Control EPP en red local) */
+/** ¿La app se abrió desde el servidor de la oficina? (http; la de celular es https en GitHub) */
+export const enServidorOficina = () => typeof location !== 'undefined' && location.protocol === 'http:' && !import.meta.env.DEV
+
+/** Pregunta al servidor que sirvió la app si es el de Control EPP. */
 export async function detectarServidorLocal(): Promise<void> {
-  if (typeof location === 'undefined' || location.protocol !== 'http:' || !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return
+  if (typeof location === 'undefined' || location.protocol !== 'http:') return
   const url = new URL('./api', location.href).href.replace(/\/$/, '')
   try {
     const ctl = new AbortController()
-    const t = setTimeout(() => ctl.abort(), 3000)
+    const t = setTimeout(() => ctl.abort(), 4000)
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ accion: 'ping' }), signal: ctl.signal })
     clearTimeout(t)
-    const d = (await r.json()) as { app?: string; modo?: string; pc?: string; tieneDatos?: boolean }
-    if (d.app === 'control-epp' && d.modo === 'local') servidorLocal.value = { url, pc: d.pc ?? '', tieneDatos: !!d.tieneDatos }
+    const d = (await r.json()) as { app?: string; modo?: string; pc?: string; tieneDatos?: boolean; enRed?: boolean; urls?: string[] }
+    if (d.app === 'control-epp' && d.modo === 'local') servidorLocal.value = { url, pc: d.pc ?? '', tieneDatos: !!d.tieneDatos, enRed: !!d.enRed, urls: d.urls ?? [] }
   } catch {
-    /* no es el servidor local */
+    /* no es el servidor de la oficina, o no responde */
   }
+}
+
+/**
+ * Si la app se abrió desde el servidor de la oficina pero este no respondió (se estaba reiniciando),
+ * se vuelve a intentar cada 10 s hasta conectar, sin que el usuario haga nada.
+ */
+export function vigilarServidorOficina(alConectar: () => Promise<unknown>): void {
+  if (!enServidorOficina() || typeof window === 'undefined') return
+  const id = window.setInterval(async () => {
+    if (servidorLocal.value) return window.clearInterval(id)
+    await detectarServidorLocal()
+    if (servidorLocal.value) {
+      window.clearInterval(id)
+      await alConectar()
+    }
+  }, 10000)
 }
 
 /** Con el servidor local, un equipo ya configurado se conecta solo a la carpeta de red. */
@@ -162,12 +197,12 @@ function iniciarAutomatico(): void {
 }
 
 /** Conecta este equipo (que ya tiene datos) a la nube y sube todo lo que tiene. */
-export async function conectarNube(url: string, clave: string): Promise<void> {
+export async function conectarNube(url: string, clave: string, reemplazar = false): Promise<void> {
   const eq = S.dispositivo.value
   if (!eq) throw new ErrorNube('Configure el equipo primero.')
   const u = normalizarUrl(url)
   await probarServidor(transporteFetch, u)
-  const token = await registrarEquipo(transporteFetch, u, clave, eq)
+  const token = await registrarEquipo(transporteFetch, u, clave, eq, reemplazar)
   await guardarNube({ url: u, equipoId: eq.id, token, cursor: 0 })
   await marcarTodoPendiente(db)
   iniciarAutomatico()
@@ -176,7 +211,7 @@ export async function conectarNube(url: string, clave: string): Promise<void> {
 }
 
 /** Equipo nuevo: descarga todo de la nube (catálogo, padrón, usuarios, movimientos). */
-export async function unirseDesdeNube(url: string, clave: string, codigo: string, nombre: string): Promise<void> {
+export async function unirseDesdeNube(url: string, clave: string, codigo: string, nombre: string, reemplazar = false): Promise<void> {
   const u = normalizarUrl(url)
   await probarServidor(transporteFetch, u)
   // Se reutiliza el mismo identificador si se reintenta, para no chocar con el propio código
@@ -184,7 +219,7 @@ export async function unirseDesdeNube(url: string, clave: string, codigo: string
   const id = previo ?? nuevoId('D')
   await guardarConfig('equipoPendienteId', id)
   const equipo: Dispositivo = { id, codigo, nombre: nombre.trim() }
-  const token = await registrarEquipo(transporteFetch, u, clave, equipo)
+  const token = await registrarEquipo(transporteFetch, u, clave, equipo, reemplazar)
   const cfg: ConfigNube = { url: u, equipoId: equipo.id, token, cursor: 0 }
   const r = await sincronizar(db, cfg, transporteFetch, (t) => (progresoNube.value = t))
   progresoNube.value = ''
@@ -197,6 +232,20 @@ export async function unirseDesdeNube(url: string, clave: string, codigo: string
   S.dispositivo.value = equipo
   estadoNube.value = 'al-dia'
   iniciarAutomatico()
+}
+
+/** Error de registro porque el código ya lo tiene otro equipo (se puede reemplazar ese registro). */
+export const esCodigoOcupado = (mensaje: string) => /ya lo usa el equipo/i.test(mensaje)
+
+/** Equipos registrados en el servidor al que está conectado este equipo. */
+export async function equiposRegistrados(): Promise<EquipoRegistrado[]> {
+  if (!nube.value) throw new ErrorNube('Este equipo no está conectado a un servidor.')
+  return listarEquipos(transporteFetch, nube.value)
+}
+
+export async function cambiarEquipoRegistrado(objetivo: string, cambios: { activo?: boolean; nombre?: string }): Promise<void> {
+  if (!nube.value) throw new ErrorNube('Este equipo no está conectado a un servidor.')
+  await cambiarEquipo(transporteFetch, nube.value, objetivo, cambios)
 }
 
 /** Deja de sincronizar este equipo. Los datos locales se conservan. */

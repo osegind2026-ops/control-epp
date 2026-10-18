@@ -8,7 +8,7 @@ import * as S from '../state/store'
 import { avisar, confirmar, intentar, Modal } from './comunes'
 import { AjustesEquipos } from './AjustesEquipos'
 import { Icono } from './iconos'
-import { TarjetaNube } from './Nube'
+import { PanelEquipos, TarjetaNube } from './Nube'
 import { PlantillaReportes } from './PlantillaReportes'
 import { Intercambio } from './Intercambio'
 import { SeccionUsuarios } from './Usuarios'
@@ -266,6 +266,7 @@ export function PantallaAjustes() {
     <div class="stack" style={{ maxWidth: '860px' }}>
       <h1>Ajustes</h1>
       <TarjetaNube />
+      <PanelEquipos />
       <Intercambio />
       <Respaldos />
       <RespaldoCompleto />
@@ -276,7 +277,7 @@ export function PantallaAjustes() {
       <ProbarCamara />
       <PlantillaReportes />
       <p class="muted small">
-        <strong>Control EPP v{VERSION}</strong> ({FECHA_VERSION}) · {nube.value ? (esLocal(nube.value.url) ? 'Sincronizado con la carpeta de red' : 'Sincronizado con Google Sheets') : 'Los datos se guardan solo en este navegador'}.</p>
+        <strong>Control EPP v{VERSION}</strong> ({FECHA_VERSION}) · {nube.value ? (esLocal(nube.value.url) ? 'Sincronizado con el servidor de la oficina' : 'Sincronizado con Google Sheets') : 'Los datos se guardan solo en este navegador'}.</p>
     </div>
   )
 }

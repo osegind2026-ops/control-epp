@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'preact/hooks'
-import type { Equipo, ObsElegida, PersonalSI, PrestamoEquipo, Trabajador } from '../domain/types'
+import type { CondicionRegreso, Equipo, ObsElegida, PersonalSI, PrestamoEquipo, Trabajador } from '../domain/types'
 import { fechaDeTs, hace, horaLocal } from '../lib/util'
 import {
   actividadesRecientes,
@@ -11,11 +11,14 @@ import {
   prestarEquipo,
   puedeSerSupervisor,
   registrarRegreso,
+  CONDICIONES,
+  editarPrestamoEquipo,
+  eliminarPrestamoEquipo,
 } from '../state/equipos'
 import { puedeInventario } from '../state/permisos'
 import * as S from '../state/store'
 import { CapturaFotos } from './Evidencia'
-import { avisar, intentar, Modal } from './comunes'
+import { avisar, confirmar, intentar, Modal } from './comunes'
 import { Icono } from './iconos'
 
 export const fmtTs = (ts: string) => `${fechaDeTs(ts)} ${horaLocal(new Date(ts))}`
@@ -473,4 +476,208 @@ export function TileEnUso({ p, onClick }: { p: PrestamoEquipo; onClick: () => vo
       </span>
     </button>
   )
+}
+
+// ---------- Correcciones del administrador ----------
+
+/** Fecha ISO → valor de un campo de fecha y hora (hora local). */
+const aCampo = (iso: string) => ahoraLocal(new Date(iso))
+
+/** Lista de opciones para corregir a una persona: la actual siempre aparece aunque ya no esté en la lista. */
+function SelectorPersona({ etiqueta, actual, lista, valor, onCambio }: { etiqueta: string; actual: { clave: string; texto: string }; lista: { clave: string; texto: string }[]; valor: string; onCambio: (v: string) => void }) {
+  const opciones = [actual, ...lista.filter((x) => x.clave !== actual.clave)]
+  return (
+    <label class="campo">
+      {etiqueta}
+      <select class="input" value={valor} onChange={(e) => onCambio((e.target as HTMLSelectElement).value)}>
+        {opciones.map((o) => (
+          <option key={o.clave} value={o.clave}>
+            {o.texto}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+/** El administrador corrige un registro de la bitácora. Queda anotado qué cambió y quién. */
+export function ModalEditarPrestamo({ p, onCerrar }: { p: PrestamoEquipo; onCerrar: () => void }) {
+  const r = p.regreso
+  const tecnicos = personalSIOrdenado(S.personalSI.value, S.prestamosEquipo.value, 'tecnico')
+  const supervisores = personalSIOrdenado(S.personalSI.value, S.prestamosEquipo.value, 'supervisor')
+  const opcTecnicos = tecnicos.map((x) => ({ clave: x.rpe ?? x.id, texto: `${x.corto} · ${trabajadorDe(x).nombre}` }))
+  const opcSupervisores = supervisores.map((x) => ({ clave: x.id, texto: `${x.corto} · ${x.nombre}` }))
+  const [tec, setTec] = useState(p.rpe)
+  const [entrego, setEntrego] = useState(p.entregoSI?.id ?? '')
+  const [uso, setUso] = useState(p.uso)
+  const [salida, setSalida] = useState(aCampo(p.ts))
+  const [bitacora, setBitacora] = useState(p.bitacora)
+  const [obs, setObs] = useState(p.observaciones)
+  const [regresoFecha, setRegresoFecha] = useState(r ? aCampo(r.ts) : '')
+  const [devolvio, setDevolvio] = useState(r?.devolvioRpe ?? '')
+  const [recibio, setRecibio] = useState(r?.recibioSI?.id ?? '')
+  const [condicion, setCondicion] = useState<CondicionRegreso>(r?.condicion ?? 'bueno')
+  const [comentarios, setComentarios] = useState(r?.comentarios ?? '')
+  /** La persona elegida en la lista; si no se cambió, la que ya estaba en el registro. */
+  const personaDe = (rpe: string, actual: Pick<Trabajador, 'rpe' | 'nombre' | 'area'>): Pick<Trabajador, 'rpe' | 'nombre' | 'area'> => {
+    if (rpe === actual.rpe) return actual
+    const x = tecnicos.find((t) => (t.rpe ?? t.id) === rpe)
+    return x ? trabajadorDe(x) : actual
+  }
+
+  const guardar = async () => {
+    const ok = await intentar(async () => {
+      await editarPrestamoEquipo(p.id, {
+        tecnico: personaDe(tec, { rpe: p.rpe, nombre: p.nombre, area: p.area }),
+        entregoSIId: entrego && entrego !== p.entregoSI?.id ? entrego : undefined,
+        uso,
+        salida,
+        bitacora,
+        observaciones: obs,
+        regreso: r
+          ? {
+              fecha: regresoFecha,
+              devolvio: personaDe(devolvio, { rpe: r.devolvioRpe, nombre: r.devolvioNombre, area: '' }),
+              recibioSIId: recibio && recibio !== r.recibioSI?.id ? recibio : undefined,
+              condicion,
+              comentarios,
+            }
+          : undefined,
+      })
+      return true
+    })
+    if (ok) {
+      avisar(`✓ Registro ${p.folio} corregido`)
+      onCerrar()
+    }
+  }
+
+  return (
+    <Modal
+      titulo={`Corregir ${p.folio}`}
+      onCerrar={onCerrar}
+      ancho
+      acciones={
+        <>
+          <button class="btn" onClick={onCerrar}>
+            Cancelar
+          </button>
+          <button class="btn primary" onClick={guardar}>
+            Guardar corrección
+          </button>
+        </>
+      }
+    >
+      <p class="muted small">
+        {p.equipoCodigo} · {p.equipoNombre}. Los cambios quedan anotados en el registro con su nombre y se envían a los demás equipos.
+      </p>
+      <strong>Salida</strong>
+      <div class="row" style={{ alignItems: 'start', gap: '8px' }}>
+        <div class="grow">
+          <SelectorPersona etiqueta="Se prestó a" actual={{ clave: p.rpe, texto: `${p.nombre} (${p.rpe})` }} lista={opcTecnicos} valor={tec} onCambio={setTec} />
+        </div>
+        <div class="grow">
+          <SelectorPersona
+            etiqueta="Lo entregó"
+            actual={{ clave: p.entregoSI?.id ?? '', texto: p.entregoSI ? `${p.entregoSI.corto ?? ''} · ${p.entregoSI.nombre}` : p.usuarioNombre }}
+            lista={opcSupervisores}
+            valor={entrego}
+            onCambio={setEntrego}
+          />
+        </div>
+      </div>
+      <div class="row" style={{ alignItems: 'start', gap: '8px' }}>
+        <label class="campo grow">
+          Actividad
+          <input class="input" value={uso} onInput={(e) => setUso((e.target as HTMLInputElement).value)} />
+        </label>
+        <label class="campo">
+          Fecha y hora de salida
+          <input class="input" type="datetime-local" value={salida} max={ahoraLocal()} onInput={(e) => setSalida((e.target as HTMLInputElement).value)} />
+        </label>
+      </div>
+      <label class="campo">
+        Observaciones al entregar
+        <input class="input" value={obs} onInput={(e) => setObs((e.target as HTMLInputElement).value)} />
+      </label>
+      <label class="check">
+        <input type="checkbox" checked={bitacora} onChange={(e) => setBitacora((e.target as HTMLInputElement).checked)} />
+        Se llevó su libreta de bitácora
+      </label>
+      {r && (
+        <>
+          <strong>{r.tipo === 'transferencia' ? 'Transferencia' : 'Devolución'}</strong>
+          <div class="row" style={{ alignItems: 'start', gap: '8px' }}>
+            <div class="grow">
+              <SelectorPersona etiqueta={r.tipo === 'transferencia' ? 'Lo transfirió' : 'Lo devolvió'} actual={{ clave: r.devolvioRpe, texto: `${r.devolvioNombre} (${r.devolvioRpe})` }} lista={opcTecnicos} valor={devolvio} onCambio={setDevolvio} />
+            </div>
+            <div class="grow">
+              <SelectorPersona
+                etiqueta={r.tipo === 'transferencia' ? 'Registró' : 'Lo recibió'}
+                actual={{ clave: r.recibioSI?.id ?? '', texto: r.recibioSI ? `${r.recibioSI.corto ?? ''} · ${r.recibioSI.nombre}` : r.usuarioNombre }}
+                lista={opcSupervisores}
+                valor={recibio}
+                onCambio={setRecibio}
+              />
+            </div>
+          </div>
+          <div class="row" style={{ alignItems: 'start', gap: '8px' }}>
+            <label class="campo">
+              Fecha y hora
+              <input class="input" type="datetime-local" value={regresoFecha} max={ahoraLocal()} onInput={(e) => setRegresoFecha((e.target as HTMLInputElement).value)} />
+            </label>
+            <label class="campo grow">
+              Condición
+              <select class="input" value={condicion} onChange={(e) => setCondicion((e.target as HTMLSelectElement).value as CondicionRegreso)}>
+                {(Object.keys(CONDICIONES) as CondicionRegreso[]).map((c) => (
+                  <option key={c} value={c}>
+                    {CONDICIONES[c]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label class="campo">
+            Observaciones al recibir
+            <input class="input" value={comentarios} onInput={(e) => setComentarios((e.target as HTMLInputElement).value)} />
+          </label>
+        </>
+      )}
+      {p.ediciones?.length ? (
+        <details>
+          <summary class="small">Correcciones anteriores ({p.ediciones.length})</summary>
+          <ul class="small muted">
+            {p.ediciones.map((x, i) => (
+              <li key={i}>
+                {fmtTs(x.ts)} · {x.usuarioNombre}: {x.cambios}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </Modal>
+  )
+}
+
+/** Borrado definitivo: primero se muestra qué se va a borrar y se pide confirmación explícita. */
+export async function confirmarEliminarPrestamo(p: PrestamoEquipo): Promise<void> {
+  const r = p.regreso
+  const ligado = p.origenId || r?.siguienteId
+  const fotos = (p.fotos?.length ?? 0) + (r?.fotos?.length ?? 0)
+  const detalle = [
+    `Folio ${p.folio} · ${p.equipoCodigo} ${p.equipoNombre}`,
+    `Salida: ${fmtTs(p.ts)} · se prestó a ${p.nombre} (${p.rpe})${p.uso ? ` · ${p.uso}` : ''}`,
+    r ? `${r.tipo === 'transferencia' ? 'Transferencia' : 'Devolución'}: ${fmtTs(r.ts)} · ${r.devolvioNombre}` : 'Sigue fuera de la oficina: el equipo quedará como disponible.',
+    fotos ? `Se borrarán también ${fotos} foto(s).` : '',
+    ligado ? 'Es parte de una transferencia: el registro ligado se conserva, pero sin la liga a este.' : '',
+    'El registro se borra también en los demás equipos al sincronizar y no se puede recuperar (salvo desde un respaldo).',
+  ]
+    .filter(Boolean)
+    .join('\n')
+  if (!(await confirmar('Eliminar registro de la bitácora', detalle, 'Eliminar definitivamente', true))) return
+  const ok = await intentar(async () => {
+    await eliminarPrestamoEquipo(p.id)
+    return true
+  })
+  if (ok) avisar(`Registro ${p.folio} eliminado`)
 }

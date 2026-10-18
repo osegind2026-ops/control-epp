@@ -5,11 +5,11 @@ import { ahoraLocal, CONDICIONES, diasCalibracion, disponibilidad, ESTADOS, guar
 import { equipoPorLectura, textoQr } from '../domain/equipoQr'
 import { dibujarEtiqueta, ETIQUETA_MM, etiquetaPng, imprimirEtiquetas } from '../lib/etiqueta'
 import { comprimirFoto } from '../lib/imagen'
-import { puedeInventario } from '../state/permisos'
+import { esAdmin, puedeInventario } from '../state/permisos'
 import * as S from '../state/store'
 import { CamaraEnVivo } from './Camara'
 import { FotosGuardadas } from './Evidencia'
-import { ModalAnular, ModalDevolver, ModalPrestar, fmtTs, FotoEquipo, nombreSI, TileEnUso } from './EquiposPrestamo'
+import { confirmarEliminarPrestamo, ModalAnular, ModalDevolver, ModalEditarPrestamo, ModalPrestar, fmtTs, FotoEquipo, nombreSI, TileEnUso } from './EquiposPrestamo'
 import { avisar, intentar, Modal, Vacio } from './comunes'
 import { Icono } from './iconos'
 
@@ -305,6 +305,7 @@ async function exportarBitacora(lista: PrestamoEquipo[]) {
 }
 
 function Bitacora() {
+  const [editar, setEditar] = useState<PrestamoEquipo | null>(null)
   const [texto, setTexto] = useState('')
   const [estatus, setEstatus] = useState<'' | PrestamoEquipo['estatus'] | 'DETALLE'>('')
   const q = normalizar(texto)
@@ -348,6 +349,7 @@ function Bitacora() {
               <th>Cierre</th>
               <th>Devolvió / recibió</th>
               <th>Estado</th>
+              {esAdmin() && <th />}
             </tr>
           </thead>
           <tbody>
@@ -409,7 +411,20 @@ function Bitacora() {
                     ) : (
                       ''
                     )}
+                    {p.ediciones?.length ? <div class="muted" title={p.ediciones.map((x) => `${fmtTs(x.ts)} · ${x.usuarioNombre}: ${x.cambios}`).join('\n')}>Corregido ({p.ediciones.length})</div> : null}
                   </td>
+                  {esAdmin() && (
+                    <td>
+                      <div class="row" style={{ gap: '4px', flexWrap: 'nowrap' }}>
+                        <button class="btn sm" onClick={() => setEditar(p)} title="Corregir este registro">
+                          <Icono n="editar" />
+                        </button>
+                        <button class="btn sm ghost" onClick={() => void confirmarEliminarPrestamo(p)} title="Eliminar este registro">
+                          <Icono n="cerrar" />
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               )
             })}
@@ -417,6 +432,7 @@ function Bitacora() {
         </table>
         {!lista.length && <div class="muted small" style={{ padding: '14px' }}>Sin registros.</div>}
       </div>
+      {editar && <ModalEditarPrestamo p={editar} onCerrar={() => setEditar(null)} />}
     </div>
   )
 }

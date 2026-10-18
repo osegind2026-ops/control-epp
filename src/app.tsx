@@ -4,7 +4,8 @@ import { fechaLocal, hace, iniciales, plural } from './lib/util'
 import { cerrarSesion } from './state/servicios'
 import { migrar } from './state/migraciones'
 import { pantalla, type Pantalla } from './state/navegacion'
-import { cargarNube, conectarLocalSiFalta, detectarServidorLocal, nube } from './state/nube'
+import { cargarNube, conectarLocalSiFalta, detectarServidorLocal, nube, vigilarServidorOficina } from './state/nube'
+import { versionNueva, vigilarVersion } from './state/versionRed'
 import * as S from './state/store'
 import { PantallaAcceso } from './ui/Acceso'
 import { PantallaCambioPin } from './ui/Usuarios'
@@ -175,6 +176,17 @@ function Shell() {
           </button>
         </header>
         <main class="pagina">
+          {versionNueva.value && (
+            <div class="aviso info version-nueva">
+              <Icono n="repetir" />
+              <span class="grow">
+                Hay una versión nueva de la app (<strong>{versionNueva.value}</strong>). Se cargará sola en cuanto deje de usarla, o actualice ahora.
+              </span>
+              <button class="btn sm primary" onClick={() => location.reload()}>
+                Actualizar ahora
+              </button>
+            </div>
+          )}
           <Contenido />
         </main>
       </div>
@@ -201,7 +213,17 @@ function Shell() {
 
 export function App() {
   useEffect(() => {
-    S.cargarTodo().then(migrar).then(detectarServidorLocal).then(cargarNube).then(conectarLocalSiFalta)
+    S.cargarTodo()
+      .then(migrar)
+      .then(detectarServidorLocal)
+      .then(cargarNube)
+      .then(conectarLocalSiFalta)
+      .then(() => {
+        // PCs: si el servidor de la oficina no respondió al abrir, se reintenta solo; y la app
+        // se recarga sola cuando la PC host recibe una versión nueva
+        vigilarServidorOficina(conectarLocalSiFalta)
+        vigilarVersion()
+      })
   }, [])
 
   let vista

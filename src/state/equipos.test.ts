@@ -227,3 +227,52 @@ describe('equipos a resguardo', () => {
     expect(S.fotos.value.has(conFoto.fotoId!)).toBe(false)
   })
 })
+
+describe('correcciones del administrador en la bitácora', () => {
+  it('edita un registro dejando anotado qué cambió, y solo el administrador puede', async () => {
+    const { editarPrestamoEquipo } = await import('./equipos')
+    const eq = await guardarEquipo({ codigo: 'EDI-01', nombre: 'Detector', marca: '', modelo: '', serie: '', accesorios: [], llevaBitacora: false, estado: 'operativo', notas: '', activo: true })
+    const sup = S.personalSI.value[0].id
+    const p = await prestarEquipo({ equipoId: eq.id, trabajador: S.personal.value.get('T0901')!, actividad: 'Uno', accesorios: [], bitacora: false, entregoSIId: sup })
+    await registrarRegreso({ prestamoId: p.id, devolvio: S.personal.value.get('T0901')!, accesorios: [], bitacora: false, recibioSIId: sup })
+    const antes = S.sesion.value
+    S.sesion.value = { ...antes!, rol: 'almacen', esAdmin: false }
+    await expect(editarPrestamoEquipo(p.id, { uso: 'Otra' })).rejects.toThrow(/administrador/)
+    S.sesion.value = antes
+    await expect(editarPrestamoEquipo(p.id, { uso: 'Uno' })).rejects.toThrow(/No hay cambios/)
+    const salida = ahoraLocal(new Date(Date.now() - 5 * 3600000))
+    await expect(editarPrestamoEquipo(p.id, { salida: ahoraLocal(new Date(Date.now() + 3 * 3600000)) })).rejects.toThrow(/posterior/)
+    const n = await editarPrestamoEquipo(p.id, { uso: 'Muestreo', salida, tecnico: S.personal.value.get('T0902')!, regreso: { condicion: 'detalle', comentarios: 'Correa floja' } })
+    expect(n.uso).toBe('Muestreo')
+    expect(n.rpe).toBe('T0902')
+    expect(n.regreso?.condicion).toBe('detalle')
+    expect(n.ver).toBe(p.ver + 2)
+    expect(n.ediciones?.[0].cambios).toMatch(/Actividad: Uno → Muestreo/)
+    expect(n.ediciones?.[0].cambios).toMatch(/Recibió: TRABAJADOR UNO/)
+    // El regreso no puede quedar antes de la salida
+    await expect(editarPrestamoEquipo(p.id, { regreso: { fecha: ahoraLocal(new Date(Date.now() - 9 * 3600000)) } })).rejects.toThrow(/anterior a la salida/)
+  })
+
+  it('elimina un registro, avisa el borrado para sincronizar y quita la liga de la transferencia', async () => {
+    const { eliminarPrestamoEquipo } = await import('./equipos')
+    const { db } = await import('../db/db')
+    const eq = S.equipos.value.find((x) => x.codigo === 'EDI-01')!
+    const sup = S.personalSI.value[0].id
+    const uno = S.personal.value.get('T0901')!
+    const dos = S.personal.value.get('T0902')!
+    const p = await prestarEquipo({ equipoId: eq.id, trabajador: uno, accesorios: [], bitacora: false, entregoSIId: sup, fotos: ['data:image/jpeg;base64,BBBB'] })
+    const { siguiente } = await registrarRegreso({ prestamoId: p.id, devolvio: uno, accesorios: [], bitacora: false, recibioSIId: sup, transferirA: { trabajador: dos } })
+    // Se borra el préstamo nuevo (el de la transferencia): el equipo queda disponible y el anterior pierde la liga
+    await eliminarPrestamoEquipo(siguiente!.id)
+    expect(S.prestamosEquipo.value.some((x) => x.id === siguiente!.id)).toBe(false)
+    expect(S.prestamosEquipo.value.find((x) => x.id === p.id)?.regreso?.siguienteId).toBeUndefined()
+    expect(disponibilidad(eq, S.prestamosEquipoActivos.value)).toBe('disponible')
+    expect(await db.bajas.get(`prestamosEquipo:${siguiente!.id}`)).toBeTruthy()
+    // Al borrar el primero se borran también sus fotos
+    const foto = S.prestamosEquipo.value.find((x) => x.id === p.id)!.fotos![0]
+    await eliminarPrestamoEquipo(p.id)
+    expect(S.fotos.value.has(foto)).toBe(false)
+    expect(await db.bajas.get(`fotos:${foto}`)).toBeTruthy()
+    await expect(eliminarPrestamoEquipo(p.id)).rejects.toThrow(/ya no existe/)
+  })
+})
