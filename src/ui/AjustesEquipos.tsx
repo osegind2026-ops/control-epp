@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks'
-import type { ObsEquipo, PersonalSI, RolSI, TipoObsEquipo } from '../domain/types'
+import type { ObsEquipo, PersonalSI, RolSI, TipoObsEquipo, TurnoSI } from '../domain/types'
 import { normalizar, plural } from '../lib/util'
-import { AJUSTE_HORAS_ALERTA, cortoSugerido, guardarAjuste, guardarObsEquipo, guardarPersonalSI, horasAlerta } from '../state/equipos'
+import { AJUSTE_HORAS_ALERTA, cortoSugerido, guardarAjuste, guardarObsEquipo, guardarPersonalSI, horasAlerta, TURNOS_SI } from '../state/equipos'
 import { esAdmin, puedeInventario } from '../state/permisos'
 import * as S from '../state/store'
 import { avisar, intentar, Modal } from './comunes'
@@ -23,12 +23,13 @@ function EditorSI({ inicial, rpe, onCerrar }: { inicial?: PersonalSI; rpe?: stri
   const [corto, setCorto] = useState(inicial?.corto ?? (trabajador ? cortoSugerido(trabajador.nombre) : ''))
   const [usuarioId, setUsuarioId] = useState(inicial?.usuarioId ?? '')
   const [rol, setRol] = useState<RolSI>(inicial?.rol ?? 'tecnico')
+  const [turno, setTurno] = useState<TurnoSI | ''>(inicial?.turno ?? '')
   const [activo, setActivo] = useState(inicial?.activo ?? true)
   const nombre = trabajador?.nombre ?? inicial?.nombre ?? ''
 
   const guardar = async () => {
     const ok = await intentar(async () => {
-      await guardarPersonalSI({ id: inicial?.id, rpe: rpeFinal, corto, rol, usuarioId, activo })
+      await guardarPersonalSI({ id: inicial?.id, rpe: rpeFinal, corto, rol, turno, usuarioId, activo })
       return true
     })
     if (ok) {
@@ -72,6 +73,17 @@ function EditorSI({ inicial, rpe, onCerrar }: { inicial?: PersonalSI; rpe?: stri
         </div>
         <span class="muted small">{ROLES_SI[rol].ayuda}.</span>
       </div>
+      <div class="stack" style={{ gap: '6px' }}>
+        <strong class="small">Turno</strong>
+        <div class="chips" role="group" aria-label="Turno">
+          {OPCIONES_TURNO.map(([v, texto]) => (
+            <button key={v} class="chip chip-si" aria-pressed={turno === v} onClick={() => setTurno(v)}>
+              {texto}
+            </button>
+          ))}
+        </div>
+        <span class="muted small">Al prestar o recibir un equipo solo salen los botones del turno en curso (y quienes están en los dos); con «Ver todos» aparecen los demás.</span>
+      </div>
       <label class="campo">
         Usuario de la app (opcional)
         <select class="input" id="si-usuario" value={usuarioId} onChange={(e) => setUsuarioId((e.target as HTMLSelectElement).value)}>
@@ -92,6 +104,47 @@ function EditorSI({ inicial, rpe, onCerrar }: { inicial?: PersonalSI; rpe?: stri
   )
 }
 
+const OPCIONES_TURNO: [TurnoSI | '', string][] = [
+  ['T1', 'Turno 1 · nocturno (19:00 a 07:00)'],
+  ['T2', 'Turno 2 · diurno (07:00 a 19:00)'],
+  ['', 'Los dos turnos'],
+]
+
+/** Renglón de la lista: el turno y el activo se cambian ahí mismo, sin abrir el editor. */
+function FilaSI({ x, onEditar }: { x: PersonalSI; onEditar: () => void }) {
+  const guardar = (cambios: { turno?: TurnoSI | ''; activo?: boolean }) =>
+    intentar(async () => {
+      if (!x.rpe) throw new Error('Este botón no está ligado al padrón; ábralo con «Editar».')
+      await guardarPersonalSI({ id: x.id, rpe: x.rpe, corto: x.corto, rol: x.rol, turno: 'turno' in cambios ? cambios.turno : x.turno, usuarioId: x.usuarioId, activo: cambios.activo ?? x.activo })
+    })
+  return (
+    <tr style={{ opacity: x.activo ? 1 : 0.55 }}>
+      <td>
+        <button class="btn sm ghost" onClick={onEditar} title="Editar nombre corto, función y usuario">
+          <strong>{x.corto}</strong> <Icono n="editar" />
+        </button>
+        <div class="muted small">{x.nombre}</div>
+      </td>
+      <td class="small">{ROLES_SI[x.rol ?? 'ambos'].texto}</td>
+      <td>
+        <select class="input" aria-label={`Turno de ${x.corto}`} value={x.turno ?? ''} onChange={(e) => void guardar({ turno: (e.target as HTMLSelectElement).value as TurnoSI | '' })}>
+          {OPCIONES_TURNO.map(([v, texto]) => (
+            <option key={v} value={v}>
+              {texto}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td>
+        <label class="check small">
+          <input type="checkbox" checked={x.activo} aria-label={`${x.corto} activo`} onChange={(e) => void guardar({ activo: (e.target as HTMLInputElement).checked })} />
+          {x.activo ? 'Sí' : 'No'}
+        </label>
+      </td>
+    </tr>
+  )
+}
+
 function PersonalSeguridad() {
   const [editar, setEditar] = useState<PersonalSI | null>(null)
   const [nuevo, setNuevo] = useState<string | null>(null)
@@ -104,18 +157,34 @@ function PersonalSeguridad() {
     <div class="stack" style={{ gap: '10px' }}>
       <h3>Personal de Seguridad Industrial</h3>
       <p class="muted small">
-        Son los botones con nombre corto del préstamo de equipos: el equipo se presta a un <strong>técnico</strong> y lo entrega un <strong>supervisor</strong> (quien también lo recibe de regreso). Marque la función de cada persona; los usados más recientemente salen primero. Las personas se toman del padrón; si alguien no está, búsquelo o dé de alta al trabajador.
+        Son los botones con nombre corto del préstamo de equipos: el equipo se presta a un <strong>técnico</strong> y lo entrega un <strong>supervisor</strong> (quien también lo recibe de regreso). Marque la función y el turno de cada persona; al prestar o recibir solo salen los del turno en curso y los usados más recientemente van primero. Desactive a quien no esté disponible (vacaciones, incapacidad) para que no aparezca. Las personas se toman del padrón; si alguien no está, búsquelo o dé de alta al trabajador.
       </p>
-      <div class="chips">
-        {lista.map((x) => (
-          <button key={x.id} class="chip chip-si" style={{ opacity: x.activo ? 1 : 0.5 }} onClick={() => setEditar(x)} title={x.nombre}>
-            {x.corto} <small class="muted">{ROLES_SI[x.rol ?? 'ambos'].corto}</small>
-            {!x.activo && ' (oculto)'} <Icono n="editar" />
-          </button>
-        ))}
-        {!lista.length && <span class="muted small">Aún no hay botones: sin técnicos en la lista no se puede registrar un préstamo.</span>}
-        {lista.some((x) => !x.rol) && <span class="muted small">Los botones sin función definida salen como técnico y supervisor; ábralos para asignarles una.</span>}
-      </div>
+      {lista.length > 0 && (
+        <p class="small">
+          {(['T1', 'T2'] as TurnoSI[]).map((t) => `${TURNOS_SI[t].nombre}: ${lista.filter((x) => x.activo && x.turno === t).length}`).join(' · ')} · En los dos turnos: {lista.filter((x) => x.activo && !x.turno).length} · Desactivados: {lista.filter((x) => !x.activo).length}
+        </p>
+      )}
+      {lista.length > 0 && (
+        <div class="tabla-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Botón</th>
+                <th>Función</th>
+                <th>Turno</th>
+                <th>Activo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lista.map((x) => (
+                <FilaSI key={x.id} x={x} onEditar={() => setEditar(x)} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {!lista.length && <span class="muted small">Aún no hay botones: sin técnicos en la lista no se puede registrar un préstamo.</span>}
+      {lista.some((x) => !x.rol) && <span class="muted small">Los botones sin función definida salen como técnico y supervisor; ábralos para asignarles una.</span>}
       {sugeridos.length > 0 && (
         <div class="stack" style={{ gap: '6px' }}>
           <strong class="small">Del área de Seguridad Industrial en el padrón ({sugeridos.length}) · toque para agregar</strong>

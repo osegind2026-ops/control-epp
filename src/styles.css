@@ -565,6 +565,12 @@ details > summary { list-style: revert; }
 .rp-tabla td:first-child { text-align: left; font-weight: bold; }
 .rp-cero { color: #b5b5b5; }
 .rp-total { color: #691c32; font-weight: bold; }
+/* Detalle de solicitantes recurrentes (opcional): un renglón pequeño bajo cada persona */
+.rp-tabla tr.rp-non td { background: #fff; }
+.rp-tabla tr.rp-par td { background: #f3f1ec; }
+.rp-tabla tr.rp-detalle td { text-align: left; font-weight: normal; font-size: 8.5pt; color: #4a4d4c; padding: 2pt 6pt 4pt; border-top: 0; }
+.rp-tabla tr.rp-non:not(.rp-detalle) td, .rp-tabla tr.rp-par:not(.rp-detalle) td { padding-top: 4pt; padding-bottom: 3pt; }
+.rp-tabla tr.rp-detalle b { color: #235b4e; }
 .rp-tabla + .rp-nota { position: absolute; left: 0.5in; top: 6.35in; font-style: italic; }
 .rp-columnas { position: absolute; left: 0.8in; right: 0.6in; top: 1.6in; height: 4.4in; display: flex; gap: 0.3in; align-items: flex-end; }
 .rp-dia { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; gap: 6pt; }
@@ -692,6 +698,13 @@ details > summary { list-style: revert; }
 .recurrencia { display: block; }
 .recurrencia svg { width: 16px; height: 16px; vertical-align: -3px; }
 .recurrencia .input { min-height: 40px; background: var(--surface); }
+
+/* Turno del movimiento en el préstamo de equipos */
+.aviso-turno { background: var(--sunk); border-radius: 6px; padding: 6px 10px; }
+
+/* Número de veces de un solicitante recurrente: se toca para ver sus entregas */
+.enlace-badge { cursor: pointer; border: 0; font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.enlace-badge:hover { filter: brightness(0.95); }
 
 /* ---------- EPP contaminado en el ticket ---------- */
 .contaminado-casilla { gap: 8px; align-items: center; flex-wrap: nowrap; cursor: pointer; color: var(--muted); }

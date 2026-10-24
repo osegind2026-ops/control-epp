@@ -69,3 +69,41 @@ describe('reporte ejecutivo', () => {
     expect(titulo('MANTENIMIENTO ELÉCTRICO')).toBe('Mantenimiento Eléctrico')
   })
 })
+
+describe('detalle de solicitantes recurrentes', () => {
+  it('guarda las fechas de cada entrega y lo que más se llevó además', async () => {
+    const { solicitantesRecurrentes, fechasCortas, otrosTexto } = await import('./datos')
+    const mats = new Map(materialesSemilla().map((m) => [m.id, m]))
+    const lista = [
+      entrega('1', '2026-10-15', 'X1', 'TALLER', [['lentes_claros', 1], ['tapones', 2]]),
+      entrega('2', '2026-10-02', 'X1', 'TALLER', [['lentes_claros', 2], ['tapones', 1], ['g_carnaza', 1, 'G']]),
+      entrega('3', '2026-10-08', 'X1', 'TALLER', [['lentes_claros', 1]]),
+      entrega('4', '2026-10-09', 'X2', 'TALLER', [['lentes_claros', 1]]),
+    ]
+    const [r] = solicitantesRecurrentes(lista, mats, new Map()).filter((x) => x.rpe === 'X1' && x.materialId === 'lentes_claros')
+    expect(r.veces).toBe(3)
+    expect(r.detalle.map((x) => x.fecha)).toEqual(['2026-10-02', '2026-10-08', '2026-10-15'])
+    expect(fechasCortas(r)).toBe('02/10 (×2), 08/10, 15/10')
+    expect(r.otros[0]).toEqual({ material: 'Tapones Auditivos', piezas: 3 })
+    expect(otrosTexto(r)).toBe('Tapones Auditivos ×3, Guante de Carnaza ×1')
+    expect(fechasCortas({ detalle: Array.from({ length: 5 }, (_, i) => ({ fecha: `2026-10-1${i}`, hora: '', folio: '', cantidad: 1 })) }, 2)).toBe('3 antes… 13/10, 14/10')
+  })
+
+  it('el Excel agrega el detalle solo si se pide', async () => {
+    const { generarExcel } = await import('./excel')
+    const JSZip = (await import('jszip')).default
+    const lista = [
+      entrega('1', '2026-10-02', 'X1', 'TALLER', [['lentes_claros', 1], ['tapones', 2]]),
+      entrega('2', '2026-10-08', 'X1', 'TALLER', [['lentes_claros', 1]]),
+    ]
+    const f = { entregas: lista, movimientos: [], resguardos: [], materiales: materialesSemilla(), motivos: motivosSemilla(), ubicaciones: ubicacionesSemilla(), personal: new Map() }
+    const d = calcularReporte(f, '2026-10-01', '2026-10-31')
+    const hojas = async (b: Blob) => Object.keys((await JSZip.loadAsync(await b.arrayBuffer())).files).filter((n) => /worksheets\/sheet\d+\.xml$/.test(n)).length
+    const libro = async (b: Blob) => (await JSZip.loadAsync(await b.arrayBuffer())).file('xl/workbook.xml')!.async('string')
+    const sin = await generarExcel(d, f)
+    const con = await generarExcel(d, f, { detalleRecurrentes: true })
+    expect(await hojas(con)).toBe((await hojas(sin)) + 1)
+    expect(await libro(con)).toMatch(/Detalle de recurrentes/)
+    expect(await libro(sin)).not.toMatch(/Detalle de recurrentes/)
+  })
+})

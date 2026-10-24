@@ -1,7 +1,7 @@
 import { calcularExistencias, ETIQUETA_NIVEL, existencia, nivelStock, variantesDe } from '../domain/logica'
 import { fechaDeTs, horaLocal } from '../lib/util'
 import type { DatosReporte, Fuentes } from './datos'
-import { entregasContaminadas, pct, titulo } from './datos'
+import { entregasContaminadas, fechasCortas, otrosTexto, pct, titulo, type OpcionesEntregable } from './datos'
 
 // Libro de Excel del reporte: una hoja por tema, con encabezados fijos y
 // columnas con ancho adecuado para filtrar o hacer tablas dinámicas.
@@ -14,7 +14,7 @@ const enc = (...t: string[]): Fila => t.map((value) => ({ value, ...ENC }))
 const v = (value: string | number | null | undefined): Celda => ({ value: value ?? '' })
 const n = (value: number): Celda => ({ value, type: Number })
 
-export async function generarExcel(d: DatosReporte, f: Fuentes): Promise<Blob> {
+export async function generarExcel(d: DatosReporte, f: Fuentes, opciones: OpcionesEntregable = {}): Promise<Blob> {
   const { default: escribir } = await import('write-excel-file/universal')
   const mats = new Map(f.materiales.map((m) => [m.id, m]))
   const ubis = f.ubicaciones.filter((u) => u.activo).sort((a, b) => a.orden - b.orden)
@@ -110,6 +110,16 @@ export async function generarExcel(d: DatosReporte, f: Fuentes): Promise<Blob> {
     enc('Área', 'Material', 'RPE', 'Nombre', 'Tipo', 'Veces', 'Piezas', 'Primera', 'Última', 'Comentarios al despachar'),
     ...d.recurrentes.map((r) => [v(r.area), v(r.material), v(r.rpe), v(r.nombre), v(r.tipo), n(r.veces), n(r.piezas), v(r.primera), v(r.ultima), { value: r.notas.join(' · '), wrap: true }]),
   ]
+  // Con detalle: fechas de cada entrega y lo que más se llevó además, y una hoja con cada entrega
+  const conDetalle = !!opciones.detalleRecurrentes && d.recurrentes.length > 0
+  if (conDetalle) {
+    recurrentes[0].push(...enc('Fechas de las entregas', 'También recibió en esas entregas'))
+    d.recurrentes.forEach((r, i) => recurrentes[i + 1].push({ value: fechasCortas(r, 60), wrap: true }, { value: otrosTexto(r, 6), wrap: true }))
+  }
+  const detalleRec: Fila[] = [
+    enc('Área', 'Solicitante', 'RPE', 'Material', 'Fecha', 'Hora', 'Folio', 'Piezas'),
+    ...d.recurrentes.flatMap((r) => r.detalle.map((x) => [v(r.area), v(r.nombre), v(r.rpe), v(r.material), v(x.fecha), v(x.hora), v(x.folio), n(x.cantidad)])),
+  ]
 
   // Cambios de EPP contaminado (con el folio del formato en papel)
   const contaminadas = entregasContaminadas(d.entregas, mats, f.personal)
@@ -127,7 +137,8 @@ export async function generarExcel(d: DatosReporte, f: Fuentes): Promise<Blob> {
     { data: material, sheet: 'Por material', columns: ancho(30, 10, 10, 14, 40), stickyRowsCount: 1 },
     { data: porArea, sheet: 'Por área', columns: ancho(34, 10, 10, 10, 10, ...columnasMat.map(() => 14)), stickyRowsCount: 1, stickyColumnsCount: 1 },
     { data: detalle, sheet: 'Entregas', columns: ancho(16, 11, 7, 9, 34, 30, 28, 7, 9, 12, 28, 20, 8, 30), stickyRowsCount: 1 },
-    { data: recurrentes, sheet: 'Solicitantes recurrentes', columns: ancho(30, 30, 9, 34, 12, 8, 8, 11, 11, 50), stickyRowsCount: 1 },
+    { data: recurrentes, sheet: 'Solicitantes recurrentes', columns: ancho(30, 30, 9, 34, 12, 8, 8, 11, 11, 50, ...(conDetalle ? [44, 44] : [])), stickyRowsCount: 1 },
+    ...(conDetalle ? [{ data: detalleRec, sheet: 'Detalle de recurrentes', columns: ancho(30, 34, 9, 30, 11, 7, 18, 8), stickyRowsCount: 1 }] : []),
     ...(contaminadas.length ? [{ data: contaminado, sheet: 'EPP contaminado', columns: ancho(16, 11, 7, 9, 34, 30, 40, 8, 30, 26, 26, 16, 20), stickyRowsCount: 1 }] : []),
     { data: existencias, sheet: 'Existencias', columns: ancho(30, 7, ...ubis.map(() => 18), 9, 9, 11), stickyRowsCount: 1 },
     { data: resguardos, sheet: 'Resguardos y préstamos', columns: ancho(20, 11, 9, 34, 30, 28, 7, 9, 11, 16, 30, 12, 12), stickyRowsCount: 1 },

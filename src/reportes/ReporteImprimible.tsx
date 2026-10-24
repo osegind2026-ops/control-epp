@@ -1,7 +1,7 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { DatosReporte } from './datos'
-import { pct, titulo } from './datos'
+import { pct, titulo, fechasCortas, otrosTexto } from './datos'
 import type { Plantilla } from './plantilla'
 
 // Versión para imprimir o guardar como PDF: mismas láminas que la presentación,
@@ -67,7 +67,7 @@ function Dona({ datos }: { datos: [string, number][] }) {
   )
 }
 
-export function ReporteImprimible({ d, p, onCerrar }: { d: DatosReporte; p: Plantilla; onCerrar: () => void }) {
+export function ReporteImprimible({ d, p, onCerrar, detalleRecurrentes }: { d: DatosReporte; p: Plantilla; onCerrar: () => void; detalleRecurrentes?: boolean }) {
   // En pantalla las páginas se reducen para caber en la ventana; al imprimir salen a tamaño real
   const [zoom, setZoom] = useState(1)
   useEffect(() => {
@@ -294,9 +294,9 @@ export function ReporteImprimible({ d, p, onCerrar }: { d: DatosReporte; p: Plan
             <tbody>
               {[...d.recurrentes]
                 .sort((a, b) => b.veces - a.veces || b.piezas - a.piezas)
-                .slice(0, 12)
-                .map((r) => (
-                  <tr key={r.area + r.materialId + r.rpe}>
+                .slice(0, detalleRecurrentes ? 7 : 12)
+                .flatMap((r, i) => [
+                  <tr key={r.area + r.materialId + r.rpe} class={detalleRecurrentes ? (i % 2 ? 'rp-par' : 'rp-non') : ''}>
                     <td>
                       {titulo(r.nombre)} ({r.rpe})
                     </td>
@@ -306,12 +306,27 @@ export function ReporteImprimible({ d, p, onCerrar }: { d: DatosReporte; p: Plan
                     <td>{r.piezas}</td>
                     <td>{r.ultima}</td>
                     <td class={r.notas.length ? '' : 'rp-cero'}>{r.notas.join(' · ') || '—'}</td>
-                  </tr>
-                ))}
+                  </tr>,
+                  ...(detalleRecurrentes
+                    ? [
+                        <tr key={r.area + r.materialId + r.rpe + '-d'} class={`rp-detalle ${i % 2 ? 'rp-par' : 'rp-non'}`}>
+                          <td colSpan={7}>
+                            <b>Fechas:</b> {fechasCortas(r, 14)}
+                            {r.otros.length > 0 && (
+                              <>
+                                {'  ·  '}
+                                <b>También recibió:</b> {otrosTexto(r)}
+                              </>
+                            )}
+                          </td>
+                        </tr>,
+                      ]
+                    : []),
+                ])}
             </tbody>
           </table>
           <p class="rp-nota">
-            Personas que recibieron el mismo material en 2 o más entregas del periodo ({d.recurrentes.length} casos). El detalle por área y material está en el Excel.
+            Personas que recibieron el mismo material en 2 o más entregas del periodo ({d.recurrentes.length} casos{detalleRecurrentes ? '; se muestran los 7 más frecuentes' : ''}). El detalle por área y material está en el Excel.
           </p>
         </Pagina>
       )}

@@ -90,7 +90,10 @@ async function excelCompleto(): Promise<Blob> {
     ]),
   ]
 
-  const personalSI: Fila[] = [enc('RPE', 'Nombre', 'Nombre corto', 'Función', 'Activo'), ...S.personalSI.value.map((x) => [v(x.rpe), v(x.nombre), v(x.corto), v({ tecnico: 'Técnico', supervisor: 'Supervisor', ambos: 'Técnico y supervisor' }[x.rol ?? 'ambos']), si(x.activo)])]
+  const personalSI: Fila[] = [
+    enc('RPE', 'Nombre', 'Nombre corto', 'Función', 'Turno', 'Activo'),
+    ...S.personalSI.value.map((x) => [v(x.rpe), v(x.nombre), v(x.corto), v({ tecnico: 'Técnico', supervisor: 'Supervisor', ambos: 'Técnico y supervisor' }[x.rol ?? 'ambos']), v(x.turno === 'T1' ? 'Turno 1 (nocturno)' : x.turno === 'T2' ? 'Turno 2 (diurno)' : 'Los dos'), si(x.activo)]),
+  ]
   const observaciones: Fila[] = [enc('Observación', 'Gravedad', 'Activa'), ...S.obsEquipo.value.map((o) => [v(o.texto), v({ ok: 'Sin novedad', detalle: 'Detalle', dano: 'Daño' }[o.tipo]), si(o.activo)])]
 
   const materiales: Fila[] = [
@@ -109,7 +112,7 @@ async function excelCompleto(): Promise<Blob> {
     { data: resguardos, sheet: 'Resguardos y préstamos', columns: ancho(20, 11, 9, 34, 30, 28, 7, 9, 11, 10, 11, 30, 16, 30, 12), stickyRowsCount: 1 },
     { data: equipos, sheet: 'Equipos a resguardo', columns: ancho(12, 22, 16, 16, 18, 40, 10, 14, 12, 8, 30), stickyRowsCount: 1 },
     { data: bitacora, sheet: 'Bitácora de equipos', columns: ancho(18, 12, 22, 16, 10, 30, 28, 30, 14, 10, 30, 40, 10, 14, 16, 30, 14, 10, 40, 8), stickyRowsCount: 1 },
-    { data: personalSI, sheet: 'Personal de SI', columns: ancho(9, 40, 16, 20, 8), stickyRowsCount: 1 },
+    { data: personalSI, sheet: 'Personal de SI', columns: ancho(9, 40, 16, 20, 20, 8), stickyRowsCount: 1 },
     { data: observaciones, sheet: 'Observaciones de equipos', columns: ancho(40, 14, 8), stickyRowsCount: 1 },
     { data: materiales, sheet: 'Materiales', columns: ancho(34, 20, 12, 30, 8), stickyRowsCount: 1 },
     { data: usuarios, sheet: 'Usuarios', columns: ancho(30, 24, 8), stickyRowsCount: 1 },

@@ -76,6 +76,10 @@ export interface SolicitanteRecurrente {
   /** Comentarios capturados al despachar cuando la app avisó de la recurrencia. */
   notas: string[]
   entregaIds: string[]
+  /** Cada entrega del caso, de la más antigua a la más reciente. */
+  detalle: { fecha: string; hora: string; folio: string; cantidad: number }[]
+  /** Lo que más se llevó además en esas mismas entregas (piezas), de más a menos. */
+  otros: { material: string; piezas: number }[]
 }
 
 /**
@@ -93,7 +97,7 @@ export function solicitantesRecurrentes(entregas: Entrega[], materiales: Map<str
       const p = personal.get(e.rpe)
       const x = mapa.get(k) ?? {
         area: e.area, materialId, material: materiales.get(materialId)?.nombre ?? materialId, rpe: e.rpe, nombre: e.nombre,
-        tipo: p ? TIPOS_TRABAJADOR[tipoDe(p)] : '', veces: 0, piezas: 0, primera: e.fecha, ultima: e.fecha, notas: [], entregaIds: [],
+        tipo: p ? TIPOS_TRABAJADOR[tipoDe(p)] : '', veces: 0, piezas: 0, primera: e.fecha, ultima: e.fecha, notas: [], entregaIds: [], detalle: [], otros: [],
       }
       x.veces++
       x.piezas += cantidad
@@ -101,13 +105,47 @@ export function solicitantesRecurrentes(entregas: Entrega[], materiales: Map<str
       if (e.fecha > x.ultima) x.ultima = e.fecha
       if (e.recurrencia?.nota && e.recurrencia.materiales.includes(materialId) && !x.notas.includes(e.recurrencia.nota)) x.notas.push(e.recurrencia.nota)
       x.entregaIds.push(e.id)
+      x.detalle.push({ fecha: e.fecha, hora: e.hora, folio: e.folio, cantidad })
+      // Lo demás que se llevó en esa misma entrega
+      const otros = new Map(x.otros.map((o) => [o.material, o.piezas]))
+      for (const l of e.lineas) {
+        if (l.materialId === materialId) continue
+        const nombre = materiales.get(l.materialId)?.nombre ?? l.materialId
+        otros.set(nombre, (otros.get(nombre) ?? 0) + l.cantidad)
+      }
+      x.otros = [...otros].map(([material, piezas]) => ({ material, piezas }))
       mapa.set(k, x)
     }
+  }
+  for (const x of mapa.values()) {
+    x.detalle.sort((a, b) => (a.fecha + a.hora < b.fecha + b.hora ? -1 : 1))
+    x.otros.sort((a, b) => b.piezas - a.piezas || a.material.localeCompare(b.material))
   }
   return [...mapa.values()]
     .filter((x) => x.veces >= minimo)
     .sort((a, b) => a.area.localeCompare(b.area) || a.material.localeCompare(b.material) || b.veces - a.veces || b.piezas - a.piezas)
 }
+
+/** Opciones de los archivos entregables (Excel, PDF y presentación). */
+export interface OpcionesEntregable {
+  /** Agrega a «Solicitantes recurrentes» las fechas de cada entrega y lo que más se llevó además. */
+  detalleRecurrentes?: boolean
+}
+
+/** «02/10, 08/10 y 15/10»: fechas cortas de las entregas de un caso recurrente. */
+export function fechasCortas(r: Pick<SolicitanteRecurrente, 'detalle'>, maximo = 12): string {
+  const f = r.detalle.map((d) => `${d.fecha.slice(8, 10)}/${d.fecha.slice(5, 7)}${d.cantidad > 1 ? ` (×${d.cantidad})` : ''}`)
+  const mostrar = f.slice(-maximo)
+  const resto = f.length - mostrar.length
+  return (resto > 0 ? `${resto} antes… ` : '') + mostrar.join(', ')
+}
+
+/** «Tapones ×4, Guante Hyflex ×2»: lo que más se llevó además en esas entregas. */
+export const otrosTexto = (r: Pick<SolicitanteRecurrente, 'otros'>, maximo = 3) =>
+  r.otros
+    .slice(0, maximo)
+    .map((o) => `${o.material} ×${o.piezas}`)
+    .join(', ')
 
 /** Cambio de EPP contaminado (entrega marcada con su folio de formato, o anterior marcada por comentario). */
 export interface EntregaContaminada {

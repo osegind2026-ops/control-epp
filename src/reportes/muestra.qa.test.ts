@@ -12,6 +12,8 @@ import { h } from 'preact'
 import { ReporteImprimible } from './ReporteImprimible'
 
 const SALIDA = process.env.MUESTRA_PPTX
+// MUESTRA_DETALLE=1: con el detalle de solicitantes recurrentes
+const opciones = { detalleRecurrentes: process.env.MUESTRA_DETALLE === '1' }
 const imagen = (archivo: string, tipo: string, ancho: number, alto: number) => ({
   dataUrl: `data:${tipo};base64,` + readFileSync(`public/plantilla/${archivo}`).toString('base64'),
   ancho,
@@ -46,7 +48,7 @@ describe.runIf(SALIDA)('muestra', () => {
       if (azar() < 0.04) lineas.push(['barbiquejo', 1])
       const fecha = dias[Math.floor(azar() * dias.length)]
       entregas.push({
-        id: 'E' + i, folio: 'CFE-A-' + i, ts: fecha + 'T15:00:00Z', fecha, hora: '09:00', rpe: 'R' + i, nombre: 'P' + i, area, usuarioId: 'u', usuarioNombre: 'U', equipo: 'A', ubicacionId: 'ubi_despacho',
+        id: 'E' + i, folio: 'CFE-A-' + i, ts: fecha + 'T15:00:00Z', fecha, hora: '09:00', rpe: 'R' + (opciones.detalleRecurrentes ? i % 120 : i), nombre: 'PERSONA FICTICIA ' + (opciones.detalleRecurrentes ? i % 120 : i), area, usuarioId: 'u', usuarioNombre: 'U', equipo: 'A', ubicacionId: 'ubi_despacho',
         lineas: lineas.map(([materialId, cantidad, varianteId = '', motivoId]) => ({ materialId, cantidad, varianteId, esResguardo: ['casco', 'faja'].includes(materialId), motivoId })),
         observaciones: '', estado: 'registrada',
       })
@@ -72,16 +74,16 @@ describe.runIf(SALIDA)('muestra', () => {
       textos: { institucion: 'Central Nucleoeléctrica Laguna Verde', oficina: 'Oficina de Seguridad Industrial' },
       personalizadas: [],
     }
-    const blob = await generarPresentacion(d, p)
+    const blob = await generarPresentacion(d, p, opciones)
     writeFileSync(SALIDA!, Buffer.from(await blob.arrayBuffer()))
     // HTML autónomo de la versión PDF (para imprimir con Chrome y revisar)
     const css = readFileSync('src/styles.css', 'utf8')
-    const cuerpo = renderToString(h(ReporteImprimible, { d, p, onCerrar: () => {} }))
+    const cuerpo = renderToString(h(ReporteImprimible, { d, p, onCerrar: () => {}, detalleRecurrentes: opciones.detalleRecurrentes }))
     writeFileSync(
       SALIDA!.replace(/\.pptx$/, '.html'),
       `<!doctype html><html lang="es"><head><meta charset="utf-8"><style>${css}</style></head><body class="imprimiendo-reporte"><div class="contenedor-reporte">${cuerpo}</div></body></html>`,
     )
-    const xlsx = await generarExcel(d, fuentes)
+    const xlsx = await generarExcel(d, fuentes, opciones)
     writeFileSync(SALIDA!.replace(/\.pptx$/, '.xlsx'), Buffer.from(await xlsx.arrayBuffer()))
   }, 60000)
 })

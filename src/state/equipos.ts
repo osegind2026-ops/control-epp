@@ -1,6 +1,6 @@
 import { db } from '../db/db'
 import { soloAlfanumerico } from '../domain/equipoQr'
-import type { CondicionRegreso, Equipo, ObsElegida, ObsEquipo, PersonalSI, PrestamoEquipo, RefSI, RolSI, TipoObsEquipo, Trabajador } from '../domain/types'
+import type { CondicionRegreso, Equipo, ObsElegida, ObsEquipo, PersonalSI, PrestamoEquipo, RefSI, RolSI, TipoObsEquipo, Trabajador, TurnoSI } from '../domain/types'
 import { fechaLocal, horaLocal, normalizar, nuevoId } from '../lib/util'
 import { avisarCambioLocal } from './nube'
 import { ErrorNegocio, guardarFotosEvidencia } from './servicios'
@@ -145,7 +145,7 @@ export const cortoSugerido = (nombre: string) => {
 }
 
 /** El integrante sale del padrón de trabajadores: de ahí vienen el nombre completo y el área. */
-export async function guardarPersonalSI(d: { id?: string; rpe: string; corto: string; rol?: RolSI; usuarioId?: string; activo: boolean }): Promise<PersonalSI> {
+export async function guardarPersonalSI(d: { id?: string; rpe: string; corto: string; rol?: RolSI; turno?: TurnoSI | ''; usuarioId?: string; activo: boolean }): Promise<PersonalSI> {
   exigirRol('admin')
   const trabajador = S.personal.value.get(d.rpe)
   if (!trabajador) throw new ErrorNegocio('Elija a la persona del padrón (o dé de alta al trabajador primero).')
@@ -157,7 +157,7 @@ export async function guardarPersonalSI(d: { id?: string; rpe: string; corto: st
   if (corto.length > 18) throw new ErrorNegocio('El nombre corto debe tener 18 letras o menos.')
   const repetido = S.personalSI.value.find((x) => x.id !== d.id && x.activo && normalizar(x.corto) === normalizar(corto))
   if (d.activo && repetido) throw new ErrorNegocio(`Ya hay un botón «${repetido.corto}». Use otro nombre corto.`)
-  const reg: PersonalSI = { id: d.id ?? nuevoId('SI'), rpe: d.rpe, nombre, corto, rol: d.rol ?? 'ambos', usuarioId: d.usuarioId || undefined, activo: d.activo, actualizado: new Date().toISOString() }
+  const reg: PersonalSI = { id: d.id ?? nuevoId('SI'), rpe: d.rpe, nombre, corto, rol: d.rol ?? 'ambos', turno: d.turno || undefined, usuarioId: d.usuarioId || undefined, activo: d.activo, actualizado: new Date().toISOString() }
   await db.personalSI.put(reg)
   await S.recargar('personalSI')
   avisarCambioLocal()
@@ -185,6 +185,20 @@ export async function guardarAjuste(id: string, valor: unknown): Promise<void> {
   await S.recargar('ajustes')
   avisarCambioLocal()
 }
+
+export const TURNOS_SI: Record<TurnoSI, { nombre: string; horario: string }> = {
+  T1: { nombre: 'Turno 1 (nocturno)', horario: '19:00 a 07:00' },
+  T2: { nombre: 'Turno 2 (diurno)', horario: '07:00 a 19:00' },
+}
+
+/** Turno de un momento: de 07:00 a 18:59 es el Turno 2 (diurno); de 19:00 a 06:59, el Turno 1 (nocturno). */
+export function turnoDe(fecha = new Date()): TurnoSI {
+  const h = fecha.getHours()
+  return h >= 7 && h < 19 ? 'T2' : 'T1'
+}
+
+/** ¿Sale en ese turno? Quien no tiene turno asignado sale en los dos. */
+export const enTurno = (x: Pick<PersonalSI, 'turno'>, turno: TurnoSI) => !x.turno || x.turno === turno
 
 /** ¿Puede ser técnico (recibe el equipo) o supervisor (lo entrega y lo recibe de regreso)? Sin rol = ambos. */
 export const puedeSerTecnico = (x: Pick<PersonalSI, 'rol'>) => x.rol !== 'supervisor'

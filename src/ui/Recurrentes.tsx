@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'preact/hooks'
 import type { Entrega } from '../domain/types'
-import { solicitantesRecurrentes, type SolicitanteRecurrente } from '../reportes/datos'
+import { otrosTexto, solicitantesRecurrentes, type SolicitanteRecurrente } from '../reportes/datos'
 import { plural } from '../lib/util'
 import * as S from '../state/store'
 import { Modal, Vacio } from './comunes'
@@ -14,8 +14,13 @@ function EntregasDe({ r, entregas, onCerrar }: { r: SolicitanteRecurrente; entre
   return (
     <Modal titulo={`${r.material} · ${r.nombre}`} onCerrar={onCerrar}>
       <p class="muted small">
-        <span class="mono">{r.rpe}</span> · {r.area} · {r.tipo} · {r.veces} entregas, {r.piezas} piezas
+        <span class="mono">{r.rpe}</span> · {r.area} · {r.tipo} · {r.veces} entregas, {r.piezas} piezas · del {r.primera} al {r.ultima}
       </p>
+      {r.otros.length > 0 && (
+        <p class="small">
+          <strong>En esas entregas también recibió:</strong> {otrosTexto(r, 6)}
+        </p>
+      )}
       <div class="tabla-wrap">
         <table>
           <thead>
@@ -23,6 +28,7 @@ function EntregasDe({ r, entregas, onCerrar }: { r: SolicitanteRecurrente; entre
               <th>Fecha</th>
               <th>Folio</th>
               <th class="num">Cant.</th>
+              <th>También se llevó</th>
               <th>Despachó</th>
               <th>Comentario</th>
             </tr>
@@ -33,6 +39,12 @@ function EntregasDe({ r, entregas, onCerrar }: { r: SolicitanteRecurrente; entre
                 <td>{e.fecha}</td>
                 <td class="mono small">{e.folio}</td>
                 <td class="num">{e.lineas.filter((l) => l.materialId === r.materialId).reduce((s, l) => s + l.cantidad, 0)}</td>
+                <td class="small">
+                  {e.lineas
+                    .filter((l) => l.materialId !== r.materialId)
+                    .map((l) => `${S.nombreMaterial(l.materialId, l.varianteId)} ×${l.cantidad}`)
+                    .join(', ') || <span class="muted">—</span>}
+                </td>
                 <td class="small">{e.usuarioNombre}</td>
                 <td class="small">{e.recurrencia?.materiales.includes(r.materialId) ? e.recurrencia.nota || '—' : ''}</td>
               </tr>
@@ -124,7 +136,16 @@ export function Recurrentes({ entregas }: { entregas: Entrega[] }) {
                               </div>
                             </td>
                             <td class="num">
-                              <span class={`badge ${r.veces >= 4 ? 'bad' : r.veces === 3 ? 'warn' : ''}`}>{r.veces}</span>
+                              <button
+                                class={`badge enlace-badge ${r.veces >= 4 ? 'bad' : r.veces === 3 ? 'warn' : ''}`}
+                                title={`Ver las ${r.veces} entregas`}
+                                onClick={(ev) => {
+                                  ev.stopPropagation()
+                                  setVer(r)
+                                }}
+                              >
+                                {r.veces} ›
+                              </button>
                             </td>
                             <td class="num">{r.piezas}</td>
                             <td class="small">{r.ultima}</td>
@@ -139,7 +160,7 @@ export function Recurrentes({ entregas }: { entregas: Entrega[] }) {
           )
         })
       )}
-      <p class="muted small">Se muestran hasta 5 solicitantes por material en cada área; la lista completa está en el Excel (hoja «Solicitantes recurrentes»). Toque un renglón para ver sus entregas.</p>
+      <p class="muted small">Se muestran hasta 5 solicitantes por material en cada área; la lista completa está en el Excel (hoja «Solicitantes recurrentes»). Toque el número de veces (o el renglón) para ver las fechas, cantidades y qué más se llevó en cada entrega.</p>
       {ver && <EntregasDe r={ver} entregas={entregas} onCerrar={() => setVer(null)} />}
     </div>
   )

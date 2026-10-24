@@ -186,9 +186,29 @@ function ReporteContaminado({ entregas }: { entregas: Entrega[] }) {
   )
 }
 
+/** Preferencia de este equipo: incluir o no el detalle de recurrentes en los archivos. */
+const CLAVE_DETALLE = 'eppDetalleRecurrentes'
+function leerDetalle(): boolean {
+  try {
+    return localStorage.getItem(CLAVE_DETALLE) === '1'
+  } catch {
+    return false
+  }
+}
+
 function Exportar({ desde, hasta, area }: { desde: string; hasta: string; area: string }) {
   const [trabajando, setTrabajando] = useState('')
   const [vista, setVista] = useState<{ d: DatosReporte; p: Plantilla } | null>(null)
+  const [detalle, setDetalle] = useState(leerDetalle)
+  const cambiarDetalle = (v: boolean) => {
+    setDetalle(v)
+    try {
+      localStorage.setItem(CLAVE_DETALLE, v ? '1' : '0')
+    } catch {
+      /* sin almacenamiento: vale solo mientras está abierta la pantalla */
+    }
+  }
+  const opciones = { detalleRecurrentes: detalle }
 
   const preparar = () => {
     const [a, b] = limites(desde, hasta)
@@ -200,12 +220,12 @@ function Exportar({ desde, hasta, area }: { desde: string; hasta: string; area: 
       const d = preparar()
       if (tipo === 'excel') {
         const { generarExcel } = await import('../reportes/excel')
-        await entregarArchivo(nombreReporte(d, 'xlsx'), await generarExcel(d, fuentes()))
+        await entregarArchivo(nombreReporte(d, 'xlsx'), await generarExcel(d, fuentes(), opciones))
       } else {
         const p = await cargarPlantilla()
         if (tipo === 'pptx') {
           const { generarPresentacion } = await import('../reportes/presentacion')
-          await entregarArchivo(nombreReporte(d, 'pptx'), await generarPresentacion(d, p))
+          await entregarArchivo(nombreReporte(d, 'pptx'), await generarPresentacion(d, p, opciones))
         } else setVista({ d, p })
       }
       if (tipo !== 'pdf') avisar('✓ Reporte descargado')
@@ -226,13 +246,17 @@ function Exportar({ desde, hasta, area }: { desde: string; hasta: string; area: 
           <Icono n="presentacion" /> {trabajando === 'pptx' ? 'Generando…' : 'Presentación'}
         </button>
       </div>
-      {vista && <VistaPdf d={vista.d} p={vista.p} onCerrar={() => setVista(null)} />}
+      <label class="check small" title="En Excel, PDF y presentación">
+        <input type="checkbox" checked={detalle} onChange={(e) => cambiarDetalle((e.target as HTMLInputElement).checked)} />
+        Incluir el detalle de solicitantes recurrentes (fechas de cada entrega y qué más se llevaron)
+      </label>
+      {vista && <VistaPdf d={vista.d} p={vista.p} detalleRecurrentes={detalle} onCerrar={() => setVista(null)} />}
     </>
   )
 }
 
 /** El reporte se monta directo en <body> para que al imprimir solo salgan sus páginas. */
-function VistaPdf(props: { d: DatosReporte; p: Plantilla; onCerrar: () => void }) {
+function VistaPdf(props: { d: DatosReporte; p: Plantilla; detalleRecurrentes?: boolean; onCerrar: () => void }) {
   const [contenedor] = useState(() => {
     const el = document.createElement('div')
     el.className = 'contenedor-reporte'

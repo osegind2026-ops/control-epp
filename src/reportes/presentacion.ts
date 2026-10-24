@@ -1,6 +1,6 @@
 import type PptxGenJS from 'pptxgenjs'
 import type { DatosReporte } from './datos'
-import { pct, titulo } from './datos'
+import { pct, titulo, fechasCortas, otrosTexto, type OpcionesEntregable } from './datos'
 import type { Plantilla } from './plantilla'
 
 // Presentación ejecutiva (.pptx) con la plantilla institucional. Las gráficas son
@@ -71,7 +71,7 @@ function cifra(s: Slide, x: number, y: number, w: number, numero: string, etique
 
 const miles = (n: number) => n.toLocaleString('es-MX')
 
-export async function generarPresentacion(d: DatosReporte, p: Plantilla): Promise<Blob> {
+export async function generarPresentacion(d: DatosReporte, p: Plantilla, opciones: OpcionesEntregable = {}): Promise<Blob> {
   const { default: Pptx } = await import('pptxgenjs')
   const pres = new Pptx()
   pres.layout = 'LAYOUT_WIDE'
@@ -242,13 +242,29 @@ export async function generarPresentacion(d: DatosReporte, p: Plantilla): Promis
   // ---------- Solicitantes recurrentes ----------
   if (d.recurrentes.length) {
     const s = laminaContenido(pres, p, d, 'Solicitantes recurrentes')
-    const top = [...d.recurrentes].sort((a, b) => b.veces - a.veces || b.piezas - a.piezas).slice(0, 12)
+    const conDetalle = !!opciones.detalleRecurrentes
+    const top = [...d.recurrentes].sort((a, b) => b.veces - a.veces || b.piezas - a.piezas).slice(0, conDetalle ? 7 : 12)
     const celdaEnc = (text: string, align: 'left' | 'center' = 'left') => ({ text, options: { bold: true, color: C.blanco, fill: { color: C.verde }, fontSize: 9.5, align } })
     const enc: PptxGenJS.TableCell[] = [celdaEnc('SOLICITANTE'), celdaEnc('ÁREA'), celdaEnc('MATERIAL'), celdaEnc('VECES', 'center'), celdaEnc('PIEZAS', 'center'), celdaEnc('ÚLTIMA', 'center'), celdaEnc('COMENTARIO')]
-    const filas: PptxGenJS.TableRow[] = top.map((r, i) => {
+    const filas: PptxGenJS.TableRow[] = top.flatMap((r, i) => {
       const fill = { color: i % 2 ? 'F3F1EC' : C.blanco }
       const o = { fontSize: 9.5, color: C.texto, fill }
+      const detalle: PptxGenJS.TableRow[] = conDetalle
+        ? [
+            [
+              {
+                text: [
+                  { text: 'Fechas: ', options: { bold: true, color: C.verde } },
+                  { text: fechasCortas(r, 14) },
+                  ...(r.otros.length ? [{ text: '   ·   También recibió: ', options: { bold: true, color: C.verde } }, { text: otrosTexto(r) }] : []),
+                ],
+                options: { colspan: 7, fontSize: 8, color: '4A4D4C', fill },
+              },
+            ],
+          ]
+        : []
       return [
+        [
         { text: `${titulo(r.nombre)} (${r.rpe})`, options: { ...o, bold: true } },
         { text: titulo(r.area), options: o },
         { text: r.material, options: o },
@@ -256,12 +272,14 @@ export async function generarPresentacion(d: DatosReporte, p: Plantilla): Promis
         { text: String(r.piezas), options: { ...o, align: 'center' as const } },
         { text: r.ultima, options: { ...o, align: 'center' as const } },
         { text: r.notas.join(' · ') || '—', options: { ...o, fontSize: 8.5, color: r.notas.length ? C.texto : 'B5B5B5' } },
+      ],
+        ...detalle,
       ]
     })
     s.addTable([enc, ...filas], {
-      x: 0.5, y: 1.45, w: 12.3, colW: [3.1, 2.3, 2.3, 0.8, 0.8, 1.1, 1.9], fontFace: FUENTE, border: { type: 'solid', color: 'DDD8CE', pt: 0.5 }, valign: 'middle', rowH: 0.36, autoPage: false,
+      x: 0.5, y: 1.45, w: 12.3, colW: [3.1, 2.3, 2.3, 0.8, 0.8, 1.1, 1.9], fontFace: FUENTE, border: { type: 'solid', color: 'DDD8CE', pt: 0.5 }, valign: 'middle', rowH: conDetalle ? 0.29 : 0.36, autoPage: false,
     })
-    s.addText(`Personas que recibieron el mismo material en 2 o más entregas del periodo (${d.recurrentes.length} casos). El detalle por área y material está en el Excel.`, {
+    s.addText(`Personas que recibieron el mismo material en 2 o más entregas del periodo (${d.recurrentes.length} casos${conDetalle ? '; se muestran los 7 más frecuentes' : ''}). El detalle por área y material está en el Excel.`, {
       x: 0.5, y: 6.35, w: 12.3, h: 0.3, fontFace: FUENTE, fontSize: 10, italic: true, color: C.gris, margin: 0, isTextBox: true,
     })
   }

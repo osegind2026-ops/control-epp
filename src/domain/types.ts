@@ -316,6 +316,9 @@ export interface RefSI {
 /** Función del integrante en el préstamo de equipos: el equipo se presta a un técnico y lo entrega un supervisor. */
 export type RolSI = 'tecnico' | 'supervisor' | 'ambos'
 
+/** Turno 1 = nocturno (19:00 a 07:00); Turno 2 = diurno (07:00 a 19:00). */
+export type TurnoSI = 'T1' | 'T2'
+
 /** Integrante de Seguridad Industrial que aparece como botón al prestar, recibir o transferir equipos. */
 export interface PersonalSI {
   id: string
@@ -326,6 +329,8 @@ export interface PersonalSI {
   corto: string
   /** Sin valor = ambos (así quedaron los botones creados antes de existir los roles). */
   rol?: RolSI
+  /** Turno en que trabaja; sin valor = sale en los dos turnos. */
+  turno?: TurnoSI
   /** Usuario de la app al que corresponde: queda preseleccionado cuando ese usuario tiene la sesión abierta. */
   usuarioId?: string
   activo: boolean

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'preact/hooks'
-import type { CondicionRegreso, Equipo, ObsElegida, PersonalSI, PrestamoEquipo, Trabajador } from '../domain/types'
+import type { CondicionRegreso, Equipo, ObsElegida, PersonalSI, PrestamoEquipo, Trabajador, TurnoSI } from '../domain/types'
 import { fechaDeTs, hace, horaLocal } from '../lib/util'
 import {
   actividadesRecientes,
@@ -10,6 +10,9 @@ import {
   prestamoVencido,
   prestarEquipo,
   puedeSerSupervisor,
+  enTurno,
+  turnoDe,
+  TURNOS_SI,
   registrarRegreso,
   CONDICIONES,
   editarPrestamoEquipo,
@@ -35,11 +38,21 @@ export function FotoEquipo({ e, mini }: { e: Pick<Equipo, 'fotoId'>; mini?: bool
 type Funcion = 'tecnico' | 'supervisor'
 
 /** Un botón por persona de Seguridad Industrial; el rótulo dice qué hace en este movimiento (presta a, entrega, recibe…). */
-function BotonesSI({ funcion, rol, valor, onCambio, excluirRpe }: { funcion: Funcion; rol: string; valor: string; onCambio: (id: string) => void; excluirRpe?: string }) {
-  const lista = useMemo(
+function BotonesSI({ funcion, rol, valor, onCambio, excluirRpe, turno }: { funcion: Funcion; rol: string; valor: string; onCambio: (id: string) => void; excluirRpe?: string; turno: TurnoSI | null }) {
+  const todos = useMemo(
     () => personalSIOrdenado(S.personalSI.value, S.prestamosEquipo.value, funcion).filter((x) => !excluirRpe || x.rpe !== excluirRpe),
     [S.personalSI.value, S.prestamosEquipo.value, funcion, excluirRpe],
   )
+  // Solo los del turno en curso (y quienes están en los dos); el ya elegido siempre se ve
+  const lista = todos.filter((x) => !turno || enTurno(x, turno) || x.id === valor)
+  if (todos.length && !lista.length) {
+    return (
+      <div class="stack" style={{ gap: '4px' }}>
+        <strong class="small">{rol}</strong>
+        <span class="small">Nadie de esta lista está asignado al {TURNOS_SI[turno!].nombre}. Toque «Ver todos» arriba.</span>
+      </div>
+    )
+  }
   if (!lista.length) {
     return (
       <div class="stack" style={{ gap: '4px' }}>
@@ -64,6 +77,28 @@ function BotonesSI({ funcion, rol, valor, onCambio, excluirRpe }: { funcion: Fun
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+/** Turno del movimiento y opción para ver también al personal de los otros turnos. */
+function AvisoTurno({ turno, verTodos, onVerTodos }: { turno: TurnoSI; verTodos: boolean; onVerTodos: (v: boolean) => void }) {
+  const fuera = S.personalSI.value.filter((x) => x.activo && !enTurno(x, turno)).length
+  if (!fuera && !verTodos) return null
+  return (
+    <div class="row small aviso-turno" style={{ gap: '8px', alignItems: 'center' }}>
+      <span class="grow">
+        {verTodos ? (
+          <>Se muestra el personal de los dos turnos.</>
+        ) : (
+          <>
+            <strong>{TURNOS_SI[turno].nombre}</strong> ({TURNOS_SI[turno].horario}): solo el personal de este turno.
+          </>
+        )}
+      </span>
+      <button class="btn sm ghost" onClick={() => onVerTodos(!verTodos)}>
+        {verTodos ? `Solo ${TURNOS_SI[turno].nombre}` : `Ver todos (+${fuera})`}
+      </button>
     </div>
   )
 }
@@ -243,6 +278,9 @@ export function ModalPrestar({ eq, onCerrar }: { eq: Equipo; onCerrar: () => voi
   const [fotos, setFotos] = useState<string[]>([])
   const [si, setSi] = useState(siPorDefecto())
   const [hora, setHora] = useState('')
+  // El turno sale de la hora del movimiento (ahora, o la que corrija el administrador)
+  const turnoMov = turnoDe(hora ? new Date(hora) : new Date())
+  const [verTodos, setVerTodos] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const tecnico = S.personalSI.value.find((x) => x.id === tec)
   const falta = !tecnico ? 'Elija a quién se presta' : haySupervisores() && !si ? 'Elija qué supervisor entrega' : ''
@@ -282,8 +320,9 @@ export function ModalPrestar({ eq, onCerrar }: { eq: Equipo; onCerrar: () => voi
           <div class="muted small">{[eq.marca, eq.modelo, eq.serie && `Serie ${eq.serie}`].filter(Boolean).join(' · ')}</div>
         </div>
       </div>
-      <BotonesSI funcion="tecnico" rol="Se presta a (técnico)" valor={tec} onCambio={setTec} />
-      <BotonesSI funcion="supervisor" rol="Lo entrega (supervisor)" valor={si} onCambio={setSi} />
+      <AvisoTurno turno={turnoMov} verTodos={verTodos} onVerTodos={setVerTodos} />
+      <BotonesSI funcion="tecnico" rol="Se presta a (técnico)" valor={tec} onCambio={setTec} turno={verTodos ? null : turnoMov} />
+      <BotonesSI funcion="supervisor" rol="Lo entrega (supervisor)" valor={si} onCambio={setSi} turno={verTodos ? null : turnoMov} />
       <ActividadCampo valor={actividad} onCambio={setActividad} />
       <Accesorios lista={eq.accesorios} marcados={accesorios} onCambio={setAccesorios} titulo="Accesorios que salen con el equipo" />
       <label class="check">
@@ -310,6 +349,9 @@ export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; on
   const [fotos, setFotos] = useState<string[]>([])
   const [si, setSi] = useState(siPorDefecto())
   const [hora, setHora] = useState('')
+  // El turno sale de la hora del movimiento (ahora, o la que corrija el administrador)
+  const turnoMov = turnoDe(hora ? new Date(hora) : new Date())
+  const [verTodos, setVerTodos] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const transfiere = modo === 'transferencia'
   const otro = S.personalSI.value.find((x) => x.id === otroId)
@@ -373,6 +415,7 @@ export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; on
         </button>
       </div>
 
+      <AvisoTurno turno={turnoMov} verTodos={verTodos} onVerTodos={setVerTodos} />
       {transfiere ? (
         <>
           <div class="stack" style={{ gap: '6px' }}>
@@ -383,7 +426,7 @@ export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; on
               </button>
             </div>
           </div>
-          <BotonesSI funcion="tecnico" rol="Recibe (técnico)" valor={nuevoId} onCambio={setNuevoId} excluirRpe={p.rpe} />
+          <BotonesSI funcion="tecnico" rol="Recibe (técnico)" valor={nuevoId} onCambio={setNuevoId} excluirRpe={p.rpe} turno={verTodos ? null : turnoMov} />
           <ActividadCampo valor={actividad} onCambio={setActividad} />
         </>
       ) : (
@@ -394,7 +437,7 @@ export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; on
               {nombreTitular}
             </button>
             {personalSIOrdenado(S.personalSI.value, S.prestamosEquipo.value, 'tecnico')
-              .filter((x) => x.rpe !== p.rpe)
+              .filter((x) => x.rpe !== p.rpe && (verTodos || enTurno(x, turnoMov) || x.id === otroId))
               .map((x) => (
                 <button key={x.id} class="chip chip-si" aria-pressed={otroId === x.id} onClick={() => setOtroId(x.id)} title={x.nombre}>
                   {x.corto}
@@ -404,7 +447,7 @@ export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; on
         </div>
       )}
 
-      <BotonesSI funcion="supervisor" rol={transfiere ? 'Registra la transferencia (supervisor)' : 'Recibe (supervisor)'} valor={si} onCambio={setSi} />
+      <BotonesSI funcion="supervisor" rol={transfiere ? 'Registra la transferencia (supervisor)' : 'Recibe (supervisor)'} valor={si} onCambio={setSi} turno={verTodos ? null : turnoMov} />
       <Accesorios lista={p.accesorios} marcados={accesorios} onCambio={setAccesorios} titulo={transfiere ? 'Accesorios que pasan con el equipo' : 'Accesorios que regresan'} />
       {p.bitacora && (
         <label class="check">

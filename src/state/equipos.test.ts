@@ -276,3 +276,29 @@ describe('correcciones del administrador en la bitácora', () => {
     await expect(eliminarPrestamoEquipo(p.id)).rejects.toThrow(/ya no existe/)
   })
 })
+
+describe('turnos del personal de Seguridad Industrial', () => {
+  it('cambia de turno a las 07:00 y a las 19:00, y filtra por turno', async () => {
+    const { turnoDe, enTurno } = await import('./equipos')
+    const a = (h: number, m = 0) => new Date(2026, 9, 24, h, m)
+    expect(turnoDe(a(6, 59))).toBe('T1')
+    expect(turnoDe(a(7, 0))).toBe('T2')
+    expect(turnoDe(a(18, 59))).toBe('T2')
+    expect(turnoDe(a(19, 0))).toBe('T1')
+    expect(turnoDe(a(0, 30))).toBe('T1')
+    expect(enTurno({ turno: 'T1' }, 'T1')).toBe(true)
+    expect(enTurno({ turno: 'T1' }, 'T2')).toBe(false)
+    expect(enTurno({}, 'T2')).toBe(true) // sin turno: sale en los dos
+  })
+
+  it('guarda el turno y permite desactivar sin perder los demás datos', async () => {
+    const x = S.personalSI.value.find((y) => y.rpe === 'T0901')!
+    const t1 = await guardarPersonalSI({ id: x.id, rpe: 'T0901', corto: x.corto, rol: x.rol, turno: 'T1', activo: true })
+    expect(t1.turno).toBe('T1')
+    const off = await guardarPersonalSI({ id: x.id, rpe: 'T0901', corto: x.corto, rol: x.rol, turno: t1.turno, activo: false })
+    expect(off.activo).toBe(false)
+    expect(off.turno).toBe('T1')
+    const ambos = await guardarPersonalSI({ id: x.id, rpe: 'T0901', corto: x.corto, rol: x.rol, turno: '', activo: true })
+    expect(ambos.turno).toBeUndefined()
+  })
+})
