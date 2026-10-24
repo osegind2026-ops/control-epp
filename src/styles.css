@@ -551,6 +551,37 @@ details > summary { list-style: revert; }
 .rp-pista span { display: block; height: 100%; }
 .rp-barra b { font-weight: normal; }
 .rp-dona-wrap { display: flex; align-items: center; gap: 0.3in; }
+/* Estilos de gráfica (los mismos de la Bitácora 24RU1). «plana» y «dona» son el diseño de siempre. */
+.rp-pastel { width: 3.8in; height: 3.8in; flex: none; }
+/* Muestra pequeña del estilo junto a cada selector en Reportes */
+.opciones-archivos { padding: 10px 14px; }
+.opciones-archivos summary { cursor: pointer; }
+.opciones-archivos[open] { display: grid; gap: 10px; }
+.estilos-graficas { display: flex; flex-wrap: wrap; gap: 16px; }
+.estilo-con-muestra { display: flex; gap: 10px; align-items: flex-end; }
+.estilos-graficas .campo { min-width: 200px; }
+.muestra-estilo { width: 150px; height: 74px; padding: 6px 10px; background: #fff; border: 1px solid var(--rule); border-radius: 8px; display: grid; place-items: center; overflow: hidden; }
+.muestra-estilo .rp-barras { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-evenly; }
+.muestra-estilo .rp-barra { grid-template-columns: 1fr; gap: 0; }
+.muestra-estilo .rp-et, .muestra-estilo .rp-barra b { display: none; }
+.muestra-estilo .rp-pista { height: 11px; }
+.muestra-estilo .rp-barras.est-3d .rp-pista { margin-top: 4px; }
+.muestra-estilo .rp-dona, .muestra-estilo .rp-pastel { width: 66px; height: 66px; }
+.rp-barras.est-degradado .rp-pista span { background: linear-gradient(180deg, var(--c-claro), var(--c-oscuro)); border-radius: 0 3pt 3pt 0; box-shadow: 1pt 1.5pt 2.5pt rgba(0, 0, 0, 0.28); }
+.rp-barras.est-cilindro .rp-pista span { position: relative; background: linear-gradient(180deg, var(--c-sombra) 0%, var(--c-brillo) 38%, var(--c-medio) 55%, var(--c-fondo) 100%); }
+.rp-barras.est-cilindro .rp-pista span::after { content: ''; position: absolute; right: -0.06in; top: 0; width: 0.12in; height: 100%; border-radius: 50%; background: var(--c-brillo); border: 0.5pt solid var(--c-medio); box-sizing: border-box; }
+.rp-barras.est-3d .rp-pista { margin-top: 5pt; }
+.rp-barras.est-3d .rp-pista span { position: relative; background: var(--c); }
+.rp-barras.est-3d .rp-pista span::before { content: ''; position: absolute; left: 0; top: -5pt; width: 100%; height: 5pt; background: var(--c-claro); transform: skewX(-45deg); transform-origin: 0 100%; }
+.rp-barras.est-3d .rp-pista span::after { content: ''; position: absolute; left: 100%; top: 0; width: 5pt; height: 100%; background: var(--c-sombra); transform: skewY(-45deg); transform-origin: 0 0; }
+.rp-columnas.est-degradado .rp-pareja span { background: linear-gradient(180deg, var(--c-claro), var(--c-oscuro)); border-radius: 3pt 3pt 0 0; box-shadow: 1pt 1.5pt 2.5pt rgba(0, 0, 0, 0.28); }
+.rp-columnas.est-cilindro .rp-pareja span { background: linear-gradient(90deg, var(--c-sombra) 0%, var(--c-brillo) 38%, var(--c-medio) 55%, var(--c-fondo) 100%); }
+.rp-columnas.est-cilindro .rp-pareja span::before { content: ''; position: absolute; left: 0; top: -4pt; width: 100%; height: 8pt; border-radius: 50%; background: var(--c-brillo); border: 0.5pt solid var(--c-medio); box-sizing: border-box; }
+.rp-columnas.est-3d .rp-pareja span { background: var(--c); }
+.rp-columnas.est-3d .rp-pareja span::before { content: ''; position: absolute; left: 0; top: -5pt; width: 100%; height: 5pt; background: var(--c-claro); transform: skewX(-45deg); transform-origin: 0 100%; }
+.rp-columnas.est-3d .rp-pareja span::after { content: ''; position: absolute; left: 100%; top: 0; width: 5pt; height: 100%; background: var(--c-sombra); transform: skewY(-45deg); transform-origin: 0 0; }
+.rp-columnas.est-3d .rp-pareja em, .rp-columnas.est-cilindro .rp-pareja em { top: -20pt; }
+.rp-columnas.est-degradado .rp-pareja em, .rp-columnas.est-cilindro .rp-pareja em, .rp-columnas.est-3d .rp-pareja em { font-weight: bold; }
 .rp-dona { width: 3.8in; height: 3.8in; border-radius: 50%; position: relative; flex: none; -webkit-mask: radial-gradient(circle, transparent 42%, #000 43%); mask: radial-gradient(circle, transparent 42%, #000 43%); }
 .rp-leyenda { list-style: none; margin: 0; padding: 0; display: grid; gap: 5pt; font-size: 10.5pt; }
 .rp-leyenda i, .rp-cuadro { display: inline-block; width: 9pt; height: 9pt; margin-right: 4pt; }

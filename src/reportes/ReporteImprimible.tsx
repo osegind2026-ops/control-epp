@@ -2,6 +2,7 @@ import type { ComponentChildren } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { DatosReporte } from './datos'
 import { pct, titulo, fechasCortas, otrosTexto } from './datos'
+import { svgPastel, varsBarra, type EstiloBarras, type EstiloPastel } from './estilos'
 import type { Plantilla } from './plantilla'
 
 // Versión para imprimir o guardar como PDF: mismas láminas que la presentación,
@@ -28,15 +29,15 @@ function Pagina({ p, portada, tituloPag, d, children }: { p: Plantilla; portada?
   )
 }
 
-function Barras({ datos, color = '#235B4E' }: { datos: [string, number][]; color?: string }) {
+function Barras({ datos, color = '#235B4E', estilo = 'plana' }: { datos: [string, number][]; color?: string; estilo?: EstiloBarras }) {
   const max = Math.max(1, ...datos.map(([, n]) => n))
   return (
-    <div class="rp-barras">
+    <div class={`rp-barras est-${estilo}`}>
       {datos.map(([et, n]) => (
         <div class="rp-barra" key={et}>
           <span class="rp-et">{et}</span>
           <span class="rp-pista">
-            <span style={{ width: `${(n / max) * 100}%`, background: color }} />
+            <span style={estilo === 'plana' ? { width: `${(n / max) * 100}%`, background: color } : { width: `${(n / max) * 100}%`, ...varsBarra(color) }} />
           </span>
           <b>{miles(n)}</b>
         </div>
@@ -45,8 +46,22 @@ function Barras({ datos, color = '#235B4E' }: { datos: [string, number][]; color
   )
 }
 
-function Dona({ datos }: { datos: [string, number][] }) {
+function Dona({ datos, estilo = 'dona' }: { datos: [string, number][]; estilo?: EstiloPastel }) {
   const total = datos.reduce((s, [, n]) => s + n, 0) || 1
+  if (estilo !== 'dona') {
+    return (
+      <div class="rp-dona-wrap">
+        <div class="rp-pastel" dangerouslySetInnerHTML={{ __html: svgPastel({ valores: datos.map(([, n]) => n), colores: COLORES, ancho: 360, alto: 360, est: estilo }) }} />
+        <ul class="rp-leyenda">
+          {datos.map(([et, n], i) => (
+            <li key={et}>
+              <i style={{ background: COLORES[i % COLORES.length] }} /> {et} <b>{pct(n, total)}%</b>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
   let acumulado = 0
   const partes = datos.map(([, n], i) => {
     const ini = (acumulado / total) * 360
@@ -67,7 +82,21 @@ function Dona({ datos }: { datos: [string, number][] }) {
   )
 }
 
-export function ReporteImprimible({ d, p, onCerrar, detalleRecurrentes }: { d: DatosReporte; p: Plantilla; onCerrar: () => void; detalleRecurrentes?: boolean }) {
+export function ReporteImprimible({
+  d,
+  p,
+  onCerrar,
+  detalleRecurrentes,
+  estiloBarras = 'plana',
+  estiloPastel = 'dona',
+}: {
+  d: DatosReporte
+  p: Plantilla
+  onCerrar: () => void
+  detalleRecurrentes?: boolean
+  estiloBarras?: EstiloBarras
+  estiloPastel?: EstiloPastel
+}) {
   // En pantalla las páginas se reducen para caber en la ventana; al imprimir salen a tamaño real
   const [zoom, setZoom] = useState(1)
   useEffect(() => {
@@ -169,7 +198,7 @@ export function ReporteImprimible({ d, p, onCerrar, detalleRecurrentes }: { d: D
       {d.materiales.length > 0 && (
         <Pagina p={p} d={d} tituloPag="Material entregado">
           <div class="rp-dos">
-            <Barras datos={d.materiales.slice(0, 12).map((m) => [m.nombre, m.piezas])} />
+            <Barras datos={d.materiales.slice(0, 12).map((m) => [m.nombre, m.piezas])} estilo={estiloBarras} />
             <div class="rp-col">
               <h3>Tallas más solicitadas</h3>
               {d.materiales
@@ -193,7 +222,7 @@ export function ReporteImprimible({ d, p, onCerrar, detalleRecurrentes }: { d: D
       {d.porArea.length > 0 && (
         <Pagina p={p} d={d} tituloPag="Personal atendido por área">
           <div class="rp-dos">
-            <Barras datos={d.porArea.slice(0, 14).map((a) => [titulo(a.area), a.personas])} color="#BC955C" />
+            <Barras datos={d.porArea.slice(0, 14).map((a) => [titulo(a.area), a.personas])} color="#BC955C" estilo={estiloBarras} />
             <div class="rp-col">
               <div class="rp-tarjeta">
                 <b style={{ color: '#235B4E' }}>{pct(d.porArea[0].personas, d.personas)}%</b>del personal atendido fue de {titulo(d.porArea[0].area)}
@@ -209,7 +238,7 @@ export function ReporteImprimible({ d, p, onCerrar, detalleRecurrentes }: { d: D
       {d.cascos > 0 && (
         <Pagina p={p} d={d} tituloPag="Entrega de cascos">
           <div class="rp-dos">
-            <Dona datos={dona} />
+            <Dona datos={dona} estilo={estiloPastel} />
             <div class="rp-col">
               <div class="rp-tarjeta">
                 <span style={{ fontSize: '15pt' }}>
@@ -333,16 +362,16 @@ export function ReporteImprimible({ d, p, onCerrar, detalleRecurrentes }: { d: D
 
       {d.porDia.length > 1 && (
         <Pagina p={p} d={d} tituloPag="Evolución por día">
-          <div class="rp-columnas">
+          <div class={`rp-columnas est-${estiloBarras}`}>
             {(() => {
               const max = Math.max(1, ...d.porDia.map((x) => x.piezas))
               return d.porDia.map((x) => (
                 <div class="rp-dia" key={x.fecha}>
                   <div class="rp-pareja">
-                    <span style={{ height: `${(x.personas / max) * 100}%`, background: '#235B4E' }}>
+                    <span style={estiloBarras === 'plana' ? { height: `${(x.personas / max) * 100}%`, background: '#235B4E' } : { height: `${(x.personas / max) * 100}%`, ...varsBarra('#235B4E') }}>
                       <em>{x.personas}</em>
                     </span>
-                    <span style={{ height: `${(x.piezas / max) * 100}%`, background: '#BC955C' }}>
+                    <span style={estiloBarras === 'plana' ? { height: `${(x.piezas / max) * 100}%`, background: '#BC955C' } : { height: `${(x.piezas / max) * 100}%`, ...varsBarra('#BC955C') }}>
                       <em>{x.piezas}</em>
                     </span>
                   </div>

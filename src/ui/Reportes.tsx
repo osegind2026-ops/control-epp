@@ -1,3 +1,4 @@
+import { signal } from '@preact/signals'
 import { createPortal } from 'preact/compat'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { entregarArchivo, fechaLocal, plural } from '../lib/util'
@@ -6,6 +7,7 @@ import { claveFolioImpreso, foliosSinCapturar, ultimoFolioCapturado, UNIDADES_FO
 import { leerConfig } from '../db/db'
 import { cargarPlantilla, type Plantilla } from '../reportes/plantilla'
 import { ReporteImprimible } from '../reportes/ReporteImprimible'
+import { ESTILOS_BARRAS, ESTILOS_PASTEL, svgPastel, varsBarra, type EstiloBarras, type EstiloPastel } from '../reportes/estilos'
 import { tipoDe } from '../domain/logica'
 import type { Entrega } from '../domain/types'
 import * as S from '../state/store'
@@ -196,19 +198,141 @@ function leerDetalle(): boolean {
   }
 }
 
+/** Preferencia guardada en este equipo (localStorage); si no se puede leer, el valor por omisión. */
+function preferencia<T extends string>(clave: string, permitidos: T[], omision: T): T {
+  try {
+    const v = localStorage.getItem(clave) as T | null
+    return v && permitidos.includes(v) ? v : omision
+  } catch {
+    return omision
+  }
+}
+function guardarPreferencia(clave: string, valor: string) {
+  try {
+    localStorage.setItem(clave, valor)
+  } catch {
+    /* sin almacenamiento: vale mientras está abierta la pantalla */
+  }
+}
+
+const COLORES_MUESTRA = ['#235B4E', '#BC955C', '#691C32', '#6F7271']
+
+/** Muestra pequeña de cómo se verán las barras o el pastel con el estilo elegido. */
+function MuestraEstilo({ barras, pastel }: { barras?: EstiloBarras; pastel?: EstiloPastel }) {
+  if (barras) {
+    return (
+      <div class="muestra-estilo rp-reporte-muestra" aria-hidden="true">
+        <div class={`rp-barras est-${barras}`}>
+          {[0.9, 0.62, 0.4].map((f, i) => (
+            <div class="rp-barra" key={i}>
+              <span class="rp-pista">
+                <span style={barras === 'plana' ? { width: `${f * 92}%`, background: COLORES_MUESTRA[0] } : { width: `${f * 92}%`, ...varsBarra(COLORES_MUESTRA[0]) }} />
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+  const datos = [45, 28, 17, 10]
+  if (pastel === 'dona') {
+    let acum = 0
+    const partes = datos.map((n, i) => {
+      const ini = (acum / 100) * 360
+      acum += n
+      return `${COLORES_MUESTRA[i]} ${ini}deg ${(acum / 100) * 360}deg`
+    })
+    return (
+      <div class="muestra-estilo" aria-hidden="true">
+        <div class="rp-dona" style={{ background: `conic-gradient(${partes.join(',')})` }} />
+      </div>
+    )
+  }
+  return (
+    <div class="muestra-estilo" aria-hidden="true">
+      <div class="rp-pastel" dangerouslySetInnerHTML={{ __html: svgPastel({ valores: datos, colores: COLORES_MUESTRA, ancho: 360, alto: 360, est: pastel ?? 'plano', sinTexto: true }) }} />
+    </div>
+  )
+}
+
+const detalleRec = signal(leerDetalle())
+const estBarras = signal<EstiloBarras>(preferencia('eppEstiloBarras', ESTILOS_BARRAS.map(([k]) => k), 'plana'))
+const estPastel = signal<EstiloPastel>(preferencia('eppEstiloPastel', ESTILOS_PASTEL.map(([k]) => k), 'dona'))
+
+/** Opciones de los archivos entregables: estilo de las gráficas y detalle de recurrentes. */
+function OpcionesArchivos() {
+  const resumen = [ESTILOS_BARRAS.find(([k]) => k === estBarras.value)?.[1], ESTILOS_PASTEL.find(([k]) => k === estPastel.value)?.[1], detalleRec.value ? 'con detalle de recurrentes' : '']
+    .filter(Boolean)
+    .join(' · ')
+  return (
+    <details class="card opciones-archivos">
+      <summary>
+        <strong>Opciones de los archivos</strong> <span class="muted small">({resumen})</span>
+      </summary>
+      <div class="estilos-graficas">
+        <div class="estilo-con-muestra">
+          <label class="campo">
+            Estilo de las barras
+            <select
+              class="input"
+              id="rep-est-barras"
+              value={estBarras.value}
+              onChange={(e) => {
+                estBarras.value = (e.target as HTMLSelectElement).value as EstiloBarras
+                guardarPreferencia('eppEstiloBarras', estBarras.value)
+              }}
+            >
+              {ESTILOS_BARRAS.map(([k, t]) => (
+                <option key={k} value={k}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+          <MuestraEstilo barras={estBarras.value} />
+        </div>
+        <div class="estilo-con-muestra">
+          <label class="campo">
+            Estilo del pastel
+            <select
+              class="input"
+              id="rep-est-pastel"
+              value={estPastel.value}
+              onChange={(e) => {
+                estPastel.value = (e.target as HTMLSelectElement).value as EstiloPastel
+                guardarPreferencia('eppEstiloPastel', estPastel.value)
+              }}
+            >
+              {ESTILOS_PASTEL.map(([k, t]) => (
+                <option key={k} value={k}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+          <MuestraEstilo pastel={estPastel.value} />
+        </div>
+      </div>
+      <label class="check small" title="En Excel, PDF y presentación">
+        <input
+          type="checkbox"
+          checked={detalleRec.value}
+          onChange={(e) => {
+            detalleRec.value = (e.target as HTMLInputElement).checked
+            guardarPreferencia(CLAVE_DETALLE, detalleRec.value ? '1' : '0')
+          }}
+        />
+        Incluir el detalle de solicitantes recurrentes (fechas de cada entrega y qué más se llevaron)
+      </label>
+      <p class="muted small">Los estilos se aplican a las gráficas del PDF y de la presentación (las de PowerPoint siguen siendo editables). El Excel no lleva gráficas.</p>
+    </details>
+  )
+}
+
 function Exportar({ desde, hasta, area }: { desde: string; hasta: string; area: string }) {
   const [trabajando, setTrabajando] = useState('')
   const [vista, setVista] = useState<{ d: DatosReporte; p: Plantilla } | null>(null)
-  const [detalle, setDetalle] = useState(leerDetalle)
-  const cambiarDetalle = (v: boolean) => {
-    setDetalle(v)
-    try {
-      localStorage.setItem(CLAVE_DETALLE, v ? '1' : '0')
-    } catch {
-      /* sin almacenamiento: vale solo mientras está abierta la pantalla */
-    }
-  }
-  const opciones = { detalleRecurrentes: detalle }
+  const opciones = { detalleRecurrentes: detalleRec.value, estiloBarras: estBarras.value, estiloPastel: estPastel.value }
 
   const preparar = () => {
     const [a, b] = limites(desde, hasta)
@@ -246,17 +370,13 @@ function Exportar({ desde, hasta, area }: { desde: string; hasta: string; area: 
           <Icono n="presentacion" /> {trabajando === 'pptx' ? 'Generando…' : 'Presentación'}
         </button>
       </div>
-      <label class="check small" title="En Excel, PDF y presentación">
-        <input type="checkbox" checked={detalle} onChange={(e) => cambiarDetalle((e.target as HTMLInputElement).checked)} />
-        Incluir el detalle de solicitantes recurrentes (fechas de cada entrega y qué más se llevaron)
-      </label>
-      {vista && <VistaPdf d={vista.d} p={vista.p} detalleRecurrentes={detalle} onCerrar={() => setVista(null)} />}
+      {vista && <VistaPdf d={vista.d} p={vista.p} {...opciones} onCerrar={() => setVista(null)} />}
     </>
   )
 }
 
 /** El reporte se monta directo en <body> para que al imprimir solo salgan sus páginas. */
-function VistaPdf(props: { d: DatosReporte; p: Plantilla; detalleRecurrentes?: boolean; onCerrar: () => void }) {
+function VistaPdf(props: { d: DatosReporte; p: Plantilla; detalleRecurrentes?: boolean; estiloBarras?: EstiloBarras; estiloPastel?: EstiloPastel; onCerrar: () => void }) {
   const [contenedor] = useState(() => {
     const el = document.createElement('div')
     el.className = 'contenedor-reporte'
@@ -333,6 +453,7 @@ export function PantallaReportes() {
       <p class="muted small">
         Elija el periodo y descargue el reporte ejecutivo con la plantilla institucional: Excel con el detalle, PDF para enviar o presentación de PowerPoint editable.
       </p>
+      <OpcionesArchivos />
       <div class="row">
         {(
           [

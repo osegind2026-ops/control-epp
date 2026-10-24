@@ -1,4 +1,5 @@
 import { calcularExistencias, existencia, nivelStock, prestamosVencidos, tipoDe, TIPOS_TRABAJADOR, variantesDe } from '../domain/logica'
+import type { EstiloBarras, EstiloPastel } from './estilos'
 import { esContaminada, materialesContaminados, contaminadoEn } from '../domain/contaminado'
 import type { Entrega, Material, Motivo, Movimiento, Resguardo, Trabajador, Ubicacion } from '../domain/types'
 import { fechaLocal } from '../lib/util'
@@ -130,6 +131,9 @@ export function solicitantesRecurrentes(entregas: Entrega[], materiales: Map<str
 export interface OpcionesEntregable {
   /** Agrega a «Solicitantes recurrentes» las fechas de cada entrega y lo que más se llevó además. */
   detalleRecurrentes?: boolean
+  /** Estilo de las gráficas de barras y de pastel (PDF y presentación). */
+  estiloBarras?: EstiloBarras
+  estiloPastel?: EstiloPastel
 }
 
 /** «02/10, 08/10 y 15/10»: fechas cortas de las entregas de un caso recurrente. */

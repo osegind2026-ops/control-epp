@@ -10,10 +10,16 @@ import { generarExcel } from './excel'
 import { renderToString } from 'preact-render-to-string'
 import { h } from 'preact'
 import { ReporteImprimible } from './ReporteImprimible'
+import type { EstiloBarras, EstiloPastel } from './estilos'
 
 const SALIDA = process.env.MUESTRA_PPTX
 // MUESTRA_DETALLE=1: con el detalle de solicitantes recurrentes
-const opciones = { detalleRecurrentes: process.env.MUESTRA_DETALLE === '1' }
+const opciones = {
+  detalleRecurrentes: process.env.MUESTRA_DETALLE === '1',
+  // MUESTRA_BARRAS / MUESTRA_PASTEL: estilo de las gráficas
+  estiloBarras: (process.env.MUESTRA_BARRAS || 'plana') as EstiloBarras,
+  estiloPastel: (process.env.MUESTRA_PASTEL || 'dona') as EstiloPastel,
+}
 const imagen = (archivo: string, tipo: string, ancho: number, alto: number) => ({
   dataUrl: `data:${tipo};base64,` + readFileSync(`public/plantilla/${archivo}`).toString('base64'),
   ancho,
@@ -78,7 +84,7 @@ describe.runIf(SALIDA)('muestra', () => {
     writeFileSync(SALIDA!, Buffer.from(await blob.arrayBuffer()))
     // HTML autónomo de la versión PDF (para imprimir con Chrome y revisar)
     const css = readFileSync('src/styles.css', 'utf8')
-    const cuerpo = renderToString(h(ReporteImprimible, { d, p, onCerrar: () => {}, detalleRecurrentes: opciones.detalleRecurrentes }))
+    const cuerpo = renderToString(h(ReporteImprimible, { d, p, onCerrar: () => {}, ...opciones }))
     writeFileSync(
       SALIDA!.replace(/\.pptx$/, '.html'),
       `<!doctype html><html lang="es"><head><meta charset="utf-8"><style>${css}</style></head><body class="imprimiendo-reporte"><div class="contenedor-reporte">${cuerpo}</div></body></html>`,

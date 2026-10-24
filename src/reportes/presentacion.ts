@@ -1,6 +1,7 @@
 import type PptxGenJS from 'pptxgenjs'
 import type { DatosReporte } from './datos'
 import { pct, titulo, fechasCortas, otrosTexto, type OpcionesEntregable } from './datos'
+import { estilizarPresentacion } from './estilos'
 import type { Plantilla } from './plantilla'
 
 // Presentación ejecutiva (.pptx) con la plantilla institucional. Las gráficas son
@@ -338,7 +339,9 @@ export async function generarPresentacion(d: DatosReporte, p: Plantilla, opcione
   }
 
   const blob = (await pres.write({ outputType: 'blob' })) as Blob
-  return new Blob([blob], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
+  // Estilo de las gráficas elegido en Reportes (se aplica sobre las gráficas nativas de PowerPoint)
+  const final = await estilizarPresentacion(blob, { barras: opciones.estiloBarras ?? 'plana', pastel: opciones.estiloPastel ?? 'dona' })
+  return new Blob([final], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
 }
 
 export { ALTO }
