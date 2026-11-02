@@ -2,14 +2,14 @@ import { signal } from '@preact/signals'
 import { createPortal } from 'preact/compat'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { entregarArchivo, fechaLocal, plural } from '../lib/util'
-import { calcularReporte, entregasContaminadas, resumenContaminado, type DatosReporte, type Fuentes } from '../reportes/datos'
+import { aplicarFiltro, calcularReporte, entregasContaminadas, NOMBRE_TIPO, resumenContaminado, type DatosReporte, type FiltroReporte, type Fuentes } from '../reportes/datos'
 import { claveFolioImpreso, foliosSinCapturar, ultimoFolioCapturado, UNIDADES_FOLIO } from '../domain/contaminado'
 import { leerConfig } from '../db/db'
 import { cargarPlantilla, type Plantilla } from '../reportes/plantilla'
 import { ReporteImprimible } from '../reportes/ReporteImprimible'
 import { ESTILOS_BARRAS, ESTILOS_PASTEL, svgPastel, varsBarra, type EstiloBarras, type EstiloPastel } from '../reportes/estilos'
 import { tipoDe } from '../domain/logica'
-import type { Entrega } from '../domain/types'
+import type { Entrega, TipoMaterial } from '../domain/types'
 import * as S from '../state/store'
 import { Recurrentes } from './Recurrentes'
 import { avisar, FotoMaterial, intentar, Vacio } from './comunes'
@@ -39,6 +39,7 @@ function fuentes(): Fuentes {
     motivos: S.motivos.value,
     ubicaciones: S.ubicaciones.value,
     personal: S.personal.value,
+    categorias: S.categorias.value,
   }
 }
 
@@ -48,7 +49,8 @@ function limites(desde: string, hasta: string): [string, string] {
   return [desde || primera, hasta || fechaLocal()]
 }
 
-const nombreReporte = (d: DatosReporte, ext: string) => `Entrega de EPP ${d.titulo.replace(/[·/\\:]/g, '-')}.${ext}`
+const nombreReporte = (d: DatosReporte, ext: string) =>
+  `Entrega de EPP ${d.titulo}${d.filtroTexto ? ` (${d.filtroTexto})` : ''}`.replace(/[·/\\:*?"<>|]/g, '-').slice(0, 150) + `.${ext}`
 
 /** Folios de EPP contaminado de este año sin capturar, por unidad (hasta el último impreso o capturado). */
 function FoliosSinCapturar() {
@@ -324,19 +326,22 @@ function OpcionesArchivos() {
         />
         Incluir el detalle de solicitantes recurrentes (fechas de cada entrega y qué más se llevaron)
       </label>
-      <p class="muted small">Los estilos se aplican a las gráficas del PDF y de la presentación (las de PowerPoint siguen siendo editables). El Excel no lleva gráficas.</p>
+      <p class="muted small">
+        Los estilos se aplican a las gráficas del PDF y de la presentación (las de PowerPoint siguen siendo editables). El Excel trae su propio «Tablero» con gráficas que
+        cambian al elegir el área.
+      </p>
     </details>
   )
 }
 
-function Exportar({ desde, hasta, area }: { desde: string; hasta: string; area: string }) {
+function Exportar({ desde, hasta, filtro }: { desde: string; hasta: string; filtro: FiltroReporte }) {
   const [trabajando, setTrabajando] = useState('')
   const [vista, setVista] = useState<{ d: DatosReporte; p: Plantilla } | null>(null)
   const opciones = { detalleRecurrentes: detalleRec.value, estiloBarras: estBarras.value, estiloPastel: estPastel.value }
 
   const preparar = () => {
     const [a, b] = limites(desde, hasta)
-    return calcularReporte(fuentes(), a, b, area)
+    return calcularReporte(fuentes(), a, b, filtro)
   }
   const ejecutar = async (tipo: 'excel' | 'pptx' | 'pdf') => {
     setTrabajando(tipo)
@@ -391,15 +396,54 @@ function Barra({ valor, max }: { valor: number; max: number }) {
   return <div class="barra" style={{ width: `${max ? Math.round((valor / max) * 100) : 0}%` }} />
 }
 
+/** Varias áreas a la vez: lista con casillas (ninguna marcada = todas). */
+function SelectorAreas({ valor, onCambio }: { valor: string[]; onCambio: (f: (v: string[]) => string[]) => void }) {
+  const [buscar, setBuscar] = useState('')
+  const areas = listaAreas().filter((a) => !buscar || a.toLowerCase().includes(buscar.toLowerCase()))
+  const texto = !valor.length ? 'Todas' : valor.length === 1 ? valor[0] : `${valor.length} áreas`
+  return (
+    <details class="selector-areas">
+      <summary class="input" id="r-area">{texto}</summary>
+      <div class="selector-areas-menu card">
+        <input class="input" placeholder="Buscar área…" value={buscar} onInput={(e) => setBuscar((e.target as HTMLInputElement).value)} />
+        <div class="selector-areas-lista">
+          {areas.map((a) => (
+            <label class="check small" key={a}>
+              <input type="checkbox" checked={valor.includes(a)} onChange={(e) => {
+                  const marcada = (e.target as HTMLInputElement).checked
+                  onCambio((v) => (marcada ? [...v.filter((x) => x !== a), a] : v.filter((x) => x !== a)))
+                }} />
+              {a}
+            </label>
+          ))}
+        </div>
+        {valor.length > 0 && (
+          <button class="btn small" onClick={() => onCambio(() => [])}>
+            Quitar selección (todas)
+          </button>
+        )}
+      </div>
+    </details>
+  )
+}
+
 export function PantallaReportes() {
   const [sel, setSel] = useState<Rango>('mes')
   const [[desde, hasta], setFechas] = useState(rango('mes'))
-  const [area, setArea] = useState('')
+  const [areas, setAreas] = useState<string[]>([])
+  const [tipo, setTipo] = useState<TipoMaterial | ''>('')
+  const [categoria, setCategoria] = useState('')
+  const [material, setMaterial] = useState('')
+  const filtro = useMemo<FiltroReporte>(
+    () => ({ areas, tipos: tipo ? [tipo] : [], categorias: categoria ? [categoria] : [], materiales: material ? [material] : [] }),
+    [areas, tipo, categoria, material],
+  )
+  const materialesFiltro = S.materiales.value
+    .filter((m) => (!categoria || m.categoriaId === categoria) && (!tipo || m.tipo === tipo))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre))
 
   const d = useMemo(() => {
-    const ent = S.entregas.value.filter(
-      (e) => e.estado === 'registrada' && (!desde || e.fecha >= desde) && (!hasta || e.fecha <= hasta) && (!area || e.area === area),
-    )
+    const ent = aplicarFiltro(S.entregas.value, filtro, S.materialesPorId.value).filter((e) => (!desde || e.fecha >= desde) && (!hasta || e.fecha <= hasta))
     const porMaterial = new Map<string, { total: number; tallas: Map<string, number> }>()
     const porArea = new Map<string, { entregas: number; personas: Set<string>; piezas: number }>()
     const porTrab = new Map<string, { nombre: string; area: string; entregas: number; piezas: number; ultima: string }>()
@@ -439,7 +483,7 @@ export function PantallaReportes() {
       trabajadores: [...porTrab.entries()].sort((a, b) => b[1].entregas - a[1].entregas || b[1].piezas - a[1].piezas).slice(0, 15),
       usuarios: [...porUsuario.entries()].sort((a, b) => b[1].entregas - a[1].entregas),
     }
-  }, [S.entregas.value, desde, hasta, area])
+  }, [S.entregas.value, desde, hasta, filtro])
 
   const maxMat = d.materiales[0]?.[1].total ?? 0
   const maxArea = d.areas[0]?.[1].piezas ?? 0
@@ -448,10 +492,11 @@ export function PantallaReportes() {
     <div class="stack">
       <div class="spread">
         <h1>Reportes</h1>
-        <Exportar desde={desde} hasta={hasta} area={area} />
+        <Exportar desde={desde} hasta={hasta} filtro={filtro} />
       </div>
       <p class="muted small">
-        Elija el periodo y descargue el reporte ejecutivo con la plantilla institucional: Excel con el detalle, PDF para enviar o presentación de PowerPoint editable.
+        Elija el periodo y, si quiere un abstracto para un departamento, el área o áreas, el tipo de EPP o el material. Descargue el reporte ejecutivo con la plantilla
+        institucional: Excel con tablero y detalle, PDF para enviar o presentación de PowerPoint editable.
       </p>
       <OpcionesArchivos />
       <div class="row">
@@ -481,11 +526,37 @@ export function PantallaReportes() {
         </label>
         <label class="campo">
           Área
-          <select class="input" id="r-area" value={area} onChange={(e) => setArea((e.target as HTMLSelectElement).value)}>
+          <SelectorAreas valor={areas} onCambio={setAreas} />
+        </label>
+        <label class="campo">
+          Tipo de EPP
+          <select class="input" id="r-tipo" value={tipo} onChange={(e) => (setTipo((e.target as HTMLSelectElement).value as TipoMaterial | ''), setMaterial(''))}>
+            <option value="">Todos</option>
+            {(Object.keys(NOMBRE_TIPO) as TipoMaterial[]).map((t) => (
+              <option key={t} value={t}>
+                {NOMBRE_TIPO[t]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label class="campo">
+          Categoría
+          <select class="input" id="r-categoria" value={categoria} onChange={(e) => (setCategoria((e.target as HTMLSelectElement).value), setMaterial(''))}>
             <option value="">Todas</option>
-            {listaAreas().map((a) => (
-              <option key={a} value={a}>
-                {a}
+            {S.categorias.value.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nombre}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label class="campo">
+          Material
+          <select class="input" id="r-material" value={material} onChange={(e) => setMaterial((e.target as HTMLSelectElement).value)}>
+            <option value="">Todos</option>
+            {materialesFiltro.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.nombre}
               </option>
             ))}
           </select>
@@ -511,7 +582,7 @@ export function PantallaReportes() {
         </div>
         <div class="kpi">
           <span>En resguardo hoy</span>
-          <b>{S.resguardosActivos.value.filter((r) => !area || r.area === area).reduce((s, r) => s + r.cantidad, 0)}</b>
+          <b>{S.resguardosActivos.value.filter((r) => (!areas.length || areas.includes(r.area)) && (!material || r.materialId === material)).reduce((s, r) => s + r.cantidad, 0)}</b>
         </div>
       </div>
 

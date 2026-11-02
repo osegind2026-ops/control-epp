@@ -158,9 +158,54 @@ describe('portada, desglose de otras áreas y EPP contaminado', () => {
     const zip = await JSZip.loadAsync(await (await generarExcel(d, f)).arrayBuffer())
     const libro = await zip.file('xl/workbook.xml')!.async('string')
     const nombres = [...libro.matchAll(/<sheet [^>]*name="([^"]+)"/g)].map((m) => m[1])
-    expect(nombres.slice(0, 3)).toEqual(['Resumen', 'Solicitantes recurrentes', 'EPP contaminado'])
+    expect(nombres.slice(0, 4)).toEqual(['Tablero', 'Resumen', 'Solicitantes recurrentes', 'EPP contaminado'])
+    expect(nombres.at(-1)).toBe('Datos')
+    expect(libro).toMatch(/name="Datos" state="hidden"/)
+    expect(Object.keys(zip.files).filter((n) => /^xl\/charts\/chart\d+\.xml$/.test(n))).toHaveLength(5)
     const textos = (await zip.file('xl/sharedStrings.xml')?.async('string')) ?? (await zip.file('xl/worksheets/sheet1.xml')!.async('string'))
     expect(textos).toMatch(/Solicitantes recurrentes \(1 caso;/)
     expect(textos).toMatch(/U2-SI-2026-007/)
+  })
+})
+
+describe('reportes sin datos y con filtros', () => {
+  it('genera Excel y presentación de un periodo vacío', async () => {
+    const { generarExcel } = await import('./excel')
+    const f = { entregas: [], movimientos: [], resguardos: [], materiales: materialesSemilla(), motivos: motivosSemilla(), ubicaciones: ubicacionesSemilla(), personal: new Map() }
+    const d = calcularReporte(f, '2026-10-01', '2026-10-31')
+    expect(d.alertas.every((a) => a.nivel !== 'ok')).toBe(true)
+    const b = await generarExcel(d, f)
+    expect(b.size).toBeGreaterThan(1000)
+  })
+
+  it('filtra por varias áreas, tipo y categoría, y compara contra el periodo anterior', () => {
+    const lista = [
+      entrega('1', '2026-10-02', 'X1', 'TALLER', [['lentes_claros', 1], ['casco', 1]]),
+      entrega('2', '2026-10-03', 'X2', 'DTM', [['g_carnaza', 2, 'G']]),
+      entrega('3', '2026-10-04', 'X3', 'PND', [['tapones', 5]]),
+      entrega('4', '2026-09-10', 'X1', 'TALLER', [['lentes_claros', 4]]),
+    ]
+    const f = { entregas: lista, movimientos: [], resguardos: [], materiales: materialesSemilla(), motivos: motivosSemilla(), ubicaciones: ubicacionesSemilla(), personal: new Map() }
+    const d = calcularReporte(f, '2026-10-01', '2026-10-31', { areas: ['TALLER', 'DTM'], tipos: ['consumible'] })
+    expect(d.personas).toBe(2)
+    expect(d.piezas).toBe(3) // sin el casco (resguardo) ni PND
+    expect(d.filtroTexto).toBe('Áreas: Taller, DTM · Tipo: Consumible')
+    expect(d.anterior.titulo).toBe('Septiembre 2026')
+    expect(d.anterior.piezas).toBe(4)
+    expect(d.tendencia.unidad).toBe('semana')
+    expect(d.tendencia.puntos).toHaveLength(12)
+    const soloManos = calcularReporte(f, '2026-10-01', '2026-10-31', { categorias: ['manos'] })
+    expect(soloManos.piezas).toBe(2)
+  })
+
+  it('prioriza las alertas: primero las altas y cada una con su acción', async () => {
+    const { alertas } = await import('./datos')
+    const lista = Array.from({ length: 6 }, (_, i) => entrega(`A${i}`, `2026-10-0${i + 1}`, 'X1', 'TALLER', [['lentes_claros', 1]]))
+    const f = { entregas: lista, movimientos: [], resguardos: [], materiales: materialesSemilla(), motivos: motivosSemilla(), ubicaciones: ubicacionesSemilla(), personal: new Map() }
+    const d = calcularReporte(f, '2026-10-01', '2026-10-31')
+    const a = alertas(d)
+    expect(a[0].nivel).toBe('alta')
+    expect(a.every((x) => x.accion.length > 0)).toBe(true)
+    expect(a.some((x) => x.titulo.includes('3 o más veces'))).toBe(true)
   })
 })

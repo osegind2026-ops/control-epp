@@ -1,15 +1,14 @@
 import { calcularExistencias, ETIQUETA_NIVEL, existencia, nivelStock, variantesDe } from '../domain/logica'
 import { fechaDeTs, horaLocal } from '../lib/util'
 import type { DatosReporte, Fuentes } from './datos'
-import { entregasContaminadas, fechasCortas, otrosTexto, pct, titulo, type OpcionesEntregable } from './datos'
+import { contaminadoEn } from '../domain/contaminado'
+import { entregasContaminadas, fechasCortas, otrosTexto, pct, textoVariacion, titulo, type OpcionesEntregable } from './datos'
+import { armarTablero, HOJA_DATOS, HOJA_TABLERO, posprocesarExcel, type Celda, type Fila } from './excelTablero'
 
-// Libro de Excel del reporte: una hoja por tema, con encabezados fijos y
-// columnas con ancho adecuado para filtrar o hacer tablas dinámicas.
+// Libro de Excel del reporte: un «Tablero» con listas desplegables y gráficas, el resumen y una
+// hoja por tema, con encabezados fijos, filtro automático y columnas con ancho adecuado.
 
-type Celda = { value: string | number | null; fontWeight?: 'bold'; color?: string; backgroundColor?: string; type?: typeof String | typeof Number; wrap?: boolean; format?: string }
-type Fila = Celda[]
-
-const ENC = { fontWeight: 'bold' as const, color: '#FFFFFF', backgroundColor: '#235B4E' }
+const ENC = { fontWeight: 'bold' as const, textColor: '#FFFFFF', backgroundColor: '#235B4E' }
 const enc = (...t: string[]): Fila => t.map((value) => ({ value, ...ENC }))
 const v = (value: string | number | null | undefined): Celda => ({ value: value ?? '' })
 const n = (value: number): Celda => ({ value, type: Number })
@@ -22,8 +21,9 @@ export async function generarExcel(d: DatosReporte, f: Fuentes, opciones: Opcion
 
   // Resumen
   const resumen: Fila[] = [
-    [{ value: 'Informe de Entrega de Equipo de Protección Personal', fontWeight: 'bold', color: '#235B4E' }],
+    [{ value: 'Informe de Entrega de Equipo de Protección Personal', fontWeight: 'bold', textColor: '#235B4E' }],
     [v(d.titulo)],
+    ...(d.filtroTexto ? [[v(`Filtro: ${d.filtroTexto}`)]] : []),
     [v(`Generado el ${d.generado}`)],
     [],
     enc('Indicador', 'Valor'),
@@ -38,10 +38,32 @@ export async function generarExcel(d: DatosReporte, f: Fuentes, opciones: Opcion
     [v('Casos de solicitantes recurrentes'), n(d.recurrentes.length)],
     [v('Cambios de EPP contaminado'), n(d.contaminado.eventos)],
     [],
-    [{ value: 'Hallazgos', fontWeight: 'bold', color: '#691C32' }],
+    [{ value: 'Hallazgos', fontWeight: 'bold', textColor: '#691C32' }],
     ...d.hallazgos.map((h) => [{ value: h, wrap: true }]),
   ]
-  const subtitulo = (t: string): Fila[] => [[], [{ value: t, fontWeight: 'bold', color: '#691C32' }]]
+  const subtitulo = (t: string): Fila[] => [[], [{ value: t, fontWeight: 'bold', textColor: '#691C32' }]]
+
+  // Comparativo contra el periodo anterior
+  resumen.push(...subtitulo(`Contra el periodo anterior (${d.anterior.titulo})`))
+  resumen.push(enc('Indicador', 'Actual', 'Anterior', 'Cambio'))
+  for (const [nombre, actual, antes] of [
+    ['Personas atendidas', d.personas, d.anterior.personas],
+    ['Entregas', d.entregas.length, d.anterior.entregas],
+    ['Piezas entregadas', d.piezas, d.anterior.piezas],
+    ['Cascos', d.cascos, d.anterior.cascos],
+    ['Casos recurrentes', d.recurrentes.length, d.anterior.recurrentes],
+    ['Cambios de EPP contaminado', d.contaminado.eventos, d.anterior.contaminado],
+  ] as [string, number, number][]) {
+    resumen.push([v(nombre), n(actual), n(antes), { value: textoVariacion(actual, antes), fontWeight: 'bold' }])
+  }
+
+  // Hallazgos y alertas priorizados con su acción sugerida
+  if (d.alertas.length) {
+    resumen.push(...subtitulo('Alertas priorizadas'))
+    resumen.push(enc('Alerta', 'Nivel', 'Acción sugerida'))
+    const NIVEL = { alta: ['ALERTA', '#691C32'], media: ['ATENCIÓN', '#9D7B45'], ok: ['BIEN', '#235B4E'] } as const
+    for (const a of d.alertas) resumen.push([{ value: a.titulo, wrap: true }, { value: NIVEL[a.nivel][0], fontWeight: 'bold', textColor: NIVEL[a.nivel][1] }, { value: a.accion, wrap: true }])
+  }
 
   // Solicitantes recurrentes más frecuentes (la lista completa está en su hoja)
   resumen.push(...subtitulo(`Solicitantes recurrentes (${d.recurrentes.length} caso${d.recurrentes.length === 1 ? '' : 's'}; 2 o más entregas del mismo material)`))
@@ -88,11 +110,12 @@ export async function generarExcel(d: DatosReporte, f: Fuentes, opciones: Opcion
 
   // Detalle de entregas
   const detalle: Fila[] = [
-    enc('Folio', 'Fecha', 'Hora', 'RPE', 'Nombre', 'Área', 'Material', 'Talla', 'Cantidad', 'Tipo', 'Motivo', 'Despachó', 'Equipo', 'Observaciones'),
+    enc('Folio', 'Fecha', 'Hora', 'RPE', 'Nombre', 'Área', 'Material', 'Talla', 'Cantidad', 'Tipo', 'Motivo', 'Despachó', 'Equipo', 'Observaciones', 'Categoría', 'Contaminado'),
     ...d.entregas.flatMap((e) =>
       e.lineas.map((l) => [
         v(e.folio), v(e.fecha), v(e.hora), v(e.rpe), v(e.nombre), v(e.area), v(mats.get(l.materialId)?.nombre ?? l.materialId), v(l.varianteId), n(l.cantidad),
         v(l.esResguardo ? 'Resguardo' : l.esPrestamo ? 'Préstamo' : 'Consumible'), v(l.motivoId ? motivos.get(l.motivoId) : ''), v(e.usuarioNombre), v(e.equipo), v(e.observaciones),
+        v(f.categorias?.find((c) => c.id === mats.get(l.materialId)?.categoriaId)?.nombre ?? mats.get(l.materialId)?.categoriaId ?? ''), v(contaminadoEn(e, l.materialId) ? 'Sí' : ''),
       ]),
     ),
   ]
@@ -106,7 +129,7 @@ export async function generarExcel(d: DatosReporte, f: Fuentes, opciones: Opcion
       const total = porUbi.reduce((a, b) => a + b, 0)
       const min = m.stockMin[t] ?? 0
       const nivel = nivelStock(total, min)
-      existencias.push([v(m.nombre), v(t), ...porUbi.map(n), n(total), n(min), { value: ETIQUETA_NIVEL[nivel], ...(nivel ? { color: '#B3261E', fontWeight: 'bold' as const } : {}) }])
+      existencias.push([v(m.nombre), v(t), ...porUbi.map(n), n(total), n(min), { value: ETIQUETA_NIVEL[nivel], ...(nivel ? { textColor: '#B3261E', fontWeight: 'bold' as const } : {}) }])
     }
   }
 
@@ -161,7 +184,15 @@ export async function generarExcel(d: DatosReporte, f: Fuentes, opciones: Opcion
   ]
 
   const ancho = (...w: number[]) => w.map((width) => ({ width }))
+  const tab = armarTablero(d, f, {
+    resumen: 'Resumen',
+    recurrentes: 'Solicitantes recurrentes',
+    contaminado: contaminadas.length ? 'EPP contaminado' : undefined,
+    entregas: 'Entregas',
+    porArea: 'Por área',
+  })
   const hojas = [
+    { data: tab.tablero, sheet: HOJA_TABLERO, columns: ancho(34, 16, 16, 21, 21, 21, 3, ...Array(16).fill(10)) },
     { data: resumen, sheet: 'Resumen', columns: ancho(70, 14, 30, 30, 9, 11) },
     // Recurrentes y contaminado van junto al resumen para que se encuentren sin buscar
     { data: recurrentes, sheet: 'Solicitantes recurrentes', columns: ancho(30, 30, 9, 34, 12, 8, 8, 11, 11, 50, ...(conDetalle ? [44, 44] : [])), stickyRowsCount: 1 },
@@ -173,6 +204,9 @@ export async function generarExcel(d: DatosReporte, f: Fuentes, opciones: Opcion
     { data: existencias, sheet: 'Existencias', columns: ancho(30, 7, ...ubis.map(() => 18), 9, 9, 11), stickyRowsCount: 1 },
     { data: resguardos, sheet: 'Resguardos y préstamos', columns: ancho(20, 11, 9, 34, 30, 28, 7, 9, 11, 16, 30, 12, 12), stickyRowsCount: 1 },
     { data: kardex, sheet: 'Movimientos', columns: ancho(11, 7, 12, 28, 7, 22, 9, 22, 28, 30, 20, 8), stickyRowsCount: 1 },
+    { data: tab.datos, sheet: HOJA_DATOS, columns: ancho(30, 28, 18, 12, 8, 10, 8, 8, 2, 2, 30, 28, 18, 12, 8, 10, 30, 18, 12, 8, 10, 2, 30, 12, 18) },
   ]
-  return escribir(hojas as never).toBlob()
+  const nombres = hojas.map((h) => h.sheet)
+  const conFiltro = nombres.filter((h) => ![HOJA_TABLERO, 'Resumen', HOJA_DATOS].includes(h))
+  return posprocesarExcel(await escribir(hojas as never).toBlob(), tab, nombres, conFiltro)
 }

@@ -1,7 +1,7 @@
 // Genera una presentación de muestra para revisión visual (no forma parte de las pruebas normales).
 import { readFileSync, writeFileSync } from 'node:fs'
 import { describe, it } from 'vitest'
-import { materialesSemilla, motivosSemilla, ubicacionesSemilla, AREAS } from '../db/semilla'
+import { materialesSemilla, motivosSemilla, ubicacionesSemilla, AREAS, CATEGORIAS } from '../db/semilla'
 import type { Entrega } from '../domain/types'
 import { calcularReporte } from './datos'
 import type { Plantilla } from './plantilla'
@@ -39,7 +39,7 @@ describe.runIf(SALIDA)('muestra', () => {
     }
     const entregas: Entrega[] = []
     const dias = ['2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25']
-    for (let i = 0; i < 390; i++) {
+    for (let i = 0; i < 1800; i++) {
       const area = elegirArea()
       const lineas: [string, number, string?, string?][] = []
       if (azar() < 0.45) lineas.push(['casco', 1, '', azar() < 0.6 ? 'ent_extravio' : azar() < 0.5 ? 'ent_primera' : 'ent_desgaste'])
@@ -52,9 +52,11 @@ describe.runIf(SALIDA)('muestra', () => {
       if (azar() < 0.05) lineas.push(['m_polvo', 1])
       if (azar() < 0.03) lineas.push(['faja', 1, ['MED', 'GDE', 'XL'][Math.floor(azar() * 3)], 'ent_primera'])
       if (azar() < 0.04) lineas.push(['barbiquejo', 1])
-      const fecha = dias[Math.floor(azar() * dias.length)]
+      // Una sexta parte en la semana del reporte y el resto en las 11 semanas anteriores (tendencia y comparativo)
+      const fecha = i % 6 === 0 ? dias[Math.floor(azar() * dias.length)] : new Date(Date.UTC(2026, 8, 20 - Math.floor(azar() * 77))).toISOString().slice(0, 10)
+      const persona = opciones.detalleRecurrentes ? Math.floor(azar() * 600) : i
       entregas.push({
-        id: 'E' + i, folio: 'CFE-A-' + i, ts: fecha + 'T15:00:00Z', fecha, hora: '09:00', rpe: 'R' + (opciones.detalleRecurrentes ? i % 120 : i), nombre: 'PERSONA FICTICIA ' + (opciones.detalleRecurrentes ? i % 120 : i), area, usuarioId: 'u', usuarioNombre: 'U', equipo: 'A', ubicacionId: 'ubi_despacho',
+        id: 'E' + i, folio: 'CFE-A-' + i, ts: fecha + 'T15:00:00Z', fecha, hora: '09:00', rpe: 'R' + persona, nombre: 'PERSONA FICTICIA ' + persona, area, usuarioId: 'u', usuarioNombre: 'U', equipo: 'A', ubicacionId: 'ubi_despacho',
         lineas: lineas.map(([materialId, cantidad, varianteId = '', motivoId]) => ({ materialId, cantidad, varianteId, esResguardo: ['casco', 'faja'].includes(materialId), motivoId })),
         observaciones: '', estado: 'registrada',
       })
@@ -63,7 +65,7 @@ describe.runIf(SALIDA)('muestra', () => {
     entregas
       .filter((e, i) => i % 29 === 3 && e.lineas.some((l) => !l.esResguardo))
       .forEach((e, i) => (e.contaminado = { folio: `U${(i % 2) + 1}-SI-2026-${String(i + 1).padStart(3, '0')}`, materiales: [e.lineas.find((l) => !l.esResguardo)!.materialId] }))
-    const fuentes = { entregas, movimientos: [], resguardos: [], materiales: materialesSemilla(), motivos: motivosSemilla(), ubicaciones: ubicacionesSemilla(), personal: new Map() }
+    const fuentes = { entregas, movimientos: [], resguardos: [], materiales: materialesSemilla(), motivos: motivosSemilla(), ubicaciones: ubicacionesSemilla(), personal: new Map(), categorias: CATEGORIAS }
     const d = calcularReporte(
       fuentes,
       '2026-09-21',

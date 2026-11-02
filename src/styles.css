@@ -1567,3 +1567,33 @@ details > summary { list-style: revert; }
 .chip.obs-detalle[aria-pressed='true'] { background: var(--warn); border-color: var(--warn); color: #fff; }
 .chip.obs-dano[aria-pressed='true'] { background: var(--bad); border-color: var(--bad); color: #fff; }
 .modal-acciones .grow { align-self: center; }
+
+/* Reportes: varias áreas a la vez */
+.selector-areas { position: relative; }
+.selector-areas > summary { list-style: none; cursor: pointer; min-width: 12rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.selector-areas > summary::-webkit-details-marker { display: none; }
+.selector-areas-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; width: min(22rem, 90vw); display: grid; gap: 8px; padding: 10px; }
+.selector-areas-lista { max-height: 16rem; overflow: auto; display: grid; gap: 4px; }
+
+/* Reportes 2.19: comparativo, tendencia, tipo de equipo y cierre con semáforo */
+.rp-filtro { font: bold 13pt Arial, sans-serif; color: #6f7271; margin: 4pt 0 0; }
+.rp-con-var { position: relative; }
+.rp-var { color: #6f7271; font-weight: bold; }
+.rp-con-var .rp-var { position: absolute; top: 0.12in; right: 0.2in; text-align: right; font-size: 12pt; display: flex; flex-direction: column; }
+.rp-con-var .rp-var small { font-size: 8pt; font-weight: normal; color: #6f7271; }
+.rp-sube { color: #691c32; }
+.rp-baja { color: #235b4e; }
+.rp-tendencia { grid-template-columns: 1fr 4.3in; }
+.rp-lineas { width: 100%; height: auto; }
+.rp-verde-claro { background: #eaf1ee; font-size: 11.5pt; color: #2b2b2b; }
+.rp-tipo { grid-template-columns: 1fr 5.5in; }
+.rp-fila.rp-tres { grid-template-columns: repeat(3, 1fr); }
+.rp-cierre { grid-template-columns: 1fr 4.4in; }
+.rp-alerta { flex-direction: row; align-items: center; gap: 0.18in; padding: 0.1in 0.2in; color: #2b2b2b; }
+.rp-alerta em { font-style: normal; font-weight: bold; font-size: 9.5pt; color: #fff; border-radius: 0.08in; padding: 0.1in 0; width: 1.15in; text-align: center; flex: none; }
+.rp-alerta div { display: flex; flex-direction: column; gap: 2pt; font-size: 11pt; }
+.rp-alerta span { font-size: 10.5pt; }
+.rp-alta em { background: #691c32; } .rp-alta span { color: #691c32; }
+.rp-media em { background: #bc955c; } .rp-media span { color: #8a6a35; }
+.rp-ok em { background: #235b4e; } .rp-ok span { color: #235b4e; }
+.rp-hallazgos-lista ul { margin: 0; padding-left: 14pt; display: grid; gap: 4pt; font-size: 10.5pt; }

@@ -1,8 +1,8 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { DatosReporte } from './datos'
-import { pct, titulo, fechasCortas, otrosTexto, periodoPortada, desgloseOtrasAreas } from './datos'
-import { svgPastel, varsBarra, type EstiloBarras, type EstiloPastel } from './estilos'
+import { pct, titulo, fechasCortas, otrosTexto, periodoPortada, desgloseOtrasAreas, textoVariacion, variacion } from './datos'
+import { mezcla, svgPastel, varsBarra, type EstiloBarras, type EstiloPastel } from './estilos'
 import type { Plantilla } from './plantilla'
 
 // Versión para imprimir o guardar como PDF: mismas láminas que la presentación,
@@ -22,7 +22,7 @@ function Pagina({ p, portada, tituloPag, d, children }: { p: Plantilla; portada?
       {tituloPag && (
         <header class="rp-titulo">
           <h2>{tituloPag}</h2>
-          <p>{d.titulo}</p>
+          <p>{d.filtroTexto ? `${d.titulo} · ${d.filtroTexto}` : d.titulo}</p>
         </header>
       )}
       {children}
@@ -83,6 +83,62 @@ function Dona({ datos, estilo = 'dona' }: { datos: [string, number][]; estilo?: 
   )
 }
 
+/** Clase de color de una variación: subir consumo = guinda, bajar = verde. */
+const claseVar = (actual: number, anterior: number, neutro = false) => {
+  const v = variacion(actual, anterior)
+  return neutro || v === null || v === 0 ? 'rp-var' : v > 0 ? 'rp-var rp-sube' : 'rp-var rp-baja'
+}
+
+/** Gráfica de líneas (tendencia) en SVG. */
+function Lineas({ etiquetas, series }: { etiquetas: string[]; series: { nombre: string; color: string; valores: number[] }[] }) {
+  const W = 760
+  const H = 430
+  const izq = 44
+  const der = 16
+  const arriba = 40
+  const abajo = 34
+  const max = Math.max(1, ...series.flatMap((x) => x.valores)) * 1.12
+  const x = (i: number) => izq + (i * (W - izq - der)) / Math.max(1, etiquetas.length - 1)
+  const y = (v: number) => arriba + (H - arriba - abajo) * (1 - v / max)
+  const lineasGuia = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(max * f))
+  return (
+    <svg class="rp-lineas" viewBox={`0 0 ${W} ${H}`}>
+      {lineasGuia.map((v) => (
+        <g key={v}>
+          <line x1={izq} x2={W - der} y1={y(v)} y2={y(v)} stroke="#E4E0D8" stroke-width="1" />
+          <text x={izq - 6} y={y(v) + 4} text-anchor="end" font-size="10" fill="#6F7271">
+            {miles(v)}
+          </text>
+        </g>
+      ))}
+      {etiquetas.map((e, i) => (
+        <text key={e + i} x={x(i)} y={H - 12} text-anchor="middle" font-size="11" fill="#2B2B2B">
+          {e}
+        </text>
+      ))}
+      {series.map((sr, k) => (
+        <g key={sr.nombre}>
+          <polyline points={sr.valores.map((v, i) => `${x(i)},${y(v)}`).join(' ')} fill="none" stroke={sr.color} stroke-width="3" />
+          {sr.valores.map((v, i) => (
+            <g key={i}>
+              <circle cx={x(i)} cy={y(v)} r="4.5" fill={sr.color} />
+              <text x={x(i)} y={y(v) - 9} text-anchor="middle" font-size="10" fill="#2B2B2B">
+                {miles(v)}
+              </text>
+            </g>
+          ))}
+          <rect x={izq + k * 190} y="8" width="12" height="12" fill={sr.color} />
+          <text x={izq + k * 190 + 18} y="18" font-size="12" fill="#2B2B2B">
+            {sr.nombre}
+          </text>
+        </g>
+      ))}
+    </svg>
+  )
+}
+
+const NIVEL = { alta: ['ALERTA', 'rp-alta'], media: ['ATENCIÓN', 'rp-media'], ok: ['BIEN', 'rp-ok'] } as const
+
 export function ReporteImprimible({
   d,
   p,
@@ -132,6 +188,9 @@ export function ReporteImprimible({
   if (restoCascos) dona.push(['Otras áreas', restoCascos])
   const otrasAreas = desgloseOtrasAreas(conCasco.slice(6), d.cascos)
   const matsTabla = d.materiales.slice(0, 8)
+  const maximos = matsTabla.map((m) => Math.max(1, ...d.porArea.slice(0, 12).map((a) => a.porMaterial[m.id] ?? 0)))
+  const personasRec = new Set(d.recurrentes.map((r) => r.rpe)).size
+  const topPctRec = [...d.recurrenciaPorArea].filter((a) => a.personasArea >= 3).sort((a, b) => b.pct - a.pct)[0]
 
   return (
     <div class="reporte-imprimible" style={{ '--zoom': zoom } as unknown as Record<string, string>}>
@@ -155,6 +214,7 @@ export function ReporteImprimible({
           </h1>
           <hr />
           <p class="rp-periodo">{periodoPortada(d.desde, d.hasta)}</p>
+          {d.filtroTexto && <p class="rp-filtro">{d.filtroTexto.toUpperCase()}</p>}
           <div class="rp-kpis">
             <div>
               <b style={{ color: '#235B4E' }}>{miles(d.personas)}</b>personas atendidas
@@ -180,14 +240,26 @@ export function ReporteImprimible({
       <Pagina p={p} d={d} tituloPag="Resumen general">
         <div class="rp-resumen">
           <div class="rp-col">
-            <div class="rp-tarjeta">
+            <div class="rp-tarjeta rp-con-var">
               <b style={{ color: '#235B4E' }}>{miles(d.personas)}</b>Personal atendido
+              <span class={claseVar(d.personas, d.anterior.personas, true)}>
+                {textoVariacion(d.personas, d.anterior.personas)}
+                <small>vs. anterior</small>
+              </span>
             </div>
-            <div class="rp-tarjeta">
+            <div class="rp-tarjeta rp-con-var">
               <b style={{ color: '#691C32' }}>{miles(casco?.piezas ?? 0)}</b>Cascos entregados
+              <span class={claseVar(casco?.piezas ?? 0, d.anterior.cascos)}>
+                {textoVariacion(casco?.piezas ?? 0, d.anterior.cascos)}
+                <small>vs. anterior</small>
+              </span>
             </div>
-            <div class="rp-tarjeta">
+            <div class="rp-tarjeta rp-con-var">
               <b>{miles(carnaza?.piezas ?? 0)}</b>Guantes de carnaza
+              <span class={claseVar(carnaza?.piezas ?? 0, d.anterior.porMaterial.get('g_carnaza') ?? 0)}>
+                {textoVariacion(carnaza?.piezas ?? 0, d.anterior.porMaterial.get('g_carnaza') ?? 0)}
+                <small>vs. anterior</small>
+              </span>
             </div>
             <div class="rp-tarjeta rp-rosa">
               <b style={{ color: '#691C32', fontSize: '26pt' }}>{pct(d.personasConCasco, d.personas)}%</b>
@@ -205,15 +277,76 @@ export function ReporteImprimible({
         </div>
       </Pagina>
 
+      {d.tendencia.puntos.some((x) => x.piezas) && (
+        <Pagina p={p} d={d} tituloPag="Tendencia y comparativo">
+          <div class="rp-dos rp-tendencia">
+            <div class="rp-col">
+              <h3>Últim{d.tendencia.unidad === 'semana' ? 'as 12 semanas' : 'os 12 meses'}</h3>
+              <Lineas
+                etiquetas={d.tendencia.puntos.map((x) => x.etiqueta)}
+                series={[
+                  { nombre: 'Piezas entregadas', color: '#BC955C', valores: d.tendencia.puntos.map((x) => x.piezas) },
+                  { nombre: 'Personas atendidas', color: '#235B4E', valores: d.tendencia.puntos.map((x) => x.personas) },
+                ]}
+              />
+            </div>
+            <div class="rp-col">
+              <h3>Contra el periodo anterior</h3>
+              <p class="rp-nota" style={{ marginTop: '-4pt' }}>{d.anterior.titulo}</p>
+              <table class="rp-tabla rp-flujo">
+                <thead>
+                  <tr>
+                    <th>Indicador</th>
+                    <th>Actual</th>
+                    <th>Anterior</th>
+                    <th>Cambio</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(
+                    [
+                      ['Personas atendidas', d.personas, d.anterior.personas],
+                      ['Entregas', d.entregas.length, d.anterior.entregas],
+                      ['Piezas entregadas', d.piezas, d.anterior.piezas],
+                      ['Cascos', d.cascos, d.anterior.cascos],
+                      ['Casos recurrentes', d.recurrentes.length, d.anterior.recurrentes],
+                      ['EPP contaminado', d.contaminado.eventos, d.anterior.contaminado],
+                    ] as [string, number, number][]
+                  ).map(([n, actual, antes], i) => (
+                    <tr key={n}>
+                      <td>{n}</td>
+                      <td>
+                        <b>{miles(actual)}</b>
+                      </td>
+                      <td class="rp-cero">{miles(antes)}</td>
+                      <td class={claseVar(actual, antes, i === 0)}>{textoVariacion(actual, antes)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p class="rp-nota">▲ en guinda: subió el consumo. ▼ en verde: bajó.</p>
+            </div>
+          </div>
+        </Pagina>
+      )}
+
       {d.materiales.length > 0 && (
         <Pagina p={p} d={d} tituloPag="Material entregado">
           <div class="rp-dos">
             <Barras datos={d.materiales.slice(0, 12).map((m) => [m.nombre, m.piezas])} estilo={estiloBarras} />
             <div class="rp-col">
+              <div class="rp-tarjeta rp-verde-claro">
+                <span>
+                  <b style={{ fontSize: '20pt', color: '#235B4E' }}>
+                    {d.pareto.materiales} de {d.pareto.total}
+                  </b>{' '}
+                  materiales concentran el 80% de las piezas entregadas.
+                </span>
+              </div>
               <h3>Tallas más solicitadas</h3>
               {d.materiales
                 .filter((m) => m.tallas.length)
-                .slice(0, 4)
+                .slice(0, 3)
                 .map((m) => (
                   <div class="rp-tarjeta rp-chica" key={m.id}>
                     <strong>{m.nombre}</strong>
@@ -229,7 +362,31 @@ export function ReporteImprimible({
         </Pagina>
       )}
 
-      {d.porArea.length > 0 && (
+      {(d.porCategoria.length > 1 || d.porTipo.length > 1) && (
+        <Pagina p={p} d={d} tituloPag="Tipo de equipo entregado">
+          <div class="rp-dos rp-tipo">
+            <Dona datos={d.porCategoria.slice(0, 8).map((c) => [c.nombre, c.piezas])} estilo={estiloPastel} />
+            <div class="rp-col">
+              <div class="rp-tarjeta">
+                <span style={{ fontSize: '15pt' }}>
+                  <strong style={{ color: '#235B4E' }}>{d.porCategoria[0].nombre}</strong> es la protección más solicitada: {pct(d.porCategoria[0].piezas, d.piezas)}% de las piezas.
+                </span>
+              </div>
+              <div class="rp-fila rp-tres">
+                {d.porTipo.map((t, i) => (
+                  <div class="rp-tarjeta" key={t.tipo}>
+                    <b style={{ color: COLORES[[0, 2, 3][i]], fontSize: '22pt' }}>{miles(t.piezas)}</b>
+                    {t.nombre.toLowerCase()} ({pct(t.piezas, d.piezas)}%)
+                  </div>
+                ))}
+              </div>
+              <p class="rp-nota">Consumible: se entrega y no regresa. Resguardo: queda a cargo del trabajador. Préstamo: se devuelve al almacén.</p>
+            </div>
+          </div>
+        </Pagina>
+      )}
+
+      {d.porArea.length > 1 && (
         <Pagina p={p} d={d} tituloPag="Personal atendido por área">
           <div class="rp-dos">
             <Barras datos={d.porArea.slice(0, 14).map((a) => [titulo(a.area), a.personas])} color="#BC955C" estilo={estiloBarras} />
@@ -240,6 +397,35 @@ export function ReporteImprimible({
               <div class="rp-tarjeta">
                 <b>{miles(d.areas)}</b>áreas atendidas
               </div>
+            </div>
+          </div>
+        </Pagina>
+      )}
+
+      {d.consumoPorPersona.length > 1 && (
+        <Pagina p={p} d={d} tituloPag="Piezas por persona en cada área">
+          <div class="rp-dos">
+            <Barras datos={d.consumoPorPersona.slice(0, 14).map((a) => [titulo(a.area), a.porPersona])} estilo={estiloBarras} />
+            <div class="rp-col">
+              <div class="rp-tarjeta">
+                <b style={{ color: '#235B4E' }}>{d.promedioPorPersona}</b>piezas por persona en promedio
+              </div>
+              {(() => {
+                const altas = d.consumoPorPersona.filter((a) => a.porPersona >= d.promedioPorPersona * 1.5)
+                return altas.length ? (
+                  <div class="rp-tarjeta rp-rosa rp-chica">
+                    <strong style={{ color: '#691C32' }}>Por encima de 1.5 veces el promedio</strong>
+                    {altas.slice(0, 6).map((a) => (
+                      <span key={a.area}>
+                        {titulo(a.area)}: {a.porPersona} ({a.personas} personas)
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div class="rp-tarjeta rp-chica">Ninguna área supera 1.5 veces el promedio de piezas por persona.</div>
+                )
+              })()}
+              <p class="rp-nota">Solo áreas con 3 personas o más. Un valor alto puede indicar trabajos especiales o falta de resguardo del EPP.</p>
             </div>
           </div>
         </Pagina>
@@ -295,7 +481,7 @@ export function ReporteImprimible({
         </Pagina>
       )}
 
-      {d.porArea.length > 0 && (
+      {d.porArea.length > 1 && (
         <Pagina p={p} d={d} tituloPag="Material entregado por área">
           <table class="rp-tabla">
             <thead>
@@ -311,17 +497,24 @@ export function ReporteImprimible({
               {d.porArea.slice(0, 12).map((a) => (
                 <tr key={a.area}>
                   <td>{titulo(a.area)}</td>
-                  {matsTabla.map((m) => (
-                    <td key={m.id} class={a.porMaterial[m.id] ? '' : 'rp-cero'}>
-                      {a.porMaterial[m.id] ?? '–'}
-                    </td>
-                  ))}
+                  {matsTabla.map((m, j) => {
+                    const n = a.porMaterial[m.id] ?? 0
+                    const t = n / maximos[j]
+                    return (
+                      <td key={m.id} class={n ? '' : 'rp-cero'} style={n ? { background: `#${mezcla('235B4E', 0.92 - t * 0.92)}`, color: t > 0.6 ? '#fff' : undefined, fontWeight: t > 0.6 ? 'bold' : undefined } : undefined}>
+                        {n || '–'}
+                      </td>
+                    )
+                  })}
                   <td class="rp-total">{a.personas}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {d.porArea.length > 12 && <p class="rp-nota">Se muestran las 12 áreas con más personal atendido de {d.porArea.length}. El detalle completo está en el Excel.</p>}
+          <p class="rp-nota">
+            {d.porArea.length > 12 ? `Se muestran las 12 áreas con más personal atendido de ${d.porArea.length}. ` : ''}Color más intenso = el área que más recibió de ese material. El detalle completo
+            está en el Excel.
+          </p>
         </Pagina>
       )}
 
@@ -376,6 +569,25 @@ export function ReporteImprimible({
           <p class="rp-nota">
             Personas que recibieron el mismo material en 2 o más entregas del periodo ({d.recurrentes.length} casos{detalleRecurrentes ? '; se muestran los 7 más frecuentes' : ''}). El detalle por área y material está en el Excel.
           </p>
+        </Pagina>
+      )}
+
+      {d.recurrenciaPorArea.length > 1 && (
+        <Pagina p={p} d={d} tituloPag="Solicitantes recurrentes por área">
+          <div class="rp-dos">
+            <Barras datos={d.recurrenciaPorArea.slice(0, 12).map((a) => [titulo(a.area), a.casos])} color="#691C32" estilo={estiloBarras} />
+            <div class="rp-col">
+              <div class="rp-tarjeta">
+                <b style={{ color: '#691C32' }}>{pct(personasRec, d.personas)}%</b>del personal atendido ({personasRec} personas) tuvo algún caso recurrente
+              </div>
+              {topPctRec && (
+                <div class="rp-tarjeta">
+                  <b>{topPctRec.pct}%</b>de las personas de {titulo(topPctRec.area)} repitió material
+                </div>
+              )}
+              <p class="rp-nota">Casos = persona y material que se entregaron 2 o más veces en el periodo. El listado con nombres está en la página anterior y en el Excel.</p>
+            </div>
+          </div>
         </Pagina>
       )}
 
@@ -474,40 +686,31 @@ export function ReporteImprimible({
       )}
 
       <Pagina p={p} d={d} tituloPag="Hallazgos y alertas">
-        <div class="rp-dos rp-hallazgos">
-          <ol>
-            {d.hallazgos.slice(0, 7).map((h) => (
-              <li key={h}>{h}</li>
-            ))}
-            {!d.hallazgos.length && <li>Sin entregas registradas en el periodo.</li>}
-          </ol>
+        <div class="rp-dos rp-cierre">
           <div class="rp-col">
-            <div class="rp-tarjeta rp-chica">
-              <strong style={{ color: '#691C32' }}>Por reabastecer ({d.reabastecer.length})</strong>
-              {d.reabastecer.slice(0, 6).map((r) => (
-                <span key={r.nombre}>
-                  {r.nombre}: {r.existencia} (mín. {r.minimo})
-                </span>
-              ))}
-              {!d.reabastecer.length && <span>Sin pendientes</span>}
-            </div>
-            <div class="rp-tarjeta rp-chica">
-              <strong style={{ color: '#691C32' }}>Préstamos vencidos ({d.prestamosVencidos.length})</strong>
-              {d.prestamosVencidos.slice(0, 5).map((r) => (
-                <span key={r.id}>
-                  {r.nombre} · desde {r.fechaEntrega}
-                </span>
-              ))}
-              {!d.prestamosVencidos.length && <span>Sin pendientes</span>}
+            {d.alertas.slice(0, 5).map((a) => (
+              <div class={`rp-tarjeta rp-alerta ${NIVEL[a.nivel][1]}`} key={a.titulo}>
+                <em>{NIVEL[a.nivel][0]}</em>
+                <div>
+                  <strong>{a.titulo}</strong>
+                  <span>→ {a.accion}</span>
+                </div>
+              </div>
+            ))}
+            {!d.alertas.length && <p class="rp-nota">{d.personas ? 'Sin alertas en el periodo.' : 'Sin entregas registradas en el periodo.'}</p>}
+          </div>
+          <div class="rp-col">
+            <div class="rp-tarjeta rp-chica rp-hallazgos-lista">
+              <strong style={{ color: '#235B4E' }}>Hallazgos del periodo</strong>
+              <ul>
+                {d.hallazgos.slice(0, 5).map((h) => (
+                  <li key={h}>{h}</li>
+                ))}
+              </ul>
             </div>
             <div class="rp-tarjeta rp-chica">
               <strong style={{ color: '#235B4E' }}>Equipo en resguardo</strong>
-              {d.resguardosActivos.map((r) => (
-                <span key={r.nombre}>
-                  {r.nombre}: {r.cantidad}
-                </span>
-              ))}
-              {!d.resguardosActivos.length && <span>Sin pendientes</span>}
+              <span>{d.resguardosActivos.length ? d.resguardosActivos.slice(0, 6).map((r) => `${r.nombre}: ${r.cantidad}`).join(' · ') : 'Sin equipo en resguardo.'}</span>
             </div>
           </div>
         </div>

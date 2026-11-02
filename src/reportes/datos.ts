@@ -1,7 +1,7 @@
 import { calcularExistencias, existencia, nivelStock, prestamosVencidos, tipoDe, TIPOS_TRABAJADOR, variantesDe } from '../domain/logica'
 import type { EstiloBarras, EstiloPastel } from './estilos'
 import { esContaminada, materialesContaminados, contaminadoEn } from '../domain/contaminado'
-import type { Entrega, Material, Motivo, Movimiento, Resguardo, Trabajador, Ubicacion } from '../domain/types'
+import type { Categoria, Entrega, LineaEntrega, Material, Motivo, Movimiento, Resguardo, TipoMaterial, Trabajador, Ubicacion } from '../domain/types'
 import { fechaLocal } from '../lib/util'
 
 // Datos de un reporte ejecutivo para un periodo. Es la única fuente de números
@@ -188,6 +188,7 @@ export function entregasContaminadas(entregas: Entrega[], materiales: Map<string
     if (e.estado !== 'registrada' || !esContaminada(e)) continue
     const ids = materialesContaminados(e)
     const lineas = e.lineas.filter((l) => ids.includes(l.materialId))
+    if (!lineas.length) continue // el filtro del reporte dejó fuera el material contaminado
     const c = e.contaminado
     const trab = personal.get(e.rpe)
     r.push({
@@ -230,6 +231,153 @@ export function resumenContaminado(lista: EntregaContaminada[], materiales: Map<
   }
 }
 
+/** Filtros del reporte. Vacío = todo. */
+export interface FiltroReporte {
+  areas?: string[]
+  tipos?: TipoMaterial[]
+  categorias?: string[]
+  materiales?: string[]
+}
+
+export const NOMBRE_TIPO: Record<TipoMaterial, string> = { consumible: 'Consumible', resguardo: 'Resguardo', prestamo: 'Préstamo' }
+export const tipoLinea = (l: LineaEntrega): TipoMaterial => (l.esResguardo ? 'resguardo' : l.esPrestamo ? 'prestamo' : 'consumible')
+
+export function lineaPasa(l: LineaEntrega, fl: FiltroReporte, materiales: Map<string, Material>): boolean {
+  if (fl.tipos?.length && !fl.tipos.includes(tipoLinea(l))) return false
+  if (fl.materiales?.length && !fl.materiales.includes(l.materialId)) return false
+  if (fl.categorias?.length && !fl.categorias.includes(materiales.get(l.materialId)?.categoriaId ?? '')) return false
+  return true
+}
+
+/** Entregas registradas que pasan el filtro. Con tipo, categoría o material solo quedan esas líneas. */
+export function aplicarFiltro(entregas: Entrega[], fl: FiltroReporte, materiales: Map<string, Material>): Entrega[] {
+  const areas = fl.areas?.length ? new Set(fl.areas) : null
+  const porLinea = !!(fl.tipos?.length || fl.categorias?.length || fl.materiales?.length)
+  const r: Entrega[] = []
+  for (const e of entregas) {
+    if (e.estado !== 'registrada' || (areas && !areas.has(e.area))) continue
+    if (!porLinea) {
+      r.push(e)
+      continue
+    }
+    const lineas = e.lineas.filter((l) => lineaPasa(l, fl, materiales))
+    if (lineas.length) r.push(lineas.length === e.lineas.length ? e : { ...e, lineas })
+  }
+  return r
+}
+
+/** «Área: Taller · Tipo: Consumible · Categoría: Manos». Vacío sin filtros. */
+export function describirFiltro(fl: FiltroReporte, materiales: Map<string, Material>, categorias: Categoria[] = []): string {
+  const varios = (xs: string[], singular: string, plural: string) =>
+    xs.length === 1 ? `${singular}: ${xs[0]}` : xs.length > 3 ? `${plural} (${xs.length})` : `${plural}: ${xs.join(', ')}`
+  const partes: string[] = []
+  if (fl.areas?.length) partes.push(varios(fl.areas.map(titulo), 'Área', 'Áreas'))
+  if (fl.tipos?.length) partes.push(varios(fl.tipos.map((t) => NOMBRE_TIPO[t]), 'Tipo', 'Tipos'))
+  if (fl.categorias?.length) partes.push(varios(fl.categorias.map((c) => categorias.find((x) => x.id === c)?.nombre ?? c), 'Categoría', 'Categorías'))
+  if (fl.materiales?.length) partes.push(varios(fl.materiales.map((m) => materiales.get(m)?.nombre ?? m), 'Material', 'Materiales'))
+  return partes.join(' · ')
+}
+
+/** Totales de un conjunto de entregas (para comparar contra el periodo anterior). */
+export interface Totales {
+  personas: number
+  entregas: number
+  piezas: number
+  cascos: number
+  recurrentes: number
+  contaminado: number
+  porMaterial: Map<string, number>
+  porArea: Map<string, number>
+}
+
+export function totales(entregas: Entrega[], materiales: Map<string, Material>, personal: Map<string, Trabajador>): Totales {
+  const porMaterial = new Map<string, number>()
+  const porArea = new Map<string, number>()
+  let piezas = 0
+  for (const e of entregas) {
+    for (const l of e.lineas) {
+      piezas += l.cantidad
+      porMaterial.set(l.materialId, (porMaterial.get(l.materialId) ?? 0) + l.cantidad)
+      porArea.set(e.area, (porArea.get(e.area) ?? 0) + l.cantidad)
+    }
+  }
+  return {
+    personas: new Set(entregas.map((e) => e.rpe)).size,
+    entregas: entregas.length,
+    piezas,
+    cascos: porMaterial.get('casco') ?? 0,
+    recurrentes: solicitantesRecurrentes(entregas, materiales, personal).length,
+    contaminado: entregasContaminadas(entregas, materiales, personal).length,
+    porMaterial,
+    porArea,
+  }
+}
+
+/** Periodo inmediato anterior del mismo tamaño (meses completos → los meses anteriores). */
+export function periodoAnterior(desde: string, hasta: string): [string, string] {
+  const a = fechaD(desde)
+  const b = fechaD(hasta)
+  const finMes = new Date(b.getFullYear(), b.getMonth() + 1, 0).getDate()
+  if (a.getDate() === 1 && b.getDate() === finMes) {
+    const meses = (b.getFullYear() - a.getFullYear()) * 12 + b.getMonth() - a.getMonth() + 1
+    return [fechaLocal(new Date(a.getFullYear(), a.getMonth() - meses, 1)), fechaLocal(new Date(a.getFullYear(), a.getMonth(), 0))]
+  }
+  const dias = Math.round((b.getTime() - a.getTime()) / 86400000) + 1
+  return [fechaLocal(new Date(a.getFullYear(), a.getMonth(), a.getDate() - dias)), fechaLocal(new Date(a.getFullYear(), a.getMonth(), a.getDate() - 1))]
+}
+
+/** Variación en % contra el periodo anterior; null si antes no hubo nada. */
+export const variacion = (actual: number, anterior: number): number | null => (anterior ? Math.round(((actual - anterior) / anterior) * 1000) / 10 : null)
+
+/** «▲ 12.5%», «▼ 8%», «= 0%» o «nuevo». */
+export function textoVariacion(actual: number, anterior: number): string {
+  const v = variacion(actual, anterior)
+  if (v === null) return actual ? 'nuevo' : '—'
+  const n = Math.abs(v) >= 100 ? Math.round(Math.abs(v)) : Math.abs(v)
+  return v > 0 ? `▲ ${n}%` : v < 0 ? `▼ ${n}%` : '= 0%'
+}
+
+export interface PuntoTendencia {
+  etiqueta: string
+  desde: string
+  hasta: string
+  personas: number
+  entregas: number
+  piezas: number
+  contaminado: number
+}
+
+/** Cortes de la tendencia: 12 semanas (periodos de hasta 45 días) o 12 meses, terminando en «hasta». */
+export function cortesTendencia(desde: string, hasta: string): { unidad: 'semana' | 'mes'; cortes: { etiqueta: string; desde: string; hasta: string }[] } {
+  const b = fechaD(hasta)
+  const dias = Math.round((b.getTime() - fechaD(desde).getTime()) / 86400000) + 1
+  if (dias <= 45) {
+    const lunes = new Date(b.getFullYear(), b.getMonth(), b.getDate() - ((b.getDay() + 6) % 7))
+    return {
+      unidad: 'semana',
+      cortes: Array.from({ length: 12 }, (_, i) => {
+        const ini = new Date(lunes.getFullYear(), lunes.getMonth(), lunes.getDate() - 7 * (11 - i))
+        const d1 = fechaLocal(ini)
+        return { etiqueta: `S${semanaIso(d1)}`, desde: d1, hasta: fechaLocal(new Date(ini.getFullYear(), ini.getMonth(), ini.getDate() + 6)) }
+      }),
+    }
+  }
+  return {
+    unidad: 'mes',
+    cortes: Array.from({ length: 12 }, (_, i) => {
+      const ini = new Date(b.getFullYear(), b.getMonth() - (11 - i), 1)
+      return { etiqueta: `${MESES[ini.getMonth()].slice(0, 3)} ${String(ini.getFullYear()).slice(2)}`, desde: fechaLocal(ini), hasta: fechaLocal(new Date(ini.getFullYear(), ini.getMonth() + 1, 0)) }
+    }),
+  }
+}
+
+/** Alerta priorizada para el cierre del reporte: alta (guinda), media (dorado) o buena noticia (verde). */
+export interface Alerta {
+  nivel: 'alta' | 'media' | 'ok'
+  titulo: string
+  accion: string
+}
+
 export interface DatosReporte {
   desde: string
   hasta: string
@@ -252,6 +400,21 @@ export interface DatosReporte {
   resguardosActivos: { nombre: string; cantidad: number }[]
   /** Solicitantes recurrentes del periodo (2 o más entregas del mismo material). */
   recurrentes: SolicitanteRecurrente[]
+  /** Filtros aplicados y su descripción («Área: Taller · Tipo: Consumible»). */
+  filtro: FiltroReporte
+  filtroTexto: string
+  /** Mismo cálculo en el periodo inmediato anterior. */
+  anterior: Totales & { desde: string; hasta: string; titulo: string }
+  tendencia: { unidad: 'semana' | 'mes'; puntos: PuntoTendencia[] }
+  porCategoria: { id: string; nombre: string; piezas: number }[]
+  porTipo: { tipo: TipoMaterial; nombre: string; piezas: number }[]
+  /** Piezas por persona en cada área (áreas con 3 o más personas). */
+  consumoPorPersona: { area: string; personas: number; piezas: number; porPersona: number }[]
+  promedioPorPersona: number
+  /** Personas con al menos un caso recurrente, por área. */
+  recurrenciaPorArea: { area: string; casos: number; personas: number; personasArea: number; pct: number }[]
+  /** Cuántos materiales concentran el 80% de las piezas. */
+  pareto: { materiales: number; total: number }
   /** Cambios de EPP contaminado: totales del periodo y los últimos 10 folios hasta el fin del periodo. */
   contaminado: {
     eventos: number
@@ -261,6 +424,8 @@ export interface DatosReporte {
     ultimos: EntregaContaminada[]
   }
   hallazgos: string[]
+  /** Hallazgos y alertas más importantes con su acción sugerida (para el cierre). */
+  alertas: Alerta[]
 }
 
 export interface Fuentes {
@@ -271,6 +436,7 @@ export interface Fuentes {
   motivos: Motivo[]
   ubicaciones: Ubicacion[]
   personal: Map<string, Trabajador>
+  categorias?: Categoria[]
 }
 
 const pct = (n: number, total: number) => (total ? Math.round((n / total) * 1000) / 10 : 0)
@@ -290,10 +456,15 @@ const titulo = (s: string) =>
     })
     .join(' ')
 
-export function calcularReporte(f: Fuentes, desde: string, hasta: string, area = ''): DatosReporte {
+export function calcularReporte(f: Fuentes, desde: string, hasta: string, filtro: FiltroReporte | string = {}): DatosReporte {
+  const fl: FiltroReporte = typeof filtro === 'string' ? (filtro ? { areas: [filtro] } : {}) : filtro
   const mats = new Map(f.materiales.map((m) => [m.id, m]))
   const motivos = new Map(f.motivos.map((m) => [m.id, m.texto]))
-  const entregas = f.entregas.filter((e) => e.estado === 'registrada' && e.fecha >= desde && e.fecha <= hasta && (!area || e.area === area))
+  const filtradas = aplicarFiltro(f.entregas, fl, mats)
+  const entregas = filtradas.filter((e) => e.fecha >= desde && e.fecha <= hasta)
+  const areasFiltro = fl.areas?.length ? new Set(fl.areas) : null
+  const materialPasa = (m: Material) =>
+    (!fl.materiales?.length || fl.materiales.includes(m.id)) && (!fl.categorias?.length || fl.categorias.includes(m.categoriaId)) && (!fl.tipos?.length || fl.tipos.includes(m.tipo))
   const personasSet = new Set(entregas.map((e) => e.rpe))
 
   // Por material
@@ -353,14 +524,14 @@ export function calcularReporte(f: Fuentes, desde: string, hasta: string, area =
   const exist = calcularExistencias(f.movimientos)
   const ubis = f.ubicaciones.filter((u) => u.activo).map((u) => u.id)
   const reabastecer: DatosReporte['reabastecer'] = []
-  for (const m of f.materiales.filter((x) => x.activo)) {
+  for (const m of f.materiales.filter((x) => x.activo && materialPasa(x))) {
     for (const v of variantesDe(m)) {
       const n = existencia(exist, m.id, v, undefined, ubis)
       const min = m.stockMin[v] ?? 0
       if (nivelStock(n, min) > 0) reabastecer.push({ nombre: v ? `${m.nombre} ${v}` : m.nombre, existencia: n, minimo: min })
     }
   }
-  const activos = f.resguardos.filter((r) => r.estatus === 'ACTIVO')
+  const activos = f.resguardos.filter((r) => r.estatus === 'ACTIVO' && (!areasFiltro || areasFiltro.has(r.area)) && (!mats.get(r.materialId) || materialPasa(mats.get(r.materialId)!)))
   const resgPorMat = new Map<string, number>()
   for (const r of activos.filter((x) => x.tipo !== 'prestamo')) resgPorMat.set(r.materialId, (resgPorMat.get(r.materialId) ?? 0) + r.cantidad)
   const resguardosActivos = [...resgPorMat.entries()].map(([id, cantidad]) => ({ nombre: mats.get(id)?.nombre ?? id, cantidad }))
@@ -368,7 +539,7 @@ export function calcularReporte(f: Fuentes, desde: string, hasta: string, area =
   // EPP contaminado: lo del periodo y los últimos folios (aunque sean de periodos anteriores)
   const contPeriodo = entregasContaminadas(entregas, mats, f.personal)
   const contHistoria = entregasContaminadas(
-    f.entregas.filter((e) => e.estado === 'registrada' && e.fecha <= hasta && (!area || e.area === area)),
+    filtradas.filter((e) => e.fecha <= hasta),
     mats,
     f.personal,
   )
@@ -378,6 +549,65 @@ export function calcularReporte(f: Fuentes, desde: string, hasta: string, area =
     personas: new Set(contPeriodo.map((c) => c.entrega.rpe)).size,
     porMaterial: resumenContaminado(contPeriodo, mats).porMaterial.map(([material, x]) => ({ material, ...x })),
     ultimos: contHistoria.slice(0, 10),
+  }
+
+  // Comparativo y tendencia
+  const [antDesde, antHasta] = periodoAnterior(desde, hasta)
+  const anterior = { ...totales(filtradas.filter((e) => e.fecha >= antDesde && e.fecha <= antHasta), mats, f.personal), desde: antDesde, hasta: antHasta, titulo: describirPeriodo(antDesde, antHasta).titulo }
+  const { unidad, cortes } = cortesTendencia(desde, hasta)
+  const puntos: PuntoTendencia[] = cortes.map((c) => {
+    const ent = filtradas.filter((e) => e.fecha >= c.desde && e.fecha <= c.hasta)
+    return {
+      ...c,
+      personas: new Set(ent.map((e) => e.rpe)).size,
+      entregas: ent.length,
+      piezas: ent.reduce((s, e) => s + e.lineas.reduce((t, l) => t + l.cantidad, 0), 0),
+      contaminado: ent.filter((e) => esContaminada(e)).length,
+    }
+  })
+
+  // Tipo de equipo
+  const porCat = new Map<string, number>()
+  const porTipoMap = new Map<TipoMaterial, number>()
+  for (const e of entregas) for (const l of e.lineas) {
+    const c = mats.get(l.materialId)?.categoriaId ?? 'otros'
+    porCat.set(c, (porCat.get(c) ?? 0) + l.cantidad)
+    porTipoMap.set(tipoLinea(l), (porTipoMap.get(tipoLinea(l)) ?? 0) + l.cantidad)
+  }
+  const nombreCat = (id: string) => f.categorias?.find((c) => c.id === id)?.nombre ?? id.charAt(0).toUpperCase() + id.slice(1)
+  let porCategoria = [...porCat].map(([id, piezas]) => ({ id, nombre: nombreCat(id), piezas })).sort((a, b) => b.piezas - a.piezas)
+  // Las categorías de menos del 3% se juntan en «Otras» para que la gráfica se lea
+  const chicas = porCategoria.filter((c) => c.piezas < piezasTotalesCat(porCategoria) * 0.03)
+  if (chicas.length > 1) porCategoria = [...porCategoria.filter((c) => !chicas.includes(c)), { id: 'otras', nombre: 'Otras', piezas: chicas.reduce((s, c) => s + c.piezas, 0) }]
+  const porTipo = (['consumible', 'resguardo', 'prestamo'] as TipoMaterial[]).map((tipo) => ({ tipo, nombre: NOMBRE_TIPO[tipo], piezas: porTipoMap.get(tipo) ?? 0 })).filter((x) => x.piezas)
+
+  // Consumo por persona y recurrencia por área
+  const piezasTotales = materiales.reduce((s, m) => s + m.piezas, 0)
+  const promedioPorPersona = personasSet.size ? Math.round((piezasTotales / personasSet.size) * 10) / 10 : 0
+  const consumoPorPersona = porArea
+    .filter((a) => a.personas >= 3)
+    .map((a) => ({ area: a.area, personas: a.personas, piezas: a.piezas, porPersona: Math.round((a.piezas / a.personas) * 10) / 10 }))
+    .sort((a, b) => b.porPersona - a.porPersona)
+  const recurrentes = solicitantesRecurrentes(entregas, mats, f.personal)
+  const recArea = new Map<string, { casos: number; personas: Set<string> }>()
+  for (const r of recurrentes) {
+    const x = recArea.get(r.area) ?? { casos: 0, personas: new Set<string>() }
+    x.casos++
+    x.personas.add(r.rpe)
+    recArea.set(r.area, x)
+  }
+  const recurrenciaPorArea = [...recArea].map(([areaR, x]) => {
+    const personasArea = porArea.find((a) => a.area === areaR)?.personas ?? x.personas.size
+    return { area: areaR, casos: x.casos, personas: x.personas.size, personasArea, pct: pct(x.personas.size, personasArea) }
+  }).sort((a, b) => b.casos - a.casos || b.pct - a.pct)
+
+  // Pareto: cuántos materiales suman el 80% de las piezas
+  let acumulado = 0
+  let nPareto = 0
+  for (const m of materiales) {
+    if (acumulado >= piezasTotales * 0.8) break
+    acumulado += m.piezas
+    nPareto++
   }
 
   const d: DatosReporte = {
@@ -399,13 +629,101 @@ export function calcularReporte(f: Fuentes, desde: string, hasta: string, area =
     reabastecer,
     prestamosVencidos: prestamosVencidos(activos, fechaLocal()),
     resguardosActivos,
-    recurrentes: solicitantesRecurrentes(entregas, mats, f.personal),
+    recurrentes,
+    filtro: fl,
+    filtroTexto: describirFiltro(fl, mats, f.categorias),
+    anterior,
+    tendencia: { unidad, puntos },
+    porCategoria,
+    porTipo,
+    consumoPorPersona,
+    promedioPorPersona,
+    recurrenciaPorArea,
+    pareto: { materiales: nPareto, total: materiales.length },
     contaminado,
     hallazgos: [],
+    alertas: [],
   }
   d.hallazgos = hallazgos(d)
+  d.alertas = alertas(d)
   return d
 }
+
+/**
+ * Hallazgos y alertas más importantes, de mayor a menor prioridad, cada uno con una acción sugerida.
+ * Reglas: aumentos contra el periodo anterior, EPP contaminado, consumo por persona alto,
+ * solicitantes muy recurrentes, préstamos vencidos y material bajo el mínimo.
+ */
+export function alertas(d: DatosReporte): Alerta[] {
+  const r: Alerta[] = []
+  const a = d.anterior
+  const ant = a.titulo.toLowerCase().startsWith('semana') ? 'la semana anterior' : `el periodo anterior (${a.titulo})`
+  if (d.prestamosVencidos.length) {
+    r.push({ nivel: 'alta', titulo: `${d.prestamosVencidos.length} préstamo${d.prestamosVencidos.length > 1 ? 's' : ''} de equipo sin devolver a tiempo.`, accion: 'Solicitar la devolución y revisar el estado del equipo.' })
+  }
+  if (d.contaminado.eventos) {
+    const v = variacion(d.contaminado.eventos, a.contaminado)
+    const sube = v === null || v > 0
+    const mat = d.contaminado.porMaterial[0]
+    r.push({
+      nivel: sube ? 'alta' : 'media',
+      titulo: `${d.contaminado.eventos} cambio${d.contaminado.eventos > 1 ? 's' : ''} de EPP contaminado (${textoVariacion(d.contaminado.eventos, a.contaminado)} contra ${ant})${mat ? `; el material más afectado fue ${mat.material.toLowerCase()} (${mat.piezas} pzas).` : '.'}`,
+      accion: 'Revisar las actividades que originan la contaminación y reforzar el uso de EPP de sobreprotección.',
+    })
+  }
+  const muy = d.recurrentes.filter((x) => x.veces >= 3)
+  if (muy.length) {
+    const top = [...muy].sort((x, y) => y.veces - x.veces)[0]
+    const personas = new Set(muy.map((x) => x.rpe)).size
+    r.push({
+      nivel: top.veces >= 4 ? 'alta' : 'media',
+      titulo: `${personas} persona${personas > 1 ? 's recibieron' : ' recibió'} el mismo material 3 o más veces; el caso más alto: ${titulo(top.nombre)} (${titulo(top.area)}), ${top.material.toLowerCase()} ${top.veces} veces.`,
+      accion: 'Dar seguimiento al motivo con el supervisor de cada persona.',
+    })
+  }
+  const vPiezas = variacion(d.piezas, a.piezas)
+  if (vPiezas !== null && vPiezas >= 20) {
+    r.push({
+      nivel: vPiezas >= 50 ? 'alta' : 'media',
+      titulo: `Las piezas entregadas subieron ${vPiezas}% contra ${ant} (${miles(a.piezas)} → ${miles(d.piezas)}).`,
+      accion: d.personas > a.personas ? 'Se atendió a más personal; confirmar que las existencias alcancen el ritmo.' : 'Hubo más piezas por persona; revisar los motivos de entrega.',
+    })
+  }
+  // Materiales que más subieron (al menos 10 piezas más y 30%)
+  const subidas = d.materiales
+    .map((m) => ({ m, antes: a.porMaterial.get(m.id) ?? 0 }))
+    .filter(({ m, antes }) => antes && m.piezas - antes >= 10 && (m.piezas - antes) / antes >= 0.3)
+    .sort((x, y) => (y.m.piezas - y.antes) / y.antes - (x.m.piezas - x.antes) / x.antes)
+    .slice(0, 2)
+  for (const { m, antes } of subidas) {
+    r.push({ nivel: 'media', titulo: `${m.nombre}: ${miles(m.piezas)} piezas, ${textoVariacion(m.piezas, antes)} contra ${ant}.`, accion: `Confirmar los motivos de entrega y las existencias de ${m.nombre.toLowerCase()}.` })
+  }
+  // Áreas con consumo por persona alto
+  const altas = d.areas > 1 ? d.consumoPorPersona.filter((x) => d.promedioPorPersona && x.porPersona >= d.promedioPorPersona * 1.5).slice(0, 3) : []
+  if (altas.length) {
+    r.push({
+      nivel: 'media',
+      titulo: `Consumo por persona alto en ${lista(altas.map((x) => `${titulo(x.area)} (${x.porPersona})`))}; el promedio es ${d.promedioPorPersona} piezas por persona.`,
+      accion: 'Revisar con el supervisor del área el uso y el resguardo del EPP.',
+    })
+  }
+  if (d.reabastecer.length) {
+    const agotados = d.reabastecer.filter((x) => x.existencia <= 0)
+    r.push({
+      nivel: agotados.length ? 'alta' : 'media',
+      titulo: `${d.reabastecer.length} material${d.reabastecer.length > 1 ? 'es' : ''} bajo el mínimo${agotados.length ? `, ${agotados.length} agotado${agotados.length > 1 ? 's' : ''}` : ''}: ${lista(d.reabastecer.slice(0, 3).map((x) => x.nombre))}${d.reabastecer.length > 3 ? '…' : '.'}`,
+      accion: 'Solicitar el reabastecimiento.',
+    })
+  }
+  // Buenas noticias: bajas importantes
+  if (vPiezas !== null && vPiezas <= -20) r.push({ nivel: 'ok', titulo: `Las piezas entregadas bajaron ${Math.abs(vPiezas)}% contra ${ant}.`, accion: 'Mantener las medidas de control del EPP.' })
+  if (a.contaminado && !d.contaminado.eventos) r.push({ nivel: 'ok', titulo: `Sin cambios de EPP contaminado (en ${ant} hubo ${a.contaminado}).`, accion: 'Mantener las medidas de protección.' })
+  const orden = { alta: 0, media: 1, ok: 2 }
+  return r.sort((x, y) => orden[x.nivel] - orden[y.nivel])
+}
+
+const miles = (n: number) => n.toLocaleString('es-MX')
+const piezasTotalesCat = (xs: { piezas: number }[]) => xs.reduce((s, x) => s + x.piezas, 0)
 
 /** Frases automáticas para la lámina de conclusiones. */
 export function hallazgos(d: DatosReporte): string[] {
