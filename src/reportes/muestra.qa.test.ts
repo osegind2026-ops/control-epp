@@ -59,6 +59,10 @@ describe.runIf(SALIDA)('muestra', () => {
         observaciones: '', estado: 'registrada',
       })
     }
+    // Algunos cambios de EPP contaminado con su folio
+    entregas
+      .filter((e, i) => i % 29 === 3 && e.lineas.some((l) => !l.esResguardo))
+      .forEach((e, i) => (e.contaminado = { folio: `U${(i % 2) + 1}-SI-2026-${String(i + 1).padStart(3, '0')}`, materiales: [e.lineas.find((l) => !l.esResguardo)!.materialId] }))
     const fuentes = { entregas, movimientos: [], resguardos: [], materiales: materialesSemilla(), motivos: motivosSemilla(), ubicaciones: ubicacionesSemilla(), personal: new Map() }
     const d = calcularReporte(
       fuentes,

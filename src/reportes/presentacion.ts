@@ -1,6 +1,6 @@
 import type PptxGenJS from 'pptxgenjs'
 import type { DatosReporte } from './datos'
-import { pct, titulo, fechasCortas, otrosTexto, type OpcionesEntregable } from './datos'
+import { pct, titulo, fechasCortas, otrosTexto, periodoPortada, desgloseOtrasAreas, type OpcionesEntregable } from './datos'
 import { estilizarPresentacion } from './estilos'
 import type { Plantilla } from './plantilla'
 
@@ -71,6 +71,7 @@ function cifra(s: Slide, x: number, y: number, w: number, numero: string, etique
 }
 
 const miles = (n: number) => n.toLocaleString('es-MX')
+const fechaCorta = (f: string) => `${f.slice(8, 10)}/${f.slice(5, 7)}/${f.slice(0, 4)}`
 
 export async function generarPresentacion(d: DatosReporte, p: Plantilla, opciones: OpcionesEntregable = {}): Promise<Blob> {
   const { default: Pptx } = await import('pptxgenjs')
@@ -84,15 +85,22 @@ export async function generarPresentacion(d: DatosReporte, p: Plantilla, opcione
   // ---------- 1. Portada ----------
   {
     const s = pres.addSlide({ masterName: 'PORTADA EPP' })
-    s.addText('ENTREGA DE EQUIPO DE\nPROTECCIÓN PERSONAL', { x: 0.7, y: 1.55, w: 11.5, h: 1.8, fontFace: FUENTE, fontSize: 40, bold: true, color: C.verde, margin: 0, valign: 'bottom', isTextBox: true })
-    s.addShape('line', { x: 0.7, y: 3.55, w: 11.95, h: 0, line: { color: C.dorado, width: 1.5 } })
-    s.addText(d.titulo.toUpperCase(), { x: 0.7, y: 3.7, w: 11.9, h: 0.5, fontFace: FUENTE, fontSize: 20, bold: true, color: C.guinda, margin: 0, isTextBox: true })
+    s.addText('INFORME DE ENTREGA DE EQUIPO DE\nPROTECCIÓN PERSONAL', { x: 0.7, y: 1.45, w: 11.9, h: 1.8, fontFace: FUENTE, fontSize: 40, bold: true, color: C.verde, margin: 0, valign: 'bottom', isTextBox: true })
+    s.addShape('line', { x: 0.7, y: 3.45, w: 11.95, h: 0, line: { color: C.dorado, width: 1.5 } })
+    s.addText(periodoPortada(d.desde, d.hasta), { x: 0.7, y: 3.6, w: 11.9, h: 0.5, fontFace: FUENTE, fontSize: 20, bold: true, color: C.guinda, margin: 0, isTextBox: true })
     const kpis: [string, string][] = [
       [miles(d.personas), 'personas atendidas'],
       [miles(d.areas), d.areas === 1 ? 'área' : 'áreas'],
+      [miles(d.entregas.length), d.entregas.length === 1 ? 'entrega realizada' : 'entregas realizadas'],
       [miles(d.piezas), 'piezas de EPP entregadas'],
     ]
-    kpis.forEach(([n, t], i) => cifra(s, 0.7 + i * 3.4, 4.45, 3.2, n, t, i === 0 ? C.verde : C.texto, 36))
+    const anchoKpi = 11.95 / kpis.length
+    kpis.forEach(([n, t], i) => {
+      const x = 0.7 + i * anchoKpi
+      const color = i % 2 ? C.texto : C.verde
+      s.addText(n, { x, y: 4.35, w: anchoKpi, h: 0.66, fontFace: FUENTE, fontSize: 36, bold: true, color, align: 'center', margin: 0, isTextBox: true })
+      s.addText(t, { x, y: 5.01, w: anchoKpi, h: 0.4, fontFace: FUENTE, fontSize: 13, color: C.gris, align: 'center', margin: 0, valign: 'top', isTextBox: true })
+    })
     s.addText(`${p.textos.oficina} · ${p.textos.institucion}`, { x: 0.7, y: 6.95, w: 5.5, h: 0.3, fontFace: FUENTE, fontSize: 10, color: C.gris, margin: 0, isTextBox: true })
   }
 
@@ -182,10 +190,22 @@ export async function generarPresentacion(d: DatosReporte, p: Plantilla, opcione
     const resto = conCasco.slice(6).reduce((n, a) => n + a.cascos, 0)
     const etiquetas = [...principales.map((a) => titulo(a.area)), ...(resto ? ['Otras áreas'] : [])]
     const valores = [...principales.map((a) => a.cascos), ...(resto ? [resto] : [])]
+    const otras = desgloseOtrasAreas(conCasco.slice(6), d.cascos)
     s.addChart(pres.ChartType.doughnut, [{ name: 'Cascos', labels: etiquetas, values: valores }], {
-      x: 0.5, y: 1.4, w: 6.4, h: 5.2, holeSize: 55, chartColors: SERIE, showPercent: true, showValue: false, dataLabelColor: C.blanco, dataLabelFontSize: 11,
+      x: 0.5, y: 1.4, w: 6.4, h: otras ? 4.3 : 5.2, holeSize: 55, chartColors: SERIE, showPercent: true, showValue: false, dataLabelColor: C.blanco, dataLabelFontSize: 11,
       showLegend: true, legendPos: 'r', legendFontSize: 10.5, legendColor: C.texto,
     })
+    if (otras) {
+      // Desglose de la rebanada «Otras áreas»
+      tarjeta(s, 0.6, 5.8, 6.3, 0.85, 'F3F1EC')
+      s.addText(
+        [
+          { text: `Desglose de «Otras áreas» (${miles(resto)} cascos): `, options: { bold: true, color: C.guinda } },
+          { text: otras, options: { color: C.texto } },
+        ],
+        { x: 0.75, y: 5.84, w: 6.0, h: 0.77, fontFace: FUENTE, fontSize: 10, margin: 0, valign: 'middle', fit: 'shrink', isTextBox: true },
+      )
+    }
     const top = conCasco[0]
     tarjeta(s, 7.2, 1.5, 5.7, 1.35)
     s.addText(
@@ -281,6 +301,56 @@ export async function generarPresentacion(d: DatosReporte, p: Plantilla, opcione
       x: 0.5, y: 1.45, w: 12.3, colW: [3.1, 2.3, 2.3, 0.8, 0.8, 1.1, 1.9], fontFace: FUENTE, border: { type: 'solid', color: 'DDD8CE', pt: 0.5 }, valign: 'middle', rowH: conDetalle ? 0.29 : 0.36, autoPage: false,
     })
     s.addText(`Personas que recibieron el mismo material en 2 o más entregas del periodo (${d.recurrentes.length} casos${conDetalle ? '; se muestran los 7 más frecuentes' : ''}). El detalle por área y material está en el Excel.`, {
+      x: 0.5, y: 6.35, w: 12.3, h: 0.3, fontFace: FUENTE, fontSize: 10, italic: true, color: C.gris, margin: 0, isTextBox: true,
+    })
+  }
+
+  // ---------- EPP contaminado ----------
+  if (d.contaminado.ultimos.length) {
+    const s = laminaContenido(pres, p, d, 'EPP contaminado')
+    const c = d.contaminado
+    tarjeta(s, 0.5, 1.5, 4.4, 1.3)
+    cifra(s, 0.7, 1.6, 2.0, miles(c.eventos), c.eventos === 1 ? 'cambio en el periodo' : 'cambios en el periodo', C.guinda, 32)
+    cifra(s, 2.75, 1.6, 2.0, miles(c.piezas), c.piezas === 1 ? 'pieza contaminada' : 'piezas contaminadas', C.texto, 32)
+    const celdaEnc = (text: string, align: 'left' | 'center' = 'left') => ({ text, options: { bold: true, color: C.blanco, fill: { color: C.verde }, fontSize: 9.5, align } })
+    s.addText('Material contaminado', { x: 0.5, y: 3.0, w: 4.4, h: 0.36, fontFace: FUENTE, fontSize: 14, bold: true, color: C.guinda, margin: 0, isTextBox: true })
+    if (c.porMaterial.length) {
+      const mats = c.porMaterial.slice(0, 8)
+      s.addTable(
+        [
+          [celdaEnc('MATERIAL'), celdaEnc('CAMBIOS', 'center'), celdaEnc('PIEZAS', 'center')],
+          ...mats.map((m, i): PptxGenJS.TableRow => {
+            const o = { fontSize: 10, color: C.texto, fill: { color: i % 2 ? 'F3F1EC' : C.blanco } }
+            return [
+              { text: m.material, options: { ...o, bold: true } },
+              { text: String(m.eventos), options: { ...o, align: 'center' } },
+              { text: String(m.piezas), options: { ...o, bold: true, color: C.guinda, align: 'center' } },
+            ]
+          }),
+        ],
+        { x: 0.5, y: 3.42, w: 4.4, colW: [2.6, 0.9, 0.9], fontFace: FUENTE, border: { type: 'solid', color: 'DDD8CE', pt: 0.5 }, valign: 'middle', rowH: 0.32, autoPage: false },
+      )
+    } else {
+      s.addText('Sin cambios de EPP contaminado en el periodo.', { x: 0.5, y: 3.42, w: 4.4, h: 0.4, fontFace: FUENTE, fontSize: 12, color: C.gris, margin: 0, isTextBox: true })
+    }
+    s.addText(`Últimos ${c.ultimos.length} folios entregados`, { x: 5.2, y: 1.45, w: 7.6, h: 0.36, fontFace: FUENTE, fontSize: 14, bold: true, color: C.guinda, margin: 0, isTextBox: true })
+    s.addTable(
+      [
+        [celdaEnc('FOLIO'), celdaEnc('FECHA', 'center'), celdaEnc('PERSONA'), celdaEnc('ÁREA'), celdaEnc('MATERIAL')],
+        ...c.ultimos.map((x, i): PptxGenJS.TableRow => {
+          const o = { fontSize: 9, color: C.texto, fill: { color: i % 2 ? 'F3F1EC' : C.blanco } }
+          return [
+            { text: x.folioFormato || '—', options: { ...o, bold: true, color: x.folioFormato ? C.guinda : 'B5B5B5' } },
+            { text: fechaCorta(x.entrega.fecha), options: { ...o, align: 'center' } },
+            { text: titulo(x.entrega.nombre), options: o },
+            { text: titulo(x.entrega.area), options: o },
+            { text: x.materiales.join(', '), options: { ...o, fontSize: 8.5 } },
+          ]
+        }),
+      ],
+      { x: 5.2, y: 1.87, w: 7.6, colW: [1.45, 0.95, 2.0, 1.6, 1.6], fontFace: FUENTE, border: { type: 'solid', color: 'DDD8CE', pt: 0.5 }, valign: 'middle', rowH: 0.38, autoPage: false },
+    )
+    s.addText('Cambios registrados con la casilla «EPP contaminado» y el folio del formato en papel. El listado completo está en el Excel.', {
       x: 0.5, y: 6.35, w: 12.3, h: 0.3, fontFace: FUENTE, fontSize: 10, italic: true, color: C.gris, margin: 0, isTextBox: true,
     })
   }

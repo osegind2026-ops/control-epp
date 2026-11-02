@@ -22,7 +22,7 @@ export async function generarExcel(d: DatosReporte, f: Fuentes, opciones: Opcion
 
   // Resumen
   const resumen: Fila[] = [
-    [{ value: 'Entrega de Equipo de Protección Personal', fontWeight: 'bold', color: '#235B4E' }],
+    [{ value: 'Informe de Entrega de Equipo de Protección Personal', fontWeight: 'bold', color: '#235B4E' }],
     [v(d.titulo)],
     [v(`Generado el ${d.generado}`)],
     [],
@@ -34,10 +34,38 @@ export async function generarExcel(d: DatosReporte, f: Fuentes, opciones: Opcion
     [v('% del personal que solicitó casco'), { value: pct(d.personasConCasco, d.personas) / 100, type: Number, format: '0.0%' }],
     [v('Materiales por reabastecer'), n(d.reabastecer.length)],
     [v('Préstamos vencidos'), n(d.prestamosVencidos.length)],
+    [v('Entregas realizadas'), n(d.entregas.length)],
+    [v('Casos de solicitantes recurrentes'), n(d.recurrentes.length)],
+    [v('Cambios de EPP contaminado'), n(d.contaminado.eventos)],
     [],
     [{ value: 'Hallazgos', fontWeight: 'bold', color: '#691C32' }],
     ...d.hallazgos.map((h) => [{ value: h, wrap: true }]),
   ]
+  const subtitulo = (t: string): Fila[] => [[], [{ value: t, fontWeight: 'bold', color: '#691C32' }]]
+
+  // Solicitantes recurrentes más frecuentes (la lista completa está en su hoja)
+  resumen.push(...subtitulo(`Solicitantes recurrentes (${d.recurrentes.length} caso${d.recurrentes.length === 1 ? '' : 's'}; 2 o más entregas del mismo material)`))
+  if (d.recurrentes.length) {
+    resumen.push(enc('Solicitante', 'Veces', 'Material', 'Área', 'Piezas', 'Última'))
+    for (const r of [...d.recurrentes].sort((a, b) => b.veces - a.veces || b.piezas - a.piezas).slice(0, 10)) {
+      resumen.push([v(`${r.nombre} (${r.rpe})`), n(r.veces), v(r.material), v(titulo(r.area)), n(r.piezas), v(r.ultima)])
+    }
+    if (d.recurrentes.length > 10) resumen.push([v(`Se muestran los 10 casos más frecuentes; el listado completo está en la hoja «Solicitantes recurrentes».`)])
+  } else resumen.push([v('Sin solicitantes recurrentes en el periodo.')])
+
+  // EPP contaminado: material del periodo y los últimos 10 folios entregados
+  resumen.push(...subtitulo(`EPP contaminado (${d.contaminado.eventos} cambio${d.contaminado.eventos === 1 ? '' : 's'} · ${d.contaminado.piezas} pieza${d.contaminado.piezas === 1 ? '' : 's'} en el periodo)`))
+  if (d.contaminado.porMaterial.length) {
+    resumen.push(enc('Material contaminado', 'Piezas', 'Cambios'))
+    for (const m of d.contaminado.porMaterial) resumen.push([v(m.material), n(m.piezas), n(m.eventos)])
+  } else resumen.push([v('Sin cambios de EPP contaminado en el periodo.')])
+  if (d.contaminado.ultimos.length) {
+    resumen.push(...subtitulo(`Últimos ${d.contaminado.ultimos.length} folios de EPP contaminado entregados`))
+    resumen.push(enc('Solicitante', 'Folio formato', 'Material', 'Área', 'Piezas', 'Fecha'))
+    for (const c of d.contaminado.ultimos) {
+      resumen.push([v(`${c.entrega.nombre} (${c.entrega.rpe})`), v(c.folioFormato || 'sin folio'), { value: c.materiales.join(' · '), wrap: true }, v(titulo(c.entrega.area)), n(c.piezas), v(c.entrega.fecha)])
+    }
+  }
 
   // Por material
   const material: Fila[] = [
@@ -110,6 +138,7 @@ export async function generarExcel(d: DatosReporte, f: Fuentes, opciones: Opcion
     enc('Área', 'Material', 'RPE', 'Nombre', 'Tipo', 'Veces', 'Piezas', 'Primera', 'Última', 'Comentarios al despachar'),
     ...d.recurrentes.map((r) => [v(r.area), v(r.material), v(r.rpe), v(r.nombre), v(r.tipo), n(r.veces), n(r.piezas), v(r.primera), v(r.ultima), { value: r.notas.join(' · '), wrap: true }]),
   ]
+  if (!d.recurrentes.length) recurrentes.push([v('Sin solicitantes recurrentes en el periodo.')])
   // Con detalle: fechas de cada entrega y lo que más se llevó además, y una hoja con cada entrega
   const conDetalle = !!opciones.detalleRecurrentes && d.recurrentes.length > 0
   if (conDetalle) {
@@ -133,13 +162,14 @@ export async function generarExcel(d: DatosReporte, f: Fuentes, opciones: Opcion
 
   const ancho = (...w: number[]) => w.map((width) => ({ width }))
   const hojas = [
-    { data: resumen, sheet: 'Resumen', columns: ancho(70, 14) },
-    { data: material, sheet: 'Por material', columns: ancho(30, 10, 10, 14, 40), stickyRowsCount: 1 },
-    { data: porArea, sheet: 'Por área', columns: ancho(34, 10, 10, 10, 10, ...columnasMat.map(() => 14)), stickyRowsCount: 1, stickyColumnsCount: 1 },
-    { data: detalle, sheet: 'Entregas', columns: ancho(16, 11, 7, 9, 34, 30, 28, 7, 9, 12, 28, 20, 8, 30), stickyRowsCount: 1 },
+    { data: resumen, sheet: 'Resumen', columns: ancho(70, 14, 30, 30, 9, 11) },
+    // Recurrentes y contaminado van junto al resumen para que se encuentren sin buscar
     { data: recurrentes, sheet: 'Solicitantes recurrentes', columns: ancho(30, 30, 9, 34, 12, 8, 8, 11, 11, 50, ...(conDetalle ? [44, 44] : [])), stickyRowsCount: 1 },
     ...(conDetalle ? [{ data: detalleRec, sheet: 'Detalle de recurrentes', columns: ancho(30, 34, 9, 30, 11, 7, 18, 8), stickyRowsCount: 1 }] : []),
     ...(contaminadas.length ? [{ data: contaminado, sheet: 'EPP contaminado', columns: ancho(16, 11, 7, 9, 34, 30, 40, 8, 30, 26, 26, 16, 20), stickyRowsCount: 1 }] : []),
+    { data: material, sheet: 'Por material', columns: ancho(30, 10, 10, 14, 40), stickyRowsCount: 1 },
+    { data: porArea, sheet: 'Por área', columns: ancho(34, 10, 10, 10, 10, ...columnasMat.map(() => 14)), stickyRowsCount: 1, stickyColumnsCount: 1 },
+    { data: detalle, sheet: 'Entregas', columns: ancho(16, 11, 7, 9, 34, 30, 28, 7, 9, 12, 28, 20, 8, 30), stickyRowsCount: 1 },
     { data: existencias, sheet: 'Existencias', columns: ancho(30, 7, ...ubis.map(() => 18), 9, 9, 11), stickyRowsCount: 1 },
     { data: resguardos, sheet: 'Resguardos y préstamos', columns: ancho(20, 11, 9, 34, 30, 28, 7, 9, 11, 16, 30, 12, 12), stickyRowsCount: 1 },
     { data: kardex, sheet: 'Movimientos', columns: ancho(11, 7, 12, 28, 7, 22, 9, 22, 28, 30, 20, 8), stickyRowsCount: 1 },

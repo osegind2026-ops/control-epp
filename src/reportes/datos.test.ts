@@ -107,3 +107,60 @@ describe('detalle de solicitantes recurrentes', () => {
     expect(await libro(sin)).not.toMatch(/Detalle de recurrentes/)
   })
 })
+
+describe('portada, desglose de otras áreas y EPP contaminado', () => {
+  it('escribe el periodo de la portada', async () => {
+    const { periodoPortada } = await import('./datos')
+    expect(periodoPortada('2026-10-01', '2026-10-31')).toBe('DEL 1° AL 31 DE OCTUBRE DE 2026')
+    expect(periodoPortada('2026-10-01', '2026-10-01')).toBe('1° DE OCTUBRE DE 2026')
+    expect(periodoPortada('2026-09-28', '2026-10-04')).toBe('SEMANA 40 · DEL 28 DE SEPTIEMBRE AL 4 DE OCTUBRE DE 2026')
+    expect(periodoPortada('2026-12-15', '2027-01-10')).toBe('DEL 15 DE DICIEMBRE DE 2026 AL 10 DE ENERO DE 2027')
+  })
+
+  it('desglosa «Otras áreas» con las más representativas', async () => {
+    const { desgloseOtrasAreas } = await import('./datos')
+    expect(desgloseOtrasAreas([], 10)).toBe('')
+    const otras = Array.from({ length: 10 }, (_, i) => ({ area: `TALLER ${i + 1}`, cascos: 10 - i }))
+    const t = desgloseOtrasAreas(otras, 100)
+    expect(t.startsWith('Taller 1 10 (10%), Taller 2 9 (9%)')).toBe(true)
+    expect(t.endsWith('y 2 áreas más (3).')).toBe(true)
+  })
+
+  it('resume el EPP contaminado del periodo y los últimos 10 folios', () => {
+    const lista: Entrega[] = []
+    for (let i = 1; i <= 12; i++) {
+      const e = entrega(`C${i}`, `2026-${i <= 4 ? '09' : '10'}-${String(10 + i).padStart(2, '0')}`, `R${i}`, 'TALLER', [['g_hyflex', 2, '9'], ['tapones', 1]])
+      e.ts = e.fecha + 'T15:00:00Z'
+      e.contaminado = { folio: `U1-SI-2026-${String(i).padStart(3, '0')}`, materiales: ['g_hyflex'] }
+      lista.push(e)
+    }
+    lista.push(entrega('N1', '2026-10-20', 'R1', 'TALLER', [['tapones', 1]]))
+    const f = { entregas: lista, movimientos: [], resguardos: [], materiales: materialesSemilla(), motivos: motivosSemilla(), ubicaciones: ubicacionesSemilla(), personal: new Map() }
+    const d = calcularReporte(f, '2026-10-01', '2026-10-31')
+    expect(d.contaminado.eventos).toBe(8)
+    expect(d.contaminado.piezas).toBe(16)
+    expect(d.contaminado.porMaterial).toEqual([{ material: 'Guante Hyflex', piezas: 16, eventos: 8 }])
+    expect(d.contaminado.ultimos).toHaveLength(10)
+    expect(d.contaminado.ultimos[0].folioFormato).toBe('U1-SI-2026-012')
+    expect(d.contaminado.ultimos[9].folioFormato).toBe('U1-SI-2026-003')
+    expect(d.hallazgos.some((h) => h.includes('8 cambios de EPP contaminado'))).toBe(true)
+  })
+
+  it('el Excel pone recurrentes y contaminado junto al resumen', async () => {
+    const { generarExcel } = await import('./excel')
+    const JSZip = (await import('jszip')).default
+    const a = entrega('1', '2026-10-02', 'X1', 'TALLER', [['lentes_claros', 1]])
+    const b = entrega('2', '2026-10-08', 'X1', 'TALLER', [['lentes_claros', 1]])
+    const c = entrega('3', '2026-10-09', 'X2', 'TALLER', [['g_hyflex', 1, '8']])
+    c.contaminado = { folio: 'U2-SI-2026-007', materiales: ['g_hyflex'] }
+    const f = { entregas: [a, b, c], movimientos: [], resguardos: [], materiales: materialesSemilla(), motivos: motivosSemilla(), ubicaciones: ubicacionesSemilla(), personal: new Map() }
+    const d = calcularReporte(f, '2026-10-01', '2026-10-31')
+    const zip = await JSZip.loadAsync(await (await generarExcel(d, f)).arrayBuffer())
+    const libro = await zip.file('xl/workbook.xml')!.async('string')
+    const nombres = [...libro.matchAll(/<sheet [^>]*name="([^"]+)"/g)].map((m) => m[1])
+    expect(nombres.slice(0, 3)).toEqual(['Resumen', 'Solicitantes recurrentes', 'EPP contaminado'])
+    const textos = (await zip.file('xl/sharedStrings.xml')?.async('string')) ?? (await zip.file('xl/worksheets/sheet1.xml')!.async('string'))
+    expect(textos).toMatch(/Solicitantes recurrentes \(1 caso;/)
+    expect(textos).toMatch(/U2-SI-2026-007/)
+  })
+})

@@ -1,7 +1,7 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { DatosReporte } from './datos'
-import { pct, titulo, fechasCortas, otrosTexto } from './datos'
+import { pct, titulo, fechasCortas, otrosTexto, periodoPortada, desgloseOtrasAreas } from './datos'
 import { svgPastel, varsBarra, type EstiloBarras, type EstiloPastel } from './estilos'
 import type { Plantilla } from './plantilla'
 
@@ -9,6 +9,7 @@ import type { Plantilla } from './plantilla'
 // en páginas horizontales de 13.33 × 7.5 pulgadas.
 
 const miles = (n: number) => n.toLocaleString('es-MX')
+const fechaCorta = (f: string) => `${f.slice(8, 10)}/${f.slice(5, 7)}/${f.slice(0, 4)}`
 const COLORES = ['#235B4E', '#BC955C', '#691C32', '#6F7271', '#3F8B78', '#9D7B45', '#A34A62', '#98989A']
 
 function Pagina({ p, portada, tituloPag, d, children }: { p: Plantilla; portada?: boolean; tituloPag?: string; d: DatosReporte; children: ComponentChildren }) {
@@ -129,6 +130,7 @@ export function ReporteImprimible({
   const dona: [string, number][] = [...conCasco.slice(0, 6).map((a) => [titulo(a.area), a.cascos] as [string, number])]
   const restoCascos = conCasco.slice(6).reduce((s, a) => s + a.cascos, 0)
   if (restoCascos) dona.push(['Otras áreas', restoCascos])
+  const otrasAreas = desgloseOtrasAreas(conCasco.slice(6), d.cascos)
   const matsTabla = d.materiales.slice(0, 8)
 
   return (
@@ -146,9 +148,13 @@ export function ReporteImprimible({
 
       <Pagina p={p} portada d={d}>
         <div class="rp-portada-texto">
-          <h1>ENTREGA DE EQUIPO DE PROTECCIÓN PERSONAL</h1>
+          <h1>
+            INFORME DE ENTREGA DE EQUIPO DE
+            <br />
+            PROTECCIÓN PERSONAL
+          </h1>
           <hr />
-          <p class="rp-periodo">{d.titulo.toUpperCase()}</p>
+          <p class="rp-periodo">{periodoPortada(d.desde, d.hasta)}</p>
           <div class="rp-kpis">
             <div>
               <b style={{ color: '#235B4E' }}>{miles(d.personas)}</b>personas atendidas
@@ -156,6 +162,10 @@ export function ReporteImprimible({
             <div>
               <b>{miles(d.areas)}</b>
               {d.areas === 1 ? 'área' : 'áreas'}
+            </div>
+            <div>
+              <b style={{ color: '#235B4E' }}>{miles(d.entregas.length)}</b>
+              {d.entregas.length === 1 ? 'entrega realizada' : 'entregas realizadas'}
             </div>
             <div>
               <b>{miles(d.piezas)}</b>piezas de EPP entregadas
@@ -238,7 +248,16 @@ export function ReporteImprimible({
       {d.cascos > 0 && (
         <Pagina p={p} d={d} tituloPag="Entrega de cascos">
           <div class="rp-dos">
-            <Dona datos={dona} estilo={estiloPastel} />
+            <div class={`rp-col ${otrasAreas ? 'rp-con-desglose' : ''}`}>
+              <Dona datos={dona} estilo={estiloPastel} />
+              {otrasAreas && (
+                <p class="rp-tarjeta rp-desglose">
+                  <span>
+                    <strong>Desglose de «Otras áreas» ({miles(restoCascos)} cascos):</strong> {otrasAreas}
+                  </span>
+                </p>
+              )}
+            </div>
             <div class="rp-col">
               <div class="rp-tarjeta">
                 <span style={{ fontSize: '15pt' }}>
@@ -357,6 +376,74 @@ export function ReporteImprimible({
           <p class="rp-nota">
             Personas que recibieron el mismo material en 2 o más entregas del periodo ({d.recurrentes.length} casos{detalleRecurrentes ? '; se muestran los 7 más frecuentes' : ''}). El detalle por área y material está en el Excel.
           </p>
+        </Pagina>
+      )}
+
+      {d.contaminado.ultimos.length > 0 && (
+        <Pagina p={p} d={d} tituloPag="EPP contaminado">
+          <div class="rp-dos rp-contaminado">
+            <div class="rp-col">
+              <div class="rp-fila">
+                <div class="rp-tarjeta">
+                  <b style={{ color: '#691C32' }}>{miles(d.contaminado.eventos)}</b>
+                  {d.contaminado.eventos === 1 ? 'cambio en el periodo' : 'cambios en el periodo'}
+                </div>
+                <div class="rp-tarjeta">
+                  <b>{miles(d.contaminado.piezas)}</b>
+                  {d.contaminado.piezas === 1 ? 'pieza contaminada' : 'piezas contaminadas'}
+                </div>
+              </div>
+              <h3>Material contaminado</h3>
+              {d.contaminado.porMaterial.length > 0 ? (
+                <table class="rp-tabla rp-flujo">
+                  <thead>
+                    <tr>
+                      <th>Material</th>
+                      <th>Cambios</th>
+                      <th class="rp-guinda">Piezas</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.contaminado.porMaterial.slice(0, 8).map((m) => (
+                      <tr key={m.material}>
+                        <td>{m.material}</td>
+                        <td>{m.eventos}</td>
+                        <td class="rp-total">{m.piezas}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p class="rp-nota">Sin cambios de EPP contaminado en el periodo.</p>
+              )}
+            </div>
+            <div class="rp-col">
+              <h3>Últimos {d.contaminado.ultimos.length} folios entregados</h3>
+              <table class="rp-tabla rp-flujo rp-izq">
+                <thead>
+                  <tr>
+                    <th>Folio</th>
+                    <th>Fecha</th>
+                    <th>Persona</th>
+                    <th>Área</th>
+                    <th>Material</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.contaminado.ultimos.map((x) => (
+                    <tr key={x.entrega.id}>
+                      <td class={x.folioFormato ? 'rp-folio' : 'rp-cero'}>{x.folioFormato || '—'}</td>
+                      <td>{fechaCorta(x.entrega.fecha)}</td>
+                      <td>{titulo(x.entrega.nombre)}</td>
+                      <td>{titulo(x.entrega.area)}</td>
+                      <td class="rp-mat">{x.materiales.join(', ')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p class="rp-nota rp-nota-pie">Cambios registrados con la casilla «EPP contaminado» y el folio del formato en papel. El listado completo está en el Excel.</p>
         </Pagina>
       )}
 

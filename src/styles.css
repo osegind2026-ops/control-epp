@@ -525,10 +525,11 @@ details > summary { list-style: revert; }
 .rp-titulo h2 { font: bold 28pt Arial, sans-serif; color: #235b4e; margin: 0; }
 .rp-titulo p { font-size: 14pt; color: #6f7271; margin: 2pt 0 0; }
 .rp-portada-texto { position: absolute; left: 0.7in; right: 0.7in; top: 1.6in; }
-.rp-portada-texto h1 { font: bold 40pt/1.1 Arial, sans-serif; color: #235b4e; margin: 0; max-width: 10in; }
+.rp-portada-texto h1 { font: bold 40pt/1.1 Arial, sans-serif; color: #235b4e; margin: 0; }
 .rp-portada-texto hr { border: 0; border-top: 1.5pt solid #bc955c; margin: 0.25in 0 0.12in; }
 .rp-periodo { font: bold 20pt Arial, sans-serif; color: #691c32; margin: 0; }
-.rp-kpis { display: flex; gap: 0.6in; margin-top: 0.4in; }
+.rp-kpis { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 0.4in; text-align: center; }
+.rp-kpis div { align-items: center; }
 .rp-kpis div, .rp-tarjeta { display: flex; flex-direction: column; color: #6f7271; font-size: 13pt; }
 .rp-kpis b { font-size: 36pt; color: #2b2b2b; }
 .rp-pie-texto { position: absolute; left: 0.7in; top: 6.95in; font-size: 10pt; color: #6f7271; margin: 0; }
@@ -553,6 +554,18 @@ details > summary { list-style: revert; }
 .rp-dona-wrap { display: flex; align-items: center; gap: 0.3in; }
 /* Estilos de gráfica (los mismos de la Bitácora 24RU1). «plana» y «dona» son el diseño de siempre. */
 .rp-pastel { width: 3.8in; height: 3.8in; flex: none; }
+/* Cascos con desglose de «Otras áreas» debajo de la gráfica */
+.rp-con-desglose .rp-dona, .rp-con-desglose .rp-pastel { width: 3.3in; height: 3.3in; }
+.rp-desglose { background: #f3f1ec; font-size: 10pt; color: #2b2b2b; margin: 0; padding: 0.08in 0.18in; display: block; }
+.rp-desglose strong { color: #691c32; }
+/* EPP contaminado */
+.rp-contaminado { grid-template-columns: 4.4in 1fr; }
+.rp-contaminado .rp-tarjeta b { font-size: 28pt; }
+.rp-tabla.rp-flujo { position: static; width: 100%; }
+.rp-tabla.rp-flujo td { padding: 4pt 6pt; }
+.rp-tabla td.rp-folio { color: #691c32; }
+.rp-tabla td.rp-mat { font-size: 8.5pt; }
+.rp-nota.rp-nota-pie { position: absolute; left: 0.5in; top: 6.35in; font-style: italic; }
 /* Muestra pequeña del estilo junto a cada selector en Reportes */
 .opciones-archivos { padding: 10px 14px; }
 .opciones-archivos summary { cursor: pointer; }

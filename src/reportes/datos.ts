@@ -45,6 +45,22 @@ export function describirPeriodo(desde: string, hasta: string): { titulo: string
   return { titulo: rango, corto: rango }
 }
 
+/** Periodo en la portada: «DEL 1° AL 31 DE OCTUBRE DE 2026», «1° DE OCTUBRE DE 2026». */
+export function periodoPortada(desde: string, hasta: string): string {
+  const a = fechaD(desde)
+  const b = fechaD(hasta)
+  const dia = (d: Date) => (d.getDate() === 1 ? '1°' : String(d.getDate()))
+  const mes = (d: Date) => MESES[d.getMonth()]
+  let t: string
+  if (desde === hasta) t = `${dia(a)} de ${mes(a)} de ${a.getFullYear()}`
+  else if (a.getFullYear() !== b.getFullYear()) t = `del ${dia(a)} de ${mes(a)} de ${a.getFullYear()} al ${dia(b)} de ${mes(b)} de ${b.getFullYear()}`
+  else if (a.getMonth() !== b.getMonth()) t = `del ${dia(a)} de ${mes(a)} al ${dia(b)} de ${mes(b)} de ${b.getFullYear()}`
+  else t = `del ${dia(a)} al ${dia(b)} de ${mes(b)} de ${b.getFullYear()}`
+  const dias = Math.round((b.getTime() - a.getTime()) / 86400000) + 1
+  if (dias === 7 && a.getDay() === 1) t = `semana ${semanaIso(desde)} · ${t}`
+  return t.toUpperCase()
+}
+
 export interface MaterialReporte {
   id: string
   nombre: string
@@ -236,6 +252,14 @@ export interface DatosReporte {
   resguardosActivos: { nombre: string; cantidad: number }[]
   /** Solicitantes recurrentes del periodo (2 o más entregas del mismo material). */
   recurrentes: SolicitanteRecurrente[]
+  /** Cambios de EPP contaminado: totales del periodo y los últimos 10 folios hasta el fin del periodo. */
+  contaminado: {
+    eventos: number
+    piezas: number
+    personas: number
+    porMaterial: { material: string; piezas: number; eventos: number }[]
+    ultimos: EntregaContaminada[]
+  }
   hallazgos: string[]
 }
 
@@ -341,6 +365,21 @@ export function calcularReporte(f: Fuentes, desde: string, hasta: string, area =
   for (const r of activos.filter((x) => x.tipo !== 'prestamo')) resgPorMat.set(r.materialId, (resgPorMat.get(r.materialId) ?? 0) + r.cantidad)
   const resguardosActivos = [...resgPorMat.entries()].map(([id, cantidad]) => ({ nombre: mats.get(id)?.nombre ?? id, cantidad }))
 
+  // EPP contaminado: lo del periodo y los últimos folios (aunque sean de periodos anteriores)
+  const contPeriodo = entregasContaminadas(entregas, mats, f.personal)
+  const contHistoria = entregasContaminadas(
+    f.entregas.filter((e) => e.estado === 'registrada' && e.fecha <= hasta && (!area || e.area === area)),
+    mats,
+    f.personal,
+  )
+  const contaminado: DatosReporte['contaminado'] = {
+    eventos: contPeriodo.length,
+    piezas: contPeriodo.reduce((s, c) => s + c.piezas, 0),
+    personas: new Set(contPeriodo.map((c) => c.entrega.rpe)).size,
+    porMaterial: resumenContaminado(contPeriodo, mats).porMaterial.map(([material, x]) => ({ material, ...x })),
+    ultimos: contHistoria.slice(0, 10),
+  }
+
   const d: DatosReporte = {
     desde,
     hasta,
@@ -361,6 +400,7 @@ export function calcularReporte(f: Fuentes, desde: string, hasta: string, area =
     prestamosVencidos: prestamosVencidos(activos, fechaLocal()),
     resguardosActivos,
     recurrentes: solicitantesRecurrentes(entregas, mats, f.personal),
+    contaminado,
     hallazgos: [],
   }
   d.hallazgos = hallazgos(d)
@@ -401,9 +441,23 @@ export function hallazgos(d: DatosReporte): string[] {
     const personas = new Set(muyRecurrentes.map((r) => r.rpe)).size
     h.push(`${personas} persona${personas > 1 ? 's recibieron' : ' recibió'} el mismo material 3 o más veces; el caso más alto es ${titulo(top.nombre)} (${titulo(top.area)}) con ${top.material.toLowerCase()} en ${top.veces} entregas.`)
   }
+  if (d.contaminado.eventos) h.push(`Se registraron ${d.contaminado.eventos} cambio${d.contaminado.eventos > 1 ? 's' : ''} de EPP contaminado (${d.contaminado.piezas} pieza${d.contaminado.piezas > 1 ? 's' : ''}).`)
   if (d.prestamosVencidos.length) h.push(`Hay ${d.prestamosVencidos.length} préstamo${d.prestamosVencidos.length > 1 ? 's' : ''} de equipo de altura sin devolver a tiempo.`)
   if (d.reabastecer.length) h.push(`${d.reabastecer.length} material${d.reabastecer.length > 1 ? 'es están' : ' está'} por debajo del mínimo y requiere${d.reabastecer.length > 1 ? 'n' : ''} reabastecimiento.`)
   return h
+}
+
+/**
+ * Texto para desglosar «Otras áreas» de la gráfica de pastel de cascos:
+ * «Mantenimiento 12 (3.1%), Química 9 (2.3%)… y 4 áreas más (6).». Vacío si no hay otras áreas.
+ */
+export function desgloseOtrasAreas(otras: Pick<AreaReporte, 'area' | 'cascos'>[], total: number, maximo = 8): string {
+  if (!otras.length) return ''
+  const mostrar = otras.slice(0, maximo)
+  const resto = otras.slice(maximo)
+  const partes = mostrar.map((a) => `${titulo(a.area)} ${a.cascos} (${pct(a.cascos, total)}%)`)
+  if (resto.length) partes.push(`y ${resto.length} área${resto.length > 1 ? 's' : ''} más (${resto.reduce((s, a) => s + a.cascos, 0)})`)
+  return partes.join(', ') + '.'
 }
 
 export { pct, titulo }
