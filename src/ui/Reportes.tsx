@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { createPortal } from 'preact/compat'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { entregarArchivo, fechaLocal, plural } from '../lib/util'
 import { aplicarFiltro, calcularReporte, entregasContaminadas, NOMBRE_TIPO, resumenContaminado, type DatosReporte, type FiltroReporte, type Fuentes } from '../reportes/datos'
 import { claveFolioImpreso, foliosSinCapturar, ultimoFolioCapturado, UNIDADES_FOLIO } from '../domain/contaminado'
@@ -401,9 +401,30 @@ function SelectorAreas({ valor, onCambio }: { valor: string[]; onCambio: (f: (v:
   const [buscar, setBuscar] = useState('')
   const areas = listaAreas().filter((a) => !buscar || a.toLowerCase().includes(buscar.toLowerCase()))
   const texto = !valor.length ? 'Todas' : valor.length === 1 ? valor[0] : `${valor.length} áreas`
+  const caja = useRef<HTMLDetailsElement>(null)
+  // Se cierra al tocar o enfocar cualquier otra cosa (p. ej. otro filtro) y con Esc, para no quedar encimado
+  useEffect(() => {
+    const fuera = (e: Event) => {
+      const d = caja.current
+      if (d?.open && !d.contains(e.target as Node)) d.open = false
+    }
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && caja.current?.open) caja.current.open = false
+    }
+    document.addEventListener('pointerdown', fuera, true)
+    document.addEventListener('focusin', fuera, true)
+    document.addEventListener('keydown', tecla)
+    return () => {
+      document.removeEventListener('pointerdown', fuera, true)
+      document.removeEventListener('focusin', fuera, true)
+      document.removeEventListener('keydown', tecla)
+    }
+  }, [])
   return (
-    <details class="selector-areas">
-      <summary class="input" id="r-area">{texto}</summary>
+    <details class="selector-areas" ref={caja}>
+      <summary class="input" id="r-area" title={valor.join(', ') || 'Todas las áreas'}>
+        <span>{texto}</span>
+      </summary>
       <div class="selector-areas-menu card">
         <input class="input" placeholder="Buscar área…" value={buscar} onInput={(e) => setBuscar((e.target as HTMLInputElement).value)} />
         <div class="selector-areas-lista">
@@ -417,11 +438,16 @@ function SelectorAreas({ valor, onCambio }: { valor: string[]; onCambio: (f: (v:
             </label>
           ))}
         </div>
-        {valor.length > 0 && (
-          <button class="btn small" onClick={() => onCambio(() => [])}>
-            Quitar selección (todas)
+        <div class="row">
+          <button class="btn sm primary" onClick={() => caja.current && (caja.current.open = false)}>
+            Listo
           </button>
-        )}
+          {valor.length > 0 && (
+            <button class="btn sm ghost" onClick={() => onCambio(() => [])}>
+              Quitar selección (todas)
+            </button>
+          )}
+        </div>
       </div>
     </details>
   )

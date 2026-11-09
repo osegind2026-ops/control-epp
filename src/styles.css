@@ -463,6 +463,7 @@ details > summary { list-style: revert; }
 .kpi.bad b { color: var(--bad); }
 .barra { height: 8px; border-radius: 4px; background: var(--accent); min-width: 2px; }
 .filtros { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; align-items: end; }
+.filtros > * { min-width: 0; } /* nada se sale de su columna ni tapa al de junto */
 .material-celda { display: flex; gap: 10px; align-items: center; }
 .subfila td { background: var(--ground); font-size: 13px; }
 .usuario-chip svg { width: 18px; height: 18px; flex: none; }
@@ -829,12 +830,14 @@ details > summary { list-style: revert; }
   color: var(--surface);
 }
 
-/* Listas desplegables con espacio suficiente para que no se corte el texto */
+/* Listas desplegables con espacio suficiente para que no se corte el texto: la columna se hace más
+   ancha (230 px) en lugar de que la lista se salga de ella y tape el campo de junto */
 .fmt-select {
-  min-width: 230px !important;
+  width: 100%;
   max-width: 100% !important;
   padding-right: 32px !important;
 }
+.filtros:has(.fmt-select) { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
 
 /* Modal y portal de impresión */
 .portal-formatos-wrap {
@@ -1570,9 +1573,13 @@ details > summary { list-style: revert; }
 
 /* Reportes: varias áreas a la vez */
 .selector-areas { position: relative; }
-.selector-areas > summary { list-style: none; cursor: pointer; min-width: 12rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.selector-areas > summary { list-style: none; cursor: pointer; width: 100%; min-width: 0; box-sizing: border-box; display: flex; align-items: center; gap: 8px; }
+.selector-areas > summary span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Flecha como la de las demás listas */
+.selector-areas > summary::after { content: ''; flex: none; width: 7px; height: 7px; margin: -3px 2px 0 0; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); opacity: 0.8; }
+.selector-areas[open] > summary::after { transform: rotate(-135deg); margin-top: 4px; }
 .selector-areas > summary::-webkit-details-marker { display: none; }
-.selector-areas-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; width: min(22rem, 90vw); display: grid; gap: 8px; padding: 10px; }
+.selector-areas-menu { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; width: min(22rem, 90vw); display: grid; gap: 8px; padding: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); }
 .selector-areas-lista { max-height: 16rem; overflow: auto; display: grid; gap: 4px; }
 
 /* Reportes 2.19: comparativo, tendencia, tipo de equipo y cierre con semáforo */
