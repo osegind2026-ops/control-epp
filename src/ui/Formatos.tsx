@@ -352,6 +352,55 @@ function imprimirPdf(url: string) {
 }
 
 // =========================================================================
+// VISTA PREVIA EN PANTALLA (las mismas hojas que se imprimen, a escala)
+// =========================================================================
+const MM_A_PX = 96 / 25.4
+
+function VistaPrevia({ paginas, horizontal = false }: { paginas: preact.ComponentChildren[]; horizontal?: boolean }) {
+  const caja = useRef<HTMLDivElement>(null)
+  const [escala, setEscala] = useState(0.4)
+  const [hoja, setHoja] = useState(0)
+  const anchoPx = (horizontal ? 279.4 : 215.9) * MM_A_PX
+  const altoPx = (horizontal ? 215.9 : 279.4) * MM_A_PX
+  useEffect(() => {
+    const el = caja.current
+    if (!el) return
+    const medir = () => setEscala(Math.min(1, el.clientWidth / anchoPx))
+    medir()
+    const ro = new ResizeObserver(medir)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [anchoPx])
+  const total = paginas.length
+  const actual = Math.min(hoja, Math.max(0, total - 1))
+  if (!total) return null
+  return (
+    <div class="fmt-previa">
+      <div class="spread">
+        <strong class="small">
+          Vista previa · hoja {actual + 1} de {total}
+        </strong>
+        {total > 1 && (
+          <div class="row" style={{ gap: '6px' }}>
+            <button class="btn sm" disabled={actual === 0} onClick={() => setHoja(actual - 1)} aria-label="Hoja anterior">
+              ‹ Anterior
+            </button>
+            <button class="btn sm" disabled={actual >= total - 1} onClick={() => setHoja(actual + 1)} aria-label="Hoja siguiente">
+              Siguiente ›
+            </button>
+          </div>
+        )}
+      </div>
+      <div class={`fmt-previa-marco ${horizontal ? 'horizontal' : ''}`} ref={caja} style={{ height: `${Math.round(altoPx * escala)}px` }} aria-hidden="true">
+        <div class="fmt-previa-hoja" style={{ width: `${anchoPx}px`, height: `${altoPx}px`, transform: `scale(${escala})` }}>
+          {paginas[actual]}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// =========================================================================
 // VENTANA MODAL / PORTAL DE IMPRESIÓN
 // =========================================================================
 function VistaImpresionPortal({
@@ -456,24 +505,25 @@ function useConsecutivo(serie: SerieFolio, piso = 0) {
 type Consecutivo = ReturnType<typeof useConsecutivo>
 
 /** Muestra el último folio impreso y avisa si el folio inicial reimprime o salta folios. */
-function AvisoConsecutivo({ c, fin, formato, nombre = 'folio' }: { c: Consecutivo; fin: number; formato: (n: number) => string; nombre?: string }) {
+function AvisoConsecutivo({ c, fin, formato, nombre = 'folio', femenino = false }: { c: Consecutivo; fin: number; formato: (n: number) => string; nombre?: string; femenino?: boolean }) {
   const d = c.detalle
+  const o = femenino ? 'a' : 'o'
   const quien = d.ultimo === c.impreso && d.equipo ? ` en el equipo ${d.equipo}${d.fecha ? `, ${hace(d.fecha)}` : ''}` : ''
   return (
     <div class="stack" style={{ gap: '8px' }}>
       <p class="muted small" style={{ margin: 0 }}>
         {c.impreso ? (
           <>
-            Último {nombre} impreso: <strong>{formato(c.impreso)}</strong>
+            Últim{o} {nombre} impres{o}: <strong>{formato(c.impreso)}</strong>
             {quien}.
           </>
         ) : (
-          `Aún no se ha impreso ningún ${nombre} en ${ANIO_ACTUAL}.`
+          `Aún no se ha impreso ${femenino ? 'ninguna' : 'ningún'} ${nombre} en ${ANIO_ACTUAL}.`
         )}
         {c.piso > c.impreso && (
           <>
             {' '}
-            Último usado en un despacho: <strong>{formato(c.piso)}</strong>.
+            Últim{o} usad{o} en un despacho: <strong>{formato(c.piso)}</strong>.
           </>
         )}{' '}
         El consecutivo se comparte con todas las PCs y celulares.
@@ -482,7 +532,7 @@ function AvisoConsecutivo({ c, fin, formato, nombre = 'folio' }: { c: Consecutiv
         <div class="aviso warn small">
           <Icono n="alerta" />
           <span class="grow">
-            <strong>Reimpresión:</strong> {c.inicio === Math.min(fin, c.ultimo) ? `el ${nombre} ${formato(c.inicio)} ya se imprimió` : `del ${formato(c.inicio)} al ${formato(Math.min(fin, c.ultimo))} ya se imprimieron`}. Úselo solo para reponer
+            <strong>Reimpresión:</strong> {c.inicio === Math.min(fin, c.ultimo) ? `${femenino ? 'la' : 'el'} ${nombre} ${formato(c.inicio)} ya se imprimió` : `del ${formato(c.inicio)} al ${formato(Math.min(fin, c.ultimo))} ya se imprimieron`}. Úselo solo para reponer
             un formato dañado o perdido; el consecutivo no retrocede.
           </span>
           <button class="btn sm" onClick={c.seguir}>
@@ -494,7 +544,7 @@ function AvisoConsecutivo({ c, fin, formato, nombre = 'folio' }: { c: Consecutiv
         <div class="aviso warn small">
           <Icono n="alerta" />
           <span class="grow">
-            Se saltarán {c.inicio - c.siguiente === 1 ? `el ${nombre} ${formato(c.siguiente)}` : `del ${formato(c.siguiente)} al ${formato(c.inicio - 1)}`} (no se imprimen).
+            Se saltarán {c.inicio - c.siguiente === 1 ? `${femenino ? 'la' : 'el'} ${nombre} ${formato(c.siguiente)}` : `del ${formato(c.siguiente)} al ${formato(c.inicio - 1)}`} (no se imprimen).
           </span>
           <button class="btn sm" onClick={c.seguir}>
             Usar el siguiente ({formato(c.siguiente)})
@@ -582,6 +632,30 @@ export function PantallaFormatos() {
     // Lo siguiente que se imprima continúa después de lo impreso (incluso tras una reimpresión)
     if (impreso.current) consActivo?.seguir()
   }
+
+  // Hojas que se imprimen; la vista previa muestra exactamente las mismas
+  const hojasContaminado = () =>
+    gruposContaminado().map((grupo, numPag) => (
+      <section key={numPag} class="hoja-formato-impresion hoja-contaminado">
+        {grupo.map((n) => (
+          <FormatoContaminadoIndividual key={n} folioTexto={formatoFolioContaminado(unidad, n)} />
+        ))}
+      </section>
+    ))
+  const hojasRegistro = () =>
+    Array.from({ length: cantHojasReg }, (_, i) => hojaInicioReg + i).map((numPag) => (
+      <section key={numPag} class="hoja-formato-impresion hoja-registro-horizontal">
+        <FormatoRegistroEntregaHorizontal paginaNum={numPag} />
+      </section>
+    ))
+  const hojasResguardo = () =>
+    gruposResguardo().map((grupo, numPag) => (
+      <section key={numPag} class={`hoja-formato-impresion hoja-resguardo ${porHojaResg === 3 ? 'resg-3-por-hoja' : 'resg-2-por-hoja'}`}>
+        {grupo.map((n) => (
+          <FormatoResguardoIndividual key={n} folioTexto={formatoFolioResguardo(n)} />
+        ))}
+      </section>
+    ))
 
   // Agrupación en páginas para EPP Contaminado (exactamente 4 por hoja carta)
   const gruposContaminado = () => {
@@ -709,6 +783,7 @@ export function PantallaFormatos() {
             </span>
           </div>
           <AvisoConsecutivo c={consContaminado} fin={folioInicioContaminado + cantContaminado - 1} formato={(n) => formatoFolioContaminado(unidad, n)} />
+          <VistaPrevia paginas={hojasContaminado()} />
 
           <div class="row">
             <button class="btn primary" onClick={ejecutarImpresion}>
@@ -764,7 +839,8 @@ export function PantallaFormatos() {
               Se generará en orientación horizontal desde la <strong>PÁGINA No. {String(hojaInicioReg).padStart(3, '0')}</strong> hasta la <strong>PÁGINA No. {String(hojaInicioReg + cantHojasReg - 1).padStart(3, '0')}</strong>. Al presionar «Imprimir» se guarda la última página impresa.
             </span>
           </div>
-          <AvisoConsecutivo c={consRegistro} fin={hojaInicioReg + cantHojasReg - 1} formato={(n) => `PÁGINA No. ${String(n).padStart(3, '0')}`} nombre="página" />
+          <AvisoConsecutivo c={consRegistro} fin={hojaInicioReg + cantHojasReg - 1} formato={(n) => `PÁGINA No. ${String(n).padStart(3, '0')}`} nombre="página" femenino />
+          <VistaPrevia paginas={hojasRegistro()} horizontal />
 
           <div class="row">
             <button class="btn primary" onClick={ejecutarImpresion}>
@@ -836,6 +912,7 @@ export function PantallaFormatos() {
             </span>
           </div>
           <AvisoConsecutivo c={consResg} fin={folioInicioResg + cantResg - 1} formato={(n) => formatoFolioResguardo(n)} />
+          <VistaPrevia paginas={hojasResguardo()} />
 
           <div class="row">
             <button class="btn primary" onClick={ejecutarImpresion}>
@@ -959,42 +1036,9 @@ export function PantallaFormatos() {
           onImprimir={guardarConsecutivo}
           onCerrar={cerrarImpresion}
         >
-          {/* EPP Contaminado: exactamente 4 por página carta (Vertical) */}
-          {tipo === 'contaminado' &&
-            gruposContaminado().map((grupo, numPag) => (
-              <section key={numPag} class="hoja-formato-impresion hoja-contaminado">
-                {grupo.map((n) => (
-                  <FormatoContaminadoIndividual
-                    key={n}
-                    folioTexto={formatoFolioContaminado(unidad, n)}
-                  />
-                ))}
-              </section>
-            ))}
-
-          {/* Registro de entrega de EPP 2026: 1 página completa por hoja en HORIZONTAL */}
-          {tipo === 'registro_epp' &&
-            Array.from({ length: cantHojasReg }, (_, i) => hojaInicioReg + i).map((numPag) => (
-              <section key={numPag} class="hoja-formato-impresion hoja-registro-horizontal">
-                <FormatoRegistroEntregaHorizontal paginaNum={numPag} />
-              </section>
-            ))}
-
-          {/* Resguardo Económico: 2 o 3 por hoja carta (Vertical) */}
-          {tipo === 'resguardo_economico' &&
-            gruposResguardo().map((grupo, numPag) => (
-              <section
-                key={numPag}
-                class={`hoja-formato-impresion hoja-resguardo ${porHojaResg === 3 ? 'resg-3-por-hoja' : 'resg-2-por-hoja'}`}
-              >
-                {grupo.map((n) => (
-                  <FormatoResguardoIndividual
-                    key={n}
-                    folioTexto={formatoFolioResguardo(n)}
-                  />
-                ))}
-              </section>
-            ))}
+          {tipo === 'contaminado' && hojasContaminado()}
+          {tipo === 'registro_epp' && hojasRegistro()}
+          {tipo === 'resguardo_economico' && hojasResguardo()}
         </VistaImpresionPortal>
       )}
     </div>

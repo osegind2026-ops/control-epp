@@ -1632,3 +1632,10 @@ details > summary { list-style: revert; }
 .renglon-eq-cuerpo { padding: 4px 10px 12px; border-top: 1px solid var(--rule); gap: 10px; }
 .devolver-check { width: 22px; height: 22px; flex: none; margin-top: 2px; accent-color: var(--accent); }
 .opcion svg { width: 20px; height: 20px; flex: none; }
+
+/* ---------- Vista previa de formatos en pantalla (mismas hojas, a escala) ---------- */
+.fmt-previa { display: grid; gap: 8px; }
+.fmt-previa-marco { position: relative; width: 100%; max-width: 520px; overflow: hidden; border-radius: 6px; background: #fff; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); justify-self: center; }
+.fmt-previa-marco.horizontal { max-width: 760px; }
+.fmt-previa-hoja { position: absolute; top: 0; left: 0; transform-origin: 0 0; pointer-events: none; }
+.fmt-previa-hoja > .hoja-formato-impresion { margin: 0 !important; box-shadow: none !important; }
