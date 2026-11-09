@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact'
 import { useMemo, useState } from 'preact/hooks'
 import type { CondicionRegreso, Equipo, ObsElegida, PersonalSI, PrestamoEquipo, Trabajador, TurnoSI } from '../domain/types'
 import { fechaDeTs, hace, horaLocal } from '../lib/util'
@@ -8,12 +9,12 @@ import {
   obsOrdenadas,
   personalSIOrdenado,
   prestamoVencido,
-  prestarEquipo,
+  prestarEquipos,
   puedeSerSupervisor,
   enTurno,
   turnoDe,
   TURNOS_SI,
-  registrarRegreso,
+  registrarRegresos,
   CONDICIONES,
   editarPrestamoEquipo,
   eliminarPrestamoEquipo,
@@ -23,6 +24,7 @@ import * as S from '../state/store'
 import { CapturaFotos } from './Evidencia'
 import { avisar, confirmar, intentar, Modal } from './comunes'
 import { Icono } from './iconos'
+import { BuscadorTrabajador, TarjetaTrabajador } from './Trabajador'
 
 export const fmtTs = (ts: string) => `${fechaDeTs(ts)} ${horaLocal(new Date(ts))}`
 /** Nombre corto de quien atendió, o de quien registró si aún no había lista de Seguridad Industrial. */
@@ -173,7 +175,7 @@ function Accesorios({ lista, marcados, onCambio, titulo }: { lista: string[]; ma
  * Observaciones de selección rápida. Las opciones de daño piden foto; lo que se escribe nuevo
  * queda guardado como opción para la próxima vez.
  */
-function ObsRapidas({ titulo, obs, onObs, fotos, onFotos }: { titulo: string; obs: ObsElegida[]; onObs: (o: ObsElegida[]) => void; fotos: string[]; onFotos: (f: string[]) => void }) {
+function ObsRapidas({ titulo, obs, onObs, fotos, onFotos, id = 'eq-obs-nueva' }: { titulo: string; obs: ObsElegida[]; onObs: (o: ObsElegida[]) => void; fotos: string[]; onFotos: (f: string[]) => void; id?: string }) {
   const [texto, setTexto] = useState('')
   const [esDano, setEsDano] = useState(false)
   const [verFotos, setVerFotos] = useState(false)
@@ -214,7 +216,7 @@ function ObsRapidas({ titulo, obs, onObs, fotos, onFotos }: { titulo: string; ob
       <div class="row" style={{ flexWrap: 'nowrap', gap: '6px' }}>
         <input
           class="input grow"
-          id="eq-obs-nueva"
+          id={id}
           placeholder="Otra observación (queda guardada como opción)"
           value={texto}
           maxLength={80}
@@ -268,125 +270,308 @@ function ActividadCampo({ valor, onCambio }: { valor: string; onCambio: (v: stri
 
 // ---------- Prestar ----------
 
-export function ModalPrestar({ eq, onCerrar }: { eq: Equipo; onCerrar: () => void }) {
-  const [tec, setTec] = useState('')
+/** A quién se presta: un técnico de Seguridad Industrial (botones) o cualquier trabajador de la planta (padrón). */
+type Receptor = { tipo: 'si'; id: string } | { tipo: 'planta'; t: Trabajador | null }
+
+function personaDe(r: Receptor): Pick<Trabajador, 'rpe' | 'nombre' | 'area'> | null {
+  if (r.tipo === 'si') {
+    const x = S.personalSI.value.find((y) => y.id === r.id)
+    return x ? trabajadorDe(x) : null
+  }
+  return r.t ? { rpe: r.t.rpe, nombre: r.t.nombre, area: r.t.area } : null
+}
+
+/** Nombre corto para los avisos: el del botón de SI o las dos primeras palabras. */
+function cortoDe(rpe: string, nombre: string): string {
+  return S.personalSI.value.find((x) => x.rpe === rpe)?.corto || nombre.split(' ').slice(0, 2).join(' ')
+}
+
+function ElegirReceptor({ rol, valor, onCambio, excluirRpe, turno }: { rol: string; valor: Receptor; onCambio: (r: Receptor) => void; excluirRpe?: string; turno: TurnoSI | null }) {
+  return (
+    <div class="stack" style={{ gap: '8px' }}>
+      <div class="row" role="group" aria-label={rol}>
+        <button class="opcion grow" aria-pressed={valor.tipo === 'si'} onClick={() => valor.tipo !== 'si' && onCambio({ tipo: 'si', id: '' })}>
+          Técnico de Seguridad Industrial
+        </button>
+        <button class="opcion grow" aria-pressed={valor.tipo === 'planta'} onClick={() => valor.tipo !== 'planta' && onCambio({ tipo: 'planta', t: null })}>
+          Personal de la planta
+        </button>
+      </div>
+      {valor.tipo === 'si' ? (
+        <BotonesSI funcion="tecnico" rol={`${rol} (técnico)`} valor={valor.id} onCambio={(id) => onCambio({ tipo: 'si', id })} excluirRpe={excluirRpe} turno={turno} />
+      ) : (
+        <div class="stack" style={{ gap: '6px' }}>
+          <strong class="small">{rol} (trabajador de la planta)</strong>
+          {valor.t ? (
+            <TarjetaTrabajador t={valor.t} onQuitar={() => onCambio({ tipo: 'planta', t: null })} />
+          ) : (
+            <BuscadorTrabajador autoFocus={false} onElegir={(t) => onCambio({ tipo: 'planta', t })} />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Lo que se anota de cada equipo dentro de un movimiento de varios. */
+interface Detalle {
+  accesorios: string[]
+  bitacora: boolean
+  obs: ObsElegida[]
+  fotos: string[]
+}
+
+/** Resumen corto de lo anotado en un equipo, para verlo sin abrir su renglón. */
+function resumenDetalle(d: Detalle, accesoriosEsperados: string[], libreta: boolean, regreso: boolean): { texto: string; nivel: '' | 'warn' | 'bad' } {
+  const partes: string[] = []
+  const faltan = accesoriosEsperados.filter((a) => !d.accesorios.includes(a))
+  if (faltan.length) partes.push(`${regreso ? 'Falta' : 'Sin'}: ${faltan.join(', ')}`)
+  if (regreso && libreta && !d.bitacora) partes.push('sin libreta')
+  if (!regreso && d.bitacora) partes.push('lleva libreta')
+  partes.push(...d.obs.map((o) => (o.tipo === 'dano' ? `⚠ ${o.texto}` : o.texto)))
+  if (d.fotos.length) partes.push(d.fotos.length === 1 ? '1 foto' : `${d.fotos.length} fotos`)
+  const nivel = d.obs.some((o) => o.tipo === 'dano') ? 'bad' : faltan.length || d.obs.some((o) => o.tipo === 'detalle') || (regreso && libreta && !d.bitacora) ? 'warn' : ''
+  return { texto: partes.join(' · ') || 'Sin comentarios', nivel }
+}
+
+/** Renglón de un equipo en la canasta: se abre para anotar accesorios, libreta, condición y fotos. */
+function RenglonEquipo(props: {
+  foto: Pick<Equipo, 'fotoId'>
+  codigo: string
+  nombre: string
+  sub?: string
+  resumen: { texto: string; nivel: '' | 'warn' | 'bad' }
+  abierto: boolean
+  onAbrir: () => void
+  onQuitar?: () => void
+  children: ComponentChildren
+}) {
+  return (
+    <div class={`renglon-eq ${props.abierto ? 'abierto' : ''}`}>
+      <div class="renglon-eq-cab">
+        <FotoEquipo e={props.foto} mini />
+        <button class="renglon-eq-titulo" onClick={props.onAbrir} aria-expanded={props.abierto}>
+          <span>
+            <strong class="mono">{props.codigo}</strong> · {props.nombre}
+          </span>
+          {props.sub && <span class="muted small">{props.sub}</span>}
+          <span class={`small renglon-eq-resumen ${props.resumen.nivel}`}>{props.resumen.texto}</span>
+        </button>
+        <button class="btn ghost sm" onClick={props.onAbrir}>
+          {props.abierto ? 'Listo' : 'Anotar'}
+        </button>
+        {props.onQuitar && (
+          <button class="btn ghost sm" onClick={props.onQuitar} aria-label={`Quitar ${props.codigo} de la lista`} title="Quitar de la lista">
+            <Icono n="cerrar" />
+          </button>
+        )}
+      </div>
+      {props.abierto && <div class="renglon-eq-cuerpo stack">{props.children}</div>}
+    </div>
+  )
+}
+
+/** Detalle guardado de cada renglón; los que no se tocan usan su valor inicial. */
+function useDetalles(inicial: (id: string) => Detalle) {
+  const [mapa, setMapa] = useState<Record<string, Detalle>>({})
+  const de = (id: string) => mapa[id] ?? inicial(id)
+  const cambiar = (id: string, c: Partial<Detalle>) => setMapa((m) => ({ ...m, [id]: { ...(m[id] ?? inicial(id)), ...c } }))
+  return { de, cambiar }
+}
+
+/**
+ * Préstamo de uno o varios equipos a la misma persona, como el despacho: se agregan a la lista,
+ * cada uno puede llevar o no comentarios de su estado, y al final se registran juntos (un folio por equipo).
+ */
+export function ModalPrestar({ equipos, onQuitar, onCerrar, onListo }: { equipos: Equipo[]; onQuitar?: (id: string) => void; onCerrar: () => void; onListo?: () => void }) {
+  const [receptor, setReceptor] = useState<Receptor>({ tipo: 'si', id: '' })
   const [actividad, setActividad] = useState('')
-  const [accesorios, setAccesorios] = useState<string[]>(eq.accesorios)
   // Casi nadie lleva su libreta: no viene marcada
-  const [bitacora, setBitacora] = useState(false)
-  const [obs, setObs] = useState<ObsElegida[]>([])
-  const [fotos, setFotos] = useState<string[]>([])
+  const det = useDetalles((id) => ({ accesorios: equipos.find((e) => e.id === id)?.accesorios ?? [], bitacora: false, obs: [], fotos: [] }))
+  const [abierto, setAbierto] = useState<string | null>(null)
   const [si, setSi] = useState(siPorDefecto())
   const [hora, setHora] = useState('')
   // El turno sale de la hora del movimiento (ahora, o la que corrija el administrador)
   const turnoMov = turnoDe(hora ? new Date(hora) : new Date())
   const [verTodos, setVerTodos] = useState(false)
   const [guardando, setGuardando] = useState(false)
-  const tecnico = S.personalSI.value.find((x) => x.id === tec)
-  const falta = !tecnico ? 'Elija a quién se presta' : haySupervisores() && !si ? 'Elija qué supervisor entrega' : ''
+  const persona = personaDe(receptor)
+  const uno = equipos.length === 1
+  const falta = !equipos.length ? 'Agregue al menos un equipo' : !persona ? 'Elija a quién se presta' : haySupervisores() && !si ? 'Elija qué supervisor entrega' : ''
 
   const guardar = async () => {
-    if (!tecnico || guardando) return
+    if (!persona || guardando) return
     setGuardando(true)
-    const p = await intentar(() => prestarEquipo({ equipoId: eq.id, trabajador: trabajadorDe(tecnico), actividad, accesorios, bitacora, obs, fotos, entregoSIId: si || undefined, fechaHora: hora || undefined }))
+    const lista = await intentar(() =>
+      prestarEquipos({
+        trabajador: persona,
+        actividad,
+        entregoSIId: si || undefined,
+        fechaHora: hora || undefined,
+        renglones: equipos.map((e) => ({ equipoId: e.id, ...det.de(e.id) })),
+      }),
+    )
     setGuardando(false)
-    if (p) {
-      avisar(`✓ ${p.equipoCodigo} para ${tecnico.corto} · ${p.folio}`)
+    if (lista) {
+      const quien = cortoDe(persona.rpe, persona.nombre)
+      avisar(
+        lista.length === 1
+          ? `✓ ${lista[0].equipoCodigo} para ${quien} · ${lista[0].folio}`
+          : `✓ ${lista.length} equipos para ${quien} · folios ${lista[0].folio} a ${lista[lista.length - 1].folio}`,
+        { ms: 6000 },
+      )
+      onListo?.()
       onCerrar()
     }
   }
 
   return (
     <Modal
-      titulo={`Prestar ${eq.codigo}`}
+      titulo={uno ? `Prestar ${equipos[0].codigo}` : `Prestar ${equipos.length} equipos`}
       onCerrar={onCerrar}
       ancho
       acciones={
         <>
           <span class="muted small grow">{falta}</span>
           <button class="btn" onClick={onCerrar}>
-            Cancelar
+            {onQuitar && !uno ? 'Seguir agregando' : 'Cancelar'}
           </button>
           <button class="btn primary" disabled={!!falta || guardando} onClick={guardar}>
-            Registrar salida
+            {uno ? 'Registrar salida' : `Registrar salida de ${equipos.length}`}
           </button>
         </>
       }
     >
-      <div class="row card" style={{ padding: '8px', flexWrap: 'nowrap' }}>
-        <FotoEquipo e={eq} mini />
-        <div class="grow">
-          <strong class="mono">{eq.codigo}</strong> · {eq.nombre}
-          <div class="muted small">{[eq.marca, eq.modelo, eq.serie && `Serie ${eq.serie}`].filter(Boolean).join(' · ')}</div>
-        </div>
+      <div class="stack" style={{ gap: '6px' }}>
+        <strong class="small">{uno ? 'Equipo' : `Equipos (${equipos.length}) · toque uno para anotar su estado; si no, sale sin comentarios`}</strong>
+        {equipos.map((eq) => {
+          const d = det.de(eq.id)
+          const abiertoEste = uno || abierto === eq.id
+          return (
+            <RenglonEquipo
+              key={eq.id}
+              foto={eq}
+              codigo={eq.codigo}
+              nombre={eq.nombre}
+              sub={[eq.marca, eq.modelo, eq.serie && `Serie ${eq.serie}`].filter(Boolean).join(' · ')}
+              resumen={resumenDetalle(d, eq.accesorios, false, false)}
+              abierto={abiertoEste}
+              onAbrir={() => !uno && setAbierto(abiertoEste ? null : eq.id)}
+              onQuitar={onQuitar && !uno ? () => onQuitar(eq.id) : undefined}
+            >
+              <Accesorios lista={eq.accesorios} marcados={d.accesorios} onCambio={(accesorios) => det.cambiar(eq.id, { accesorios })} titulo="Accesorios que salen con el equipo" />
+              {eq.llevaBitacora && (
+                <label class="check">
+                  <input type="checkbox" checked={d.bitacora} onChange={(e) => det.cambiar(eq.id, { bitacora: (e.target as HTMLInputElement).checked })} />
+                  Se lleva su libreta de bitácora
+                </label>
+              )}
+              <ObsRapidas
+                id={`eq-obs-${eq.id}`}
+                titulo="Condición del equipo al entregarlo"
+                obs={d.obs}
+                onObs={(obs) => det.cambiar(eq.id, { obs })}
+                fotos={d.fotos}
+                onFotos={(fotos) => det.cambiar(eq.id, { fotos })}
+              />
+            </RenglonEquipo>
+          )
+        })}
       </div>
       <AvisoTurno turno={turnoMov} verTodos={verTodos} onVerTodos={setVerTodos} />
-      <BotonesSI funcion="tecnico" rol="Se presta a (técnico)" valor={tec} onCambio={setTec} turno={verTodos ? null : turnoMov} />
+      <ElegirReceptor rol="Se presta a" valor={receptor} onCambio={setReceptor} turno={verTodos ? null : turnoMov} />
       <BotonesSI funcion="supervisor" rol="Lo entrega (supervisor)" valor={si} onCambio={setSi} turno={verTodos ? null : turnoMov} />
       <ActividadCampo valor={actividad} onCambio={setActividad} />
-      <Accesorios lista={eq.accesorios} marcados={accesorios} onCambio={setAccesorios} titulo="Accesorios que salen con el equipo" />
-      <label class="check">
-        <input type="checkbox" checked={bitacora} onChange={(e) => setBitacora((e.target as HTMLInputElement).checked)} />
-        Se lleva su libreta de bitácora
-      </label>
-      <ObsRapidas titulo="Condición del equipo al entregarlo" obs={obs} onObs={setObs} fotos={fotos} onFotos={setFotos} />
-      <HoraMovimiento etiqueta="Hora de la entrega" valor={hora} onCambio={setHora} />
+      <HoraMovimiento etiqueta={uno ? 'Hora de la entrega' : 'Hora de la entrega (la misma para todos)'} valor={hora} onCambio={setHora} />
     </Modal>
   )
 }
 
 // ---------- Devolver o transferir ----------
 
-export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; onCerrar: () => void; onAnular: (p: PrestamoEquipo) => void }) {
+/**
+ * Devolución a la oficina o paso a otra persona de uno o varios equipos (de una o de varias personas).
+ * Cada equipo lleva sus accesorios, libreta, condición y fotos; lo demás se captura una sola vez.
+ */
+export function ModalDevolver({
+  prestamos,
+  onQuitar,
+  onCerrar,
+  onListo,
+  onAnular,
+}: {
+  prestamos: PrestamoEquipo[]
+  onQuitar?: (id: string) => void
+  onCerrar: () => void
+  onListo?: () => void
+  onAnular: (p: PrestamoEquipo) => void
+}) {
+  const uno = prestamos.length === 1
+  const titulares = [...new Set(prestamos.map((p) => p.rpe))]
+  const unTitular = titulares.length === 1
+  const p0 = prestamos[0]
   const [modo, setModo] = useState<'devolucion' | 'transferencia'>('devolucion')
   // Quien devuelve: el que lo tiene (por defecto) u otro técnico
   const [otroId, setOtroId] = useState('')
-  const [nuevoId, setNuevoId] = useState('')
-  const [actividad, setActividad] = useState(p.uso)
-  const [accesorios, setAccesorios] = useState<string[]>(p.accesorios)
-  const [bitacora, setBitacora] = useState(p.bitacora)
-  const [obs, setObs] = useState<ObsElegida[]>([])
-  const [fotos, setFotos] = useState<string[]>([])
+  const [nuevo, setNuevo] = useState<Receptor>({ tipo: 'si', id: '' })
+  const usos = [...new Set(prestamos.map((p) => p.uso))]
+  const [actividad, setActividad] = useState(usos.length === 1 ? usos[0] : '')
+  const det = useDetalles((id) => {
+    const p = prestamos.find((x) => x.id === id)
+    return { accesorios: p?.accesorios ?? [], bitacora: !!p?.bitacora, obs: [], fotos: [] }
+  })
+  const [abierto, setAbierto] = useState<string | null>(null)
   const [si, setSi] = useState(siPorDefecto())
   const [hora, setHora] = useState('')
   // El turno sale de la hora del movimiento (ahora, o la que corrija el administrador)
   const turnoMov = turnoDe(hora ? new Date(hora) : new Date())
   const [verTodos, setVerTodos] = useState(false)
   const [guardando, setGuardando] = useState(false)
+  if (!p0) return null
   const transfiere = modo === 'transferencia'
-  const otro = S.personalSI.value.find((x) => x.id === otroId)
-  const nuevo = S.personalSI.value.find((x) => x.id === nuevoId)
-  const titularSI = S.personalSI.value.find((x) => x.rpe === p.rpe)
-  const nombreTitular = titularSI?.corto ?? p.nombre.split(' ').slice(0, 2).join(' ')
-  const devolvio = transfiere || !otro ? { rpe: p.rpe, nombre: p.nombre } : trabajadorDe(otro)
-  const falta = transfiere && !nuevo ? 'Elija quién lo recibe' : haySupervisores() && !si ? `Elija qué supervisor ${transfiere ? 'registra' : 'recibe'}` : ''
+  const otro = unTitular ? S.personalSI.value.find((x) => x.id === otroId) : undefined
+  const destino = personaDe(nuevo)
+  const nombreTitular = cortoDe(p0.rpe, p0.nombre)
+  const falta = !prestamos.length
+    ? 'Elija al menos un equipo'
+    : transfiere && !destino
+      ? 'Elija quién lo recibe'
+      : transfiere && destino && titulares.includes(destino.rpe)
+        ? 'Quien recibe ya tiene uno de estos equipos: elija a otra persona'
+        : haySupervisores() && !si
+          ? `Elija qué supervisor ${transfiere ? 'registra' : 'recibe'}`
+          : ''
 
   const guardar = async () => {
     if (guardando) return
     setGuardando(true)
+    const devolvio = !transfiere && otro ? trabajadorDe(otro) : undefined
+    const act = actividad.trim()
     const r = await intentar(() =>
-      registrarRegreso({
-        prestamoId: p.id,
-        devolvio,
-        accesorios,
-        bitacora,
-        obs,
-        fotos,
+      registrarRegresos({
         recibioSIId: si || undefined,
         fechaHora: hora || undefined,
-        transferirA: transfiere && nuevo ? { trabajador: trabajadorDe(nuevo), actividad } : undefined,
+        // Sin actividad nueva, cada equipo conserva la suya
+        transferirA: transfiere && destino ? { trabajador: destino, actividad: act || undefined } : undefined,
+        renglones: prestamos.map((p) => ({ prestamoId: p.id, devolvio, ...det.de(p.id) })),
       }),
     )
     setGuardando(false)
     if (!r) return
-    const corto = (n: string) => n.split(' ').slice(0, 2).join(' ')
-    avisar(r.siguiente ? `✓ ${p.equipoCodigo} pasó de ${nombreTitular} a ${nuevo?.corto ?? corto(r.siguiente.nombre)}` : `✓ ${p.equipoCodigo} de regreso en la oficina`)
+    const que = uno ? p0.equipoCodigo : `${prestamos.length} equipos`
+    avisar(
+      transfiere && destino
+        ? `✓ ${que} ${uno ? 'pasó' : 'pasaron'} ${unTitular ? `de ${nombreTitular} ` : ''}a ${cortoDe(destino.rpe, destino.nombre)}`
+        : `✓ ${que} de regreso en la oficina`,
+      { ms: 6000 },
+    )
+    onListo?.()
     onCerrar()
   }
 
   return (
     <Modal
-      titulo={`${transfiere ? 'Transferir' : 'Devolver'} ${p.equipoCodigo}`}
+      titulo={`${transfiere ? 'Transferir' : 'Devolver'} ${uno ? p0.equipoCodigo : `${prestamos.length} equipos`}`}
       onCerrar={onCerrar}
       ancho
       acciones={
@@ -397,47 +582,100 @@ export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; on
           </button>
           <button class="btn primary" disabled={!!falta || guardando} onClick={guardar}>
             {transfiere ? 'Registrar transferencia' : 'Registrar devolución'}
+            {!uno && ` de ${prestamos.length}`}
           </button>
         </>
       }
     >
-      <div class="muted small">
-        {p.equipoNombre} · folio {p.folio}
-        <br />
-        Lo tiene <strong>{nombreTitular}</strong> desde {fmtTs(p.ts)} ({hace(p.ts)}){p.uso && ` · ${p.uso}`}
-      </div>
+      {uno && (
+        <div class="muted small">
+          {p0.equipoNombre} · folio {p0.folio}
+          <br />
+          Lo tiene <strong>{nombreTitular}</strong> desde {fmtTs(p0.ts)} ({hace(p0.ts)}){p0.uso && ` · ${p0.uso}`}
+        </div>
+      )}
       <div class="row" role="group" aria-label="Qué se hace con el equipo">
         <button class="opcion grow" aria-pressed={!transfiere} onClick={() => setModo('devolucion')}>
           <Icono n="devolucion" /> Devolución a la oficina
         </button>
         <button class="opcion grow" aria-pressed={transfiere} onClick={() => setModo('transferencia')}>
-          <Icono n="repetir" /> Pasa a otro técnico
+          <Icono n="repetir" /> Pasa a otra persona
         </button>
+      </div>
+
+      <div class="stack" style={{ gap: '6px' }}>
+        <strong class="small">{uno ? 'Equipo' : `Equipos (${prestamos.length}) · toque uno para anotar su estado; si no, queda sin comentarios`}</strong>
+        {prestamos.map((p) => {
+          const d = det.de(p.id)
+          const abiertoEste = uno || abierto === p.id
+          const eq = S.equipos.value.find((e) => e.id === p.equipoId)
+          return (
+            <RenglonEquipo
+              key={p.id}
+              foto={eq ?? {}}
+              codigo={p.equipoCodigo}
+              nombre={eq?.nombre ?? p.equipoNombre}
+              sub={uno ? undefined : `${p.folio} · ${unTitular ? '' : `${cortoDe(p.rpe, p.nombre)} · `}desde ${fmtTs(p.ts)} (${hace(p.ts)})`}
+              resumen={resumenDetalle(d, p.accesorios, p.bitacora, true)}
+              abierto={abiertoEste}
+              onAbrir={() => !uno && setAbierto(abiertoEste ? null : p.id)}
+              onQuitar={onQuitar && !uno ? () => onQuitar(p.id) : undefined}
+            >
+              <Accesorios
+                lista={p.accesorios}
+                marcados={d.accesorios}
+                onCambio={(accesorios) => det.cambiar(p.id, { accesorios })}
+                titulo={transfiere ? 'Accesorios que pasan con el equipo' : 'Accesorios que regresan'}
+              />
+              {p.bitacora && (
+                <label class="check">
+                  <input type="checkbox" checked={d.bitacora} onChange={(e) => det.cambiar(p.id, { bitacora: (e.target as HTMLInputElement).checked })} />
+                  {transfiere ? 'La libreta de bitácora pasa con el equipo' : 'Regresa la libreta de bitácora'}
+                </label>
+              )}
+              <ObsRapidas
+                id={`eq-obs-${p.id}`}
+                titulo={transfiere ? 'Condición del equipo en la transferencia' : 'Condición del equipo al recibirlo'}
+                obs={d.obs}
+                onObs={(obs) => det.cambiar(p.id, { obs })}
+                fotos={d.fotos}
+                onFotos={(fotos) => det.cambiar(p.id, { fotos })}
+              />
+              {d.obs.some((o) => o.tipo === 'dano') && !transfiere && <p class="muted small">Con un daño, el equipo quedará «En revisión» y no se podrá prestar hasta que se marque como operativo.</p>}
+            </RenglonEquipo>
+          )
+        })}
       </div>
 
       <AvisoTurno turno={turnoMov} verTodos={verTodos} onVerTodos={setVerTodos} />
       {transfiere ? (
         <>
           <div class="stack" style={{ gap: '6px' }}>
-            <strong class="small">Transfiere (técnico)</strong>
+            <strong class="small">Transfiere</strong>
             <div class="chips">
-              <button class="chip chip-si" aria-pressed>
-                {nombreTitular}
-              </button>
+              {titulares.map((rpe) => {
+                const p = prestamos.find((x) => x.rpe === rpe)!
+                return (
+                  <button key={rpe} class="chip chip-si" aria-pressed>
+                    {cortoDe(p.rpe, p.nombre)}
+                  </button>
+                )
+              })}
             </div>
           </div>
-          <BotonesSI funcion="tecnico" rol="Recibe (técnico)" valor={nuevoId} onCambio={setNuevoId} excluirRpe={p.rpe} turno={verTodos ? null : turnoMov} />
+          <ElegirReceptor rol="Recibe" valor={nuevo} onCambio={setNuevo} excluirRpe={unTitular ? p0.rpe : undefined} turno={verTodos ? null : turnoMov} />
           <ActividadCampo valor={actividad} onCambio={setActividad} />
+          {!actividad.trim() && usos.length > 1 && <p class="muted small">Sin actividad nueva, cada equipo conserva la que tenía.</p>}
         </>
-      ) : (
+      ) : unTitular ? (
         <div class="stack" style={{ gap: '6px' }}>
-          <strong class="small">Devuelve (técnico)</strong>
+          <strong class="small">Devuelve</strong>
           <div class="chips" role="group" aria-label="Quién devuelve">
             <button class="chip chip-si" aria-pressed={!otroId} onClick={() => setOtroId('')}>
               {nombreTitular}
             </button>
             {personalSIOrdenado(S.personalSI.value, S.prestamosEquipo.value, 'tecnico')
-              .filter((x) => x.rpe !== p.rpe && (verTodos || enTurno(x, turnoMov) || x.id === otroId))
+              .filter((x) => x.rpe !== p0.rpe && (verTodos || enTurno(x, turnoMov) || x.id === otroId))
               .map((x) => (
                 <button key={x.id} class="chip chip-si" aria-pressed={otroId === x.id} onClick={() => setOtroId(x.id)} title={x.nombre}>
                   {x.corto}
@@ -445,22 +683,21 @@ export function ModalDevolver({ p, onCerrar, onAnular }: { p: PrestamoEquipo; on
               ))}
           </div>
         </div>
+      ) : (
+        <p class="muted small">Cada equipo queda devuelto por la persona que lo tiene.</p>
       )}
 
       <BotonesSI funcion="supervisor" rol={transfiere ? 'Registra la transferencia (supervisor)' : 'Recibe (supervisor)'} valor={si} onCambio={setSi} turno={verTodos ? null : turnoMov} />
-      <Accesorios lista={p.accesorios} marcados={accesorios} onCambio={setAccesorios} titulo={transfiere ? 'Accesorios que pasan con el equipo' : 'Accesorios que regresan'} />
-      {p.bitacora && (
-        <label class="check">
-          <input type="checkbox" checked={bitacora} onChange={(e) => setBitacora((e.target as HTMLInputElement).checked)} />
-          {transfiere ? 'La libreta de bitácora pasa con el equipo' : 'Regresa la libreta de bitácora'}
-        </label>
+      <HoraMovimiento
+        etiqueta={`${transfiere ? 'Hora de la transferencia' : 'Hora de la devolución'}${uno ? '' : ' (la misma para todos)'}`}
+        valor={hora}
+        onCambio={setHora}
+      />
+      {uno && (
+        <button class="btn ghost sm" style={{ justifySelf: 'start' }} onClick={() => (onCerrar(), onAnular(p0))}>
+          Se registró por error: anular esta salida
+        </button>
       )}
-      <ObsRapidas titulo={transfiere ? 'Condición del equipo en la transferencia' : 'Condición del equipo al recibirlo'} obs={obs} onObs={setObs} fotos={fotos} onFotos={setFotos} />
-      {obs.some((o) => o.tipo === 'dano') && !transfiere && <p class="muted small">Con un daño, el equipo quedará «En revisión» y no se podrá prestar hasta que se marque como operativo.</p>}
-      <HoraMovimiento etiqueta={transfiere ? 'Hora de la transferencia' : 'Hora de la devolución'} valor={hora} onCambio={setHora} />
-      <button class="btn ghost sm" style={{ justifySelf: 'start' }} onClick={() => (onCerrar(), onAnular(p))}>
-        Se registró por error: anular esta salida
-      </button>
     </Modal>
   )
 }
@@ -504,11 +741,12 @@ export function ModalAnular({ p, onCerrar }: { p: PrestamoEquipo; onCerrar: () =
 }
 
 /** Cuadro de un equipo prestado: quién lo tiene, desde cuándo y si ya se pasó el tiempo de alerta. */
-export function TileEnUso({ p, onClick }: { p: PrestamoEquipo; onClick: () => void }) {
+export function TileEnUso({ p, onClick, elegido }: { p: PrestamoEquipo; onClick: () => void; elegido?: boolean }) {
   const eq = S.equipos.value.find((e) => e.id === p.equipoId)
   const vencido = prestamoVencido(p)
   return (
-    <button class={`tile prest ${vencido ? 'prestamo-vencido' : ''}`} onClick={onClick}>
+    <button class={`tile prest ${vencido ? 'prestamo-vencido' : ''}`} onClick={onClick} aria-pressed={elegido === undefined ? undefined : elegido}>
+      {elegido && <span class="tile-marca" aria-hidden="true">✓</span>}
       <FotoEquipo e={eq ?? {}} />
       <span class="tile-codigo mono">{p.equipoCodigo}</span>
       <span class="tile-nombre">{p.nombre.split(' ').slice(0, 3).join(' ')}</span>

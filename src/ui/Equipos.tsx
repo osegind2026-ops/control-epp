@@ -462,8 +462,27 @@ function NoDisponibles() {
   )
 }
 
-/** Equipos disponibles en cuadros grandes, como el despacho de EPP. */
-function PrestarEquipos({ onElegir }: { onElegir: (e: Equipo) => void }) {
+/** Barra fija con lo que lleva la lista: se registra todo junto al final, como en el despacho. */
+function BarraLista({ cuantos, nombres, accion, onVaciar, onContinuar }: { cuantos: number; nombres: string[]; accion: string; onVaciar: () => void; onContinuar: () => void }) {
+  if (!cuantos) return null
+  return (
+    <div class="canasta-barra" role="region" aria-label="Equipos elegidos">
+      <span class="grow">
+        <strong>{plural(cuantos, 'equipo', 'equipos')}</strong>
+        <span class="muted small canasta-nombres"> · {nombres.join(', ')}</span>
+      </span>
+      <button class="btn ghost sm" onClick={onVaciar}>
+        Quitar todos
+      </button>
+      <button class="btn primary" onClick={onContinuar}>
+        {accion} →
+      </button>
+    </div>
+  )
+}
+
+/** Equipos disponibles en cuadros grandes, como el despacho de EPP: se marcan varios y se prestan juntos. */
+function PrestarEquipos({ lista: elegidos, onAlternar, onAgregar, onContinuar, onVaciar }: { lista: string[]; onAlternar: (e: Equipo) => void; onAgregar: (e: Equipo) => void; onContinuar: () => void; onVaciar: () => void }) {
   const activos = S.prestamosEquipoActivos.value
   const [buscar, setBuscar] = useState('')
   const [camara, setCamara] = useState(false)
@@ -472,11 +491,12 @@ function PrestarEquipos({ onElegir }: { onElegir: (e: Equipo) => void }) {
   const q = normalizar(buscar)
   const lista = disponibles.filter((e) => !q || normalizar(`${e.codigo} ${e.nombre} ${e.marca} ${e.modelo} ${e.serie}`).includes(q))
 
-  /** Lectura del QR (escáner o cámara): abre el préstamo de ese equipo si está disponible. */
+  /** Lectura del QR (escáner o cámara): agrega ese equipo a la lista si está disponible. */
   const porLectura = (texto: string): boolean => {
     const leido = equipoPorLectura(texto, S.equipos.value)
     if (leido && disponibles.includes(leido)) {
-      onElegir(leido)
+      onAgregar(leido)
+      setBuscar('')
       return true
     }
     if (leido) {
@@ -488,6 +508,9 @@ function PrestarEquipos({ onElegir }: { onElegir: (e: Equipo) => void }) {
 
   return (
     <div class="stack">
+      <p class="muted small" style={{ margin: 0 }}>
+        Toque o escanee los equipos que se llevan (uno o varios) y al final presione <strong>Prestar</strong>.
+      </p>
       <div class="row" style={{ flexWrap: 'nowrap' }}>
         <div class="campo-buscar mini grow">
           <Icono n="buscar" />
@@ -500,7 +523,10 @@ function PrestarEquipos({ onElegir }: { onElegir: (e: Equipo) => void }) {
             onKeyDown={(e) => {
               if (e.key !== 'Enter') return
               // Acepta el código tecleado o la lectura del QR con un escáner
-              if (!porLectura(buscar) && lista.length === 1) onElegir(lista[0])
+              if (!porLectura(buscar) && lista.length === 1) {
+                onAgregar(lista[0])
+                setBuscar('')
+              }
             }}
           />
         </div>
@@ -512,7 +538,7 @@ function PrestarEquipos({ onElegir }: { onElegir: (e: Equipo) => void }) {
       {camara && (
         <CamaraEnVivo
           titulo="Leer QR del equipo"
-          ayuda="Apunte la cámara al código QR de la etiqueta del equipo. Se abre solo en cuanto lo lee."
+          ayuda="Apunte la cámara al código QR de la etiqueta del equipo. Se agrega a la lista en cuanto lo lee."
           textoFoto="Leer de la foto"
           guia={1}
           buscarCodigo={async (c) => {
@@ -541,8 +567,14 @@ function PrestarEquipos({ onElegir }: { onElegir: (e: Equipo) => void }) {
       <div class="mosaico grande">
         {lista.map((e) => {
           const dc = diasCalibracion(e)
+          const elegido = elegidos.includes(e.id)
           return (
-            <button key={e.id} class="tile equipo" onClick={() => onElegir(e)}>
+            <button key={e.id} class="tile equipo" aria-pressed={elegido} onClick={() => onAlternar(e)}>
+              {elegido && (
+                <span class="tile-marca" aria-hidden="true">
+                  ✓
+                </span>
+              )}
               <FotoEquipo e={e} />
               <span class="tile-codigo mono">{e.codigo}</span>
               <span class="tile-nombre">{e.nombre}</span>
@@ -556,44 +588,117 @@ function PrestarEquipos({ onElegir }: { onElegir: (e: Equipo) => void }) {
         <Vacio>{disponibles.length ? 'Ningún equipo disponible coincide.' : S.equipos.value.length ? 'No hay equipos disponibles: todos están prestados o fuera de servicio.' : 'Aún no hay equipos. Un administrador o el encargado de almacén los agrega en la pestaña «Equipos».'}</Vacio>
       )}
       <NoDisponibles />
+      <BarraLista
+        cuantos={elegidos.length}
+        nombres={elegidos.map((id) => S.equipos.value.find((e) => e.id === id)?.codigo ?? '')}
+        accion="Prestar"
+        onVaciar={onVaciar}
+        onContinuar={onContinuar}
+      />
     </div>
   )
 }
 
-/** Equipos que están fuera de la oficina: se devuelven o pasan a otra persona. */
-function DevolverEquipos({ onElegir }: { onElegir: (p: PrestamoEquipo) => void }) {
+/** Equipos que están fuera de la oficina: se marcan uno o varios y se devuelven o pasan a otra persona juntos. */
+function DevolverEquipos({ lista: elegidos, onAlternar, onAgregar, onContinuar, onVaciar }: { lista: string[]; onAlternar: (p: PrestamoEquipo) => void; onAgregar: (ps: PrestamoEquipo[]) => void; onContinuar: () => void; onVaciar: () => void }) {
   const [buscar, setBuscar] = useState('')
+  const activos = S.prestamosEquipoActivos.value
   const q = normalizar(buscar)
-  const lista = [...S.prestamosEquipoActivos.value]
-    .sort((a, b) => (a.ts < b.ts ? -1 : 1))
-    .filter((p) => !q || normalizar(`${p.equipoCodigo} ${p.equipoNombre} ${p.nombre} ${p.rpe} ${p.uso}`).includes(q))
-  if (!S.prestamosEquipoActivos.value.length) return <Vacio>No hay equipos fuera de la oficina.</Vacio>
+  const lista = [...activos].sort((a, b) => (a.ts < b.ts ? -1 : 1)).filter((p) => !q || normalizar(`${p.equipoCodigo} ${p.equipoNombre} ${p.nombre} ${p.rpe} ${p.uso}`).includes(q))
+  if (!activos.length) return <Vacio>No hay equipos fuera de la oficina.</Vacio>
+
+  /** Lectura del QR con el escáner: marca el préstamo activo de ese equipo. */
+  const porLectura = (texto: string): boolean => {
+    const leido = equipoPorLectura(texto, S.equipos.value)
+    if (!leido) return false
+    const p = activos.find((x) => x.equipoId === leido.id)
+    if (p) {
+      onAgregar([p])
+      setBuscar('')
+    } else avisar(`${leido.codigo} no está prestado: está en la oficina.`, { tipo: 'bad' })
+    return true
+  }
+
+  // Si ya eligió equipos de alguien que tiene más, ofrecer agregar los demás de esa persona
+  const titulares = [...new Set(activos.filter((p) => elegidos.includes(p.id)).map((p) => p.rpe))]
+  const sugerencias = titulares
+    .map((rpe) => ({ rpe, resto: activos.filter((p) => p.rpe === rpe && !elegidos.includes(p.id)) }))
+    .filter((x) => x.resto.length)
+
   return (
     <div class="stack">
+      <p class="muted small" style={{ margin: 0 }}>
+        Toque los equipos que regresan o pasan a otra persona (de una o de varias personas) y al final presione <strong>Devolver o transferir</strong>.
+      </p>
       <div class="campo-buscar mini">
         <Icono n="buscar" />
-        <input class="input" id="eq-buscar-uso" placeholder="Buscar por equipo o por persona" value={buscar} onInput={(e) => setBuscar((e.target as HTMLInputElement).value)} />
+        <input
+          class="input"
+          id="eq-buscar-uso"
+          placeholder="Buscar por equipo o por persona, o escanear su QR"
+          value={buscar}
+          onInput={(e) => setBuscar((e.target as HTMLInputElement).value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return
+            if (!porLectura(buscar) && lista.length === 1) {
+              onAgregar(lista)
+              setBuscar('')
+            }
+          }}
+        />
       </div>
+      {sugerencias.length > 0 && (
+        <div class="row" style={{ gap: '6px' }}>
+          {sugerencias.map((x) => (
+            <button key={x.rpe} class="btn sm" onClick={() => onAgregar(x.resto)}>
+              + Agregar {x.resto.length === 1 ? 'el otro' : `los otros ${x.resto.length}`} de {x.resto[0].nombre.split(' ').slice(0, 2).join(' ')}
+            </button>
+          ))}
+        </div>
+      )}
       <div class="mosaico grande">
         {lista.map((p) => (
-          <TileEnUso key={p.id} p={p} onClick={() => onElegir(p)} />
+          <TileEnUso key={p.id} p={p} elegido={elegidos.includes(p.id)} onClick={() => onAlternar(p)} />
         ))}
       </div>
       {!lista.length && <Vacio>Ningún equipo coincide.</Vacio>}
+      <BarraLista
+        cuantos={elegidos.length}
+        nombres={elegidos.map((id) => activos.find((p) => p.id === id)?.equipoCodigo ?? '')}
+        accion="Devolver o transferir"
+        onVaciar={onVaciar}
+        onContinuar={onContinuar}
+      />
     </div>
   )
 }
 
+const alternar = (lista: string[], id: string) => (lista.includes(id) ? lista.filter((x) => x !== id) : [...lista, id])
+const agregar = (lista: string[], ids: string[]) => [...lista, ...ids.filter((id) => !lista.includes(id))]
+
 export function PantallaEquipos() {
   const [tab, setTab] = useState<'prestar' | 'devolver' | 'catalogo' | 'bitacora'>('prestar')
-  const [prestar, setPrestar] = useState<Equipo | null>(null)
-  const [devolver, setDevolver] = useState<PrestamoEquipo | null>(null)
+  // Listas como la del despacho: se arman tocando cuadros y se registran juntas
+  const [porPrestar, setPorPrestar] = useState<string[]>([])
+  const [porDevolver, setPorDevolver] = useState<string[]>([])
+  const [prestar, setPrestar] = useState(false)
+  const [devolver, setDevolver] = useState(false)
   const [anular, setAnular] = useState<PrestamoEquipo | null>(null)
   const activos = S.prestamosEquipoActivos.value
   const ahora = ahoraLocal()
   const vencidos = activos.filter((p) => prestamoVencido(p, ahora))
-  const disponibles = S.equipos.value.filter((e) => disponibilidad(e, activos) === 'disponible').length
+  const listos = S.equipos.value.filter((e) => disponibilidad(e, activos) === 'disponible')
+  const disponibles = listos.length
   const calibrar = S.equipos.value.filter((e) => e.estado !== 'baja' && (diasCalibracion(e) ?? 999) <= 30)
+  // Lo que ya no está disponible (o ya regresó) sale solo de las listas
+  const equiposPrestar = porPrestar.map((id) => listos.find((e) => e.id === id)).filter((e): e is Equipo => !!e)
+  const prestamosDevolver = porDevolver.map((id) => activos.find((p) => p.id === id)).filter((p): p is PrestamoEquipo => !!p)
+  const idsPrestar = equiposPrestar.map((e) => e.id)
+  const idsDevolver = prestamosDevolver.map((p) => p.id)
+  const agregarAPrestar = (e: Equipo) => {
+    if (!idsPrestar.includes(e.id)) avisar(`✓ ${e.codigo} en la lista (${idsPrestar.length + 1})`, { ms: 2000 })
+    setPorPrestar((l) => agregar(l, [e.id]))
+  }
   return (
     <div class="stack">
       <div class="spread">
@@ -628,7 +733,7 @@ export function PantallaEquipos() {
       <div class="tabs" role="tablist">
         {(
           [
-            ['prestar', 'Prestar'],
+            ['prestar', `Prestar${idsPrestar.length ? ` (${idsPrestar.length} en lista)` : ''}`],
             ['devolver', `Devolver o transferir (${activos.length})`],
             ['catalogo', `Equipos (${S.equipos.value.filter((e) => e.estado !== 'baja').length})`],
             ['bitacora', 'Bitácora'],
@@ -639,12 +744,51 @@ export function PantallaEquipos() {
           </button>
         ))}
       </div>
-      {tab === 'prestar' && <PrestarEquipos onElegir={setPrestar} />}
-      {tab === 'devolver' && <DevolverEquipos onElegir={setDevolver} />}
-      {tab === 'catalogo' && <CatalogoEquipos onPrestar={setPrestar} />}
+      {tab === 'prestar' && (
+        <PrestarEquipos
+          lista={idsPrestar}
+          onAlternar={(e) => setPorPrestar((l) => alternar(l, e.id))}
+          onAgregar={agregarAPrestar}
+          onVaciar={() => setPorPrestar([])}
+          onContinuar={() => setPrestar(true)}
+        />
+      )}
+      {tab === 'devolver' && (
+        <DevolverEquipos
+          lista={idsDevolver}
+          onAlternar={(p) => setPorDevolver((l) => alternar(l, p.id))}
+          onAgregar={(ps) => setPorDevolver((l) => agregar(l, ps.map((p) => p.id)))}
+          onVaciar={() => setPorDevolver([])}
+          onContinuar={() => setDevolver(true)}
+        />
+      )}
+      {tab === 'catalogo' && (
+        <CatalogoEquipos
+          onPrestar={(e) => {
+            setPorPrestar((l) => agregar(l, [e.id]))
+            setTab('prestar')
+            setPrestar(true)
+          }}
+        />
+      )}
       {tab === 'bitacora' && <Bitacora />}
-      {prestar && <ModalPrestar eq={prestar} onCerrar={() => setPrestar(null)} />}
-      {devolver && <ModalDevolver p={devolver} onCerrar={() => setDevolver(null)} onAnular={setAnular} />}
+      {prestar && equiposPrestar.length > 0 && (
+        <ModalPrestar
+          equipos={equiposPrestar}
+          onQuitar={(id) => setPorPrestar((l) => l.filter((x) => x !== id))}
+          onCerrar={() => setPrestar(false)}
+          onListo={() => setPorPrestar([])}
+        />
+      )}
+      {devolver && prestamosDevolver.length > 0 && (
+        <ModalDevolver
+          prestamos={prestamosDevolver}
+          onQuitar={(id) => setPorDevolver((l) => l.filter((x) => x !== id))}
+          onCerrar={() => setDevolver(false)}
+          onListo={() => setPorDevolver([])}
+          onAnular={setAnular}
+        />
+      )}
       {anular && <ModalAnular p={anular} onCerrar={() => setAnular(null)} />}
     </div>
   )

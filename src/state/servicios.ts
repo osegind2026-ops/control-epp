@@ -631,46 +631,74 @@ export async function guardarFotosEvidencia(dataUrls: string[]): Promise<string[
 }
 export const MAX_FOTOS_EVIDENCIA = 4
 
-export async function devolverResguardo(resguardoId: string, motivoId: string, nota: string, fotos: string[] = []): Promise<void> {
+/** Un equipo dentro de una devolución de varios: cada uno con su estado, nota y fotos. */
+export interface RenglonDevolucion {
+  resguardoId: string
+  motivoId: string
+  nota?: string
+  fotos?: string[]
+}
+
+/** Recibe varios equipos en resguardo o prestados en un solo paso (todo o nada). */
+export async function devolverResguardos(renglones: RenglonDevolucion[]): Promise<void> {
   const { sesion } = actor()
-  const r = S.resguardos.value.find((x) => x.id === resguardoId)
-  if (!r || r.estatus !== 'ACTIVO') throw new ErrorNegocio('El resguardo ya no está activo.')
-  const motivo = S.motivos.value.find((m) => m.id === motivoId)
-  if (!motivo) throw new ErrorNegocio('Elija el estado del equipo devuelto.')
+  if (!renglones.length) throw new ErrorNegocio('Elija al menos un equipo.')
+  if (new Set(renglones.map((x) => x.resguardoId)).size !== renglones.length) throw new ErrorNegocio('Un equipo está repetido en la lista.')
   const ahora = new Date()
-  const cerrado: Resguardo = {
-    ...r,
-    ver: (r.ver ?? 0) + 1,
-    estatus: 'CERRADO',
-    cierre: {
-      ts: ahora.toISOString(),
-      fecha: fechaLocal(ahora),
-      motivo: motivo.texto + (nota.trim() ? ` · ${nota.trim()}` : ''),
-      reingresa: !!motivo.reingresa,
-      usuarioId: sesion.usuarioId,
-      usuarioNombre: sesion.usuarioNombre,
-      ref: 'DEVOLUCIÓN',
-    },
-  }
+  const cambios = renglones.map((x) => {
+    const r = S.resguardos.value.find((y) => y.id === x.resguardoId)
+    if (!r || r.estatus !== 'ACTIVO') throw new ErrorNegocio(r ? `El resguardo de ${S.nombreMaterial(r.materialId, r.varianteId)} (${r.nombre}) ya no está activo.` : 'El resguardo ya no está activo.')
+    const motivo = S.motivos.value.find((m) => m.id === x.motivoId)
+    if (!motivo) throw new ErrorNegocio(`Elija el estado de ${S.nombreMaterial(r.materialId, r.varianteId)}.`)
+    const nota = (x.nota ?? '').trim()
+    const cerrado: Resguardo = {
+      ...r,
+      ver: (r.ver ?? 0) + 1,
+      estatus: 'CERRADO',
+      cierre: {
+        ts: ahora.toISOString(),
+        fecha: fechaLocal(ahora),
+        motivo: motivo.texto + (nota ? ` · ${nota}` : ''),
+        reingresa: !!motivo.reingresa,
+        usuarioId: sesion.usuarioId,
+        usuarioNombre: sesion.usuarioNombre,
+        ref: 'DEVOLUCIÓN',
+      },
+    }
+    return { r, cerrado, motivo, fotos: x.fotos ?? [] }
+  })
   await db.transaction('rw', [db.resguardos, db.movimientos, db.fotos], async () => {
-    cerrado.cierre!.fotos = await guardarFotosEvidencia(fotos)
-    await db.resguardos.put(cerrado)
-    if (motivo.reingresa) {
-      await db.movimientos.add(
-        nuevoMovimiento('DEVOLUCION', {
-          materialId: r.materialId,
-          varianteId: r.varianteId,
-          ubicacionId: ubicacionDespachoId(),
-          cantidad: r.cantidad,
-          ref: r.folioSI,
-          motivo: motivo.texto,
-          nota: `${r.rpe} · ${r.nombre}`,
-        }),
-      )
+    for (const { r, cerrado, motivo, fotos } of cambios) {
+      cerrado.cierre!.fotos = await guardarFotosEvidencia(fotos)
+      await db.resguardos.put(cerrado)
+      if (motivo.reingresa) {
+        await db.movimientos.add(
+          nuevoMovimiento('DEVOLUCION', {
+            materialId: r.materialId,
+            varianteId: r.varianteId,
+            ubicacionId: ubicacionDespachoId(),
+            cantidad: r.cantidad,
+            ref: r.folioSI,
+            motivo: motivo.texto,
+            nota: `${r.rpe} · ${r.nombre}`,
+          }),
+        )
+      }
     }
   })
   await S.recargar('resguardos', 'movimientos', 'fotos')
   await marcarCambio()
+}
+
+export async function devolverResguardo(resguardoId: string, motivoId: string, nota: string, fotos: string[] = []): Promise<void> {
+  try {
+    await devolverResguardos([{ resguardoId, motivoId, nota, fotos }])
+  } catch (e) {
+    // Mismos mensajes de siempre para un solo equipo
+    if (e instanceof ErrorNegocio && /ya no está activo/.test(e.message)) throw new ErrorNegocio('El resguardo ya no está activo.')
+    if (e instanceof ErrorNegocio && /^Elija el estado/.test(e.message)) throw new ErrorNegocio('Elija el estado del equipo devuelto.')
+    throw e
+  }
 }
 
 // ---------- Almacén ----------

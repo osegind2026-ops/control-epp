@@ -1604,3 +1604,24 @@ details > summary { list-style: revert; }
 .rp-media em { background: #bc955c; } .rp-media span { color: #8a6a35; }
 .rp-ok em { background: #235b4e; } .rp-ok span { color: #235b4e; }
 .rp-hallazgos-lista ul { margin: 0; padding-left: 14pt; display: grid; gap: 4pt; font-size: 10.5pt; }
+
+/* ---------- Listas de varios equipos (préstamo y devolución juntos) ---------- */
+.tile[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
+.tile-marca { position: absolute; top: 6px; right: 6px; z-index: 1; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 999px; background: var(--accent); color: #fff; font: 700 15px/1 var(--display); box-shadow: var(--shadow); }
+.canasta-barra { position: sticky; bottom: 0; z-index: 5; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 12px; background: var(--surface); border: 1px solid var(--accent); border-radius: 10px; box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.12); }
+.canasta-barra > .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 899px) {
+  .canasta-barra { bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom, 0px)); }
+  .canasta-nombres { display: none; }
+}
+.renglon-eq { border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); }
+.renglon-eq.abierto { border-color: var(--accent); }
+.renglon-eq-cab { display: flex; align-items: center; gap: 8px; padding: 6px 8px; min-width: 0; }
+.renglon-eq-titulo { flex: 1; min-width: 0; display: grid; gap: 2px; text-align: left; background: none; border: 0; padding: 2px 0; color: inherit; font: inherit; cursor: pointer; }
+.renglon-eq-titulo > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.renglon-eq-resumen { color: var(--muted); }
+.renglon-eq-resumen.warn { color: var(--warn); font-weight: 600; }
+.renglon-eq-resumen.bad { color: var(--bad); font-weight: 600; }
+.renglon-eq-cuerpo { padding: 4px 10px 12px; border-top: 1px solid var(--rule); gap: 10px; }
+.devolver-check { width: 22px; height: 22px; flex: none; margin-top: 2px; accent-color: var(--accent); }
+.opcion svg { width: 20px; height: 20px; flex: none; }

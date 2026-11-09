@@ -393,29 +393,53 @@ function armarPrestamo(
   return p
 }
 
-export async function prestarEquipo(d: DatosSalida): Promise<PrestamoEquipo> {
-  const eq = S.equipos.value.find((e) => e.id === d.equipoId)
-  if (!eq) throw new ErrorNegocio('Elija el equipo.')
-  const estado = disponibilidad(eq, S.prestamosEquipoActivos.value)
-  if (estado === 'prestado') {
-    const p = S.prestamosEquipoActivos.value.find((x) => x.equipoId === eq.id)
-    throw new ErrorNegocio(`${eq.codigo} ya está prestado a ${p?.nombre ?? 'otra persona'}. Registre primero su devolución o transfiéralo.`)
-  }
-  if (estado !== 'disponible') throw new ErrorNegocio(`${eq.codigo} no se puede prestar: ${TEXTO_DISPONIBILIDAD[estado].toLowerCase()}.`)
+/** Un equipo dentro de un préstamo de varios: cada uno lleva sus accesorios, libreta, condición y fotos. */
+export type RenglonSalida = Pick<DatosSalida, 'equipoId' | 'accesorios' | 'bitacora' | 'obs' | 'fotos'>
+
+/** Préstamo de varios equipos a la misma persona en un solo paso (cada equipo con su folio). */
+export interface DatosSalidaVarios extends Pick<DatosSalida, 'trabajador' | 'actividad' | 'entregoSIId' | 'fechaHora'> {
+  renglones: RenglonSalida[]
+}
+
+export async function prestarEquipos(d: DatosSalidaVarios): Promise<PrestamoEquipo[]> {
+  if (!d.renglones.length) throw new ErrorNegocio('Agregue al menos un equipo.')
+  if (new Set(d.renglones.map((r) => r.equipoId)).size !== d.renglones.length) throw new ErrorNegocio('Un equipo está repetido en la lista.')
   if (!d.trabajador.rpe) throw new ErrorNegocio('Indique quién recibe el equipo.')
+  const equipos = d.renglones.map((r) => {
+    const eq = S.equipos.value.find((e) => e.id === r.equipoId)
+    if (!eq) throw new ErrorNegocio('Elija el equipo.')
+    const estado = disponibilidad(eq, S.prestamosEquipoActivos.value)
+    if (estado === 'prestado') {
+      const p = S.prestamosEquipoActivos.value.find((x) => x.equipoId === eq.id)
+      throw new ErrorNegocio(`${eq.codigo} ya está prestado a ${p?.nombre ?? 'otra persona'}. Registre primero su devolución o transfiéralo.`)
+    }
+    if (estado !== 'disponible') throw new ErrorNegocio(`${eq.codigo} no se puede prestar: ${TEXTO_DISPONIBILIDAD[estado].toLowerCase()}.`)
+    return eq
+  })
   const entregoSI = resolverSI(d.entregoSIId, 'entrega el equipo')
   const { ts, capturada } = momento(d.fechaHora)
-  const obs = limpiarObs(d.obs)
-  const p = armarPrestamo(eq, d, { folios: S.prestamosEquipo.value.map((x) => x.folio), ts, capturada, entregoSI, obs })
+  const folios = S.prestamosEquipo.value.map((x) => x.folio)
+  const lista = d.renglones.map((r, k) => {
+    const obs = limpiarObs(r.obs)
+    const p = armarPrestamo(equipos[k], { ...r, trabajador: d.trabajador, actividad: d.actividad }, { folios, ts, capturada, entregoSI, obs })
+    folios.push(p.folio)
+    return { p, obs, fotos: r.fotos ?? [] }
+  })
   await db.transaction('rw', [db.prestamosEquipo, db.fotos, db.obsEquipo], async () => {
-    const ids = await guardarFotosEvidencia(d.fotos ?? [])
-    if (ids) p.fotos = ids
-    await guardarObsNuevas(obs)
-    await db.prestamosEquipo.add(p)
+    for (const x of lista) {
+      const ids = await guardarFotosEvidencia(x.fotos)
+      if (ids) x.p.fotos = ids
+      await guardarObsNuevas(x.obs)
+      await db.prestamosEquipo.add(x.p)
+    }
   })
   await S.recargar('prestamosEquipo', 'fotos', 'obsEquipo')
   avisarCambioLocal()
-  return p
+  return lista.map((x) => x.p)
+}
+
+export async function prestarEquipo(d: DatosSalida): Promise<PrestamoEquipo> {
+  return (await prestarEquipos({ ...d, renglones: [d] }))[0]
 }
 
 export interface DatosRegreso {
@@ -436,71 +460,104 @@ export interface DatosRegreso {
   transferirA?: { trabajador: Pick<Trabajador, 'rpe' | 'nombre' | 'area'>; actividad?: string }
 }
 
-export async function registrarRegreso(d: DatosRegreso): Promise<{ siguiente?: PrestamoEquipo }> {
+/** Un equipo dentro de una devolución o transferencia de varios. */
+export interface RenglonRegreso extends Pick<DatosRegreso, 'prestamoId' | 'accesorios' | 'bitacora' | 'obs' | 'fotos'> {
+  /** Quién lo devuelve; sin valor = la persona que lo tiene. */
+  devolvio?: Pick<Trabajador, 'rpe' | 'nombre'>
+}
+
+/** Devolución (o transferencia a otra persona) de varios equipos en un solo paso. */
+export interface DatosRegresoVarios extends Pick<DatosRegreso, 'recibioSIId' | 'fechaHora' | 'transferirA'> {
+  renglones: RenglonRegreso[]
+}
+
+export async function registrarRegresos(d: DatosRegresoVarios): Promise<{ siguientes: PrestamoEquipo[] }> {
   const { sesion } = actor()
-  const p = S.prestamosEquipo.value.find((x) => x.id === d.prestamoId)
-  if (!p || p.estatus !== 'ACTIVO') throw new ErrorNegocio('Ese préstamo ya no está activo.')
+  if (!d.renglones.length) throw new ErrorNegocio('Elija al menos un equipo.')
+  if (new Set(d.renglones.map((r) => r.prestamoId)).size !== d.renglones.length) throw new ErrorNegocio('Un equipo está repetido en la lista.')
   const transfiere = !!d.transferirA
   if (d.transferirA && !d.transferirA.trabajador.rpe) throw new ErrorNegocio('Indique quién recibe el equipo.')
-  if (d.transferirA && d.transferirA.trabajador.rpe === d.devolvio.rpe) throw new ErrorNegocio('Elija a otra persona: quien lo transfiere no puede ser también quien lo recibe.')
+  const prestamos = d.renglones.map((r) => {
+    const p = S.prestamosEquipo.value.find((x) => x.id === r.prestamoId)
+    if (!p || p.estatus !== 'ACTIVO') throw new ErrorNegocio(p ? `El préstamo de ${p.equipoCodigo} ya no está activo.` : 'Ese préstamo ya no está activo.')
+    const devolvio = r.devolvio ?? { rpe: p.rpe, nombre: p.nombre }
+    if (d.transferirA && d.transferirA.trabajador.rpe === devolvio.rpe)
+      throw new ErrorNegocio(`Elija a otra persona: ${p.equipoCodigo} ya lo tiene ${devolvio.nombre.split(' ').slice(0, 2).join(' ')} y no puede transferírselo a sí mismo.`)
+    return { p, r, devolvio }
+  })
   const recibioSI = resolverSI(d.recibioSIId, transfiere ? 'registra la transferencia' : 'recibe el equipo')
-  const { ts, capturada } = momento(d.fechaHora, p.ts)
-  const obs = limpiarObs(d.obs)
+  const salidaMasReciente = prestamos.reduce((m, x) => (x.p.ts > m ? x.p.ts : m), '')
+  const { ts, capturada } = momento(d.fechaHora, salidaMasReciente)
+  const folios = [...S.prestamosEquipo.value.map((x) => x.folio)]
+  const ahoraIso = new Date().toISOString()
 
-  // Lo que falta se anota solo, sin tener que escribirlo
-  const faltan = p.accesorios.filter((a) => !d.accesorios.includes(a))
-  const faltaLibreta = p.bitacora && !d.bitacora
-  const notasFalta: string[] = []
-  if (faltan.length) notasFalta.push(`Falta: ${faltan.join(', ')}`)
-  if (faltaLibreta) notasFalta.push('No regresó la libreta de bitácora')
-  let condicion = condicionDe(obs)
-  if (condicion === 'bueno' && notasFalta.length) condicion = 'detalle'
-  const textos = obs.map((o) => o.texto)
+  const cambios = prestamos.map(({ p, r, devolvio }) => {
+    const obs = limpiarObs(r.obs)
+    // Lo que falta se anota solo, sin tener que escribirlo
+    const faltan = p.accesorios.filter((a) => !r.accesorios.includes(a))
+    const faltaLibreta = p.bitacora && !r.bitacora
+    const notasFalta: string[] = []
+    if (faltan.length) notasFalta.push(`Falta: ${faltan.join(', ')}`)
+    if (faltaLibreta) notasFalta.push('No regresó la libreta de bitácora')
+    let condicion = condicionDe(obs)
+    if (condicion === 'bueno' && notasFalta.length) condicion = 'detalle'
+    const textos = obs.map((o) => o.texto)
 
-  const siguiente = d.transferirA
-    ? armarPrestamo(
-        S.equipos.value.find((e) => e.id === p.equipoId) ?? ({ id: p.equipoId, codigo: p.equipoCodigo, nombre: p.equipoNombre, marca: '', modelo: '' } as Equipo),
-        { trabajador: d.transferirA.trabajador, actividad: d.transferirA.actividad ?? p.uso, accesorios: d.accesorios, bitacora: d.bitacora },
-        { folios: [...S.prestamosEquipo.value.map((x) => x.folio), p.folio], ts, capturada, entregoSI: recibioSI, obs, origenId: p.id },
-      )
-    : undefined
-  // El préstamo nuevo conserva el nombre completo del equipo del anterior
-  if (siguiente) siguiente.equipoNombre = p.equipoNombre
+    const siguiente = d.transferirA
+      ? armarPrestamo(
+          S.equipos.value.find((e) => e.id === p.equipoId) ?? ({ id: p.equipoId, codigo: p.equipoCodigo, nombre: p.equipoNombre, marca: '', modelo: '' } as Equipo),
+          { trabajador: d.transferirA.trabajador, actividad: d.transferirA.actividad ?? p.uso, accesorios: r.accesorios, bitacora: r.bitacora },
+          { folios: [...folios, p.folio], ts, capturada, entregoSI: recibioSI, obs, origenId: p.id },
+        )
+      : undefined
+    if (siguiente) {
+      // El préstamo nuevo conserva el nombre completo del equipo del anterior
+      siguiente.equipoNombre = p.equipoNombre
+      folios.push(siguiente.folio)
+    }
+    const actualizado: PrestamoEquipo = {
+      ...p,
+      estatus: 'DEVUELTO',
+      regreso: {
+        ts,
+        tipo: transfiere ? 'transferencia' : 'devolucion',
+        recibioSI,
+        devolvioRpe: devolvio.rpe,
+        devolvioNombre: devolvio.nombre,
+        usuarioId: sesion.usuarioId,
+        usuarioNombre: sesion.usuarioNombre,
+        condicion,
+        accesorios: r.accesorios,
+        bitacora: r.bitacora,
+        comentarios: [...textos, ...notasFalta].join(' · '),
+        ...(textos.length ? { obsRapidas: textos } : {}),
+        ...(siguiente ? { siguienteId: siguiente.id } : {}),
+        ...(capturada ? { capturada } : {}),
+      },
+      ver: p.ver + 1,
+      actualizado: ahoraIso,
+    }
+    return { actualizado, siguiente, obs, fotos: r.fotos ?? [], condicion, eq: S.equipos.value.find((e) => e.id === p.equipoId) }
+  })
 
-  const actualizado: PrestamoEquipo = {
-    ...p,
-    estatus: 'DEVUELTO',
-    regreso: {
-      ts,
-      tipo: transfiere ? 'transferencia' : 'devolucion',
-      recibioSI,
-      devolvioRpe: d.devolvio.rpe,
-      devolvioNombre: d.devolvio.nombre,
-      usuarioId: sesion.usuarioId,
-      usuarioNombre: sesion.usuarioNombre,
-      condicion,
-      accesorios: d.accesorios,
-      bitacora: d.bitacora,
-      comentarios: [...textos, ...notasFalta].join(' · '),
-      ...(textos.length ? { obsRapidas: textos } : {}),
-      ...(siguiente ? { siguienteId: siguiente.id } : {}),
-      ...(capturada ? { capturada } : {}),
-    },
-    ver: p.ver + 1,
-    actualizado: new Date().toISOString(),
-  }
-  const eq = S.equipos.value.find((e) => e.id === p.equipoId)
   await db.transaction('rw', [db.prestamosEquipo, db.equipos, db.fotos, db.obsEquipo], async () => {
-    actualizado.regreso!.fotos = await guardarFotosEvidencia(d.fotos ?? [])
-    await guardarObsNuevas(obs)
-    await db.prestamosEquipo.put(actualizado)
-    if (siguiente) await db.prestamosEquipo.add(siguiente)
-    // Un equipo dañado no se vuelve a prestar hasta que alguien lo revise (si pasa a otra persona sigue en uso)
-    if (!siguiente && eq && condicion === 'danado' && eq.estado === 'operativo') await db.equipos.put({ ...eq, estado: 'revision', actualizado: actualizado.actualizado })
+    for (const c of cambios) {
+      c.actualizado.regreso!.fotos = await guardarFotosEvidencia(c.fotos)
+      await guardarObsNuevas(c.obs)
+      await db.prestamosEquipo.put(c.actualizado)
+      if (c.siguiente) await db.prestamosEquipo.add(c.siguiente)
+      // Un equipo dañado no se vuelve a prestar hasta que alguien lo revise (si pasa a otra persona sigue en uso)
+      if (!c.siguiente && c.eq && c.condicion === 'danado' && c.eq.estado === 'operativo') await db.equipos.put({ ...c.eq, estado: 'revision', actualizado: ahoraIso })
+    }
   })
   await S.recargar('prestamosEquipo', 'equipos', 'fotos', 'obsEquipo')
   avisarCambioLocal()
-  return { siguiente }
+  return { siguientes: cambios.flatMap((c) => (c.siguiente ? [c.siguiente] : [])) }
+}
+
+export async function registrarRegreso(d: DatosRegreso): Promise<{ siguiente?: PrestamoEquipo }> {
+  const { siguientes } = await registrarRegresos({ ...d, renglones: [d] })
+  return { siguiente: siguientes[0] }
 }
 
 // ---------- Correcciones del administrador en la bitácora ----------
