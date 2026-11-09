@@ -1250,9 +1250,12 @@ details > summary { list-style: revert; }
   height: 5.5mm;
 }
 .fmt-reg-h-tabla thead tr:nth-child(2) {
-  height: 15.5mm;
+  height: 7.5mm;
 }
-.fmt-reg-h-tabla thead th[rowspan="2"] {
+.fmt-reg-h-tabla thead tr:nth-child(3) {
+  height: 8mm;
+}
+.fmt-reg-h-tabla thead th[rowspan="3"] {
   height: 21mm;
 }
 
@@ -1267,24 +1270,28 @@ details > summary { list-style: revert; }
   letter-spacing: 0.5px;
 }
 
-/* Anchos fieles al formato original (suma total = 268.4mm) */
-.fmt-reg-h-tabla .col-h-nom { width: 53mm; text-align: left !important; padding-left: 4px !important; }
-.fmt-reg-h-tabla .col-h-rpe { width: 17mm; }
-.fmt-reg-h-tabla .col-h-firma { width: 25mm; }
-.fmt-reg-h-tabla .col-h-area { width: 20mm; }
-.fmt-reg-h-tabla .col-h-lentes { width: 10.5mm; }
+/* Anchos (suma total = 268.4mm). Desde la 2.23.0 cada guante tiene CANT. y TALLA para encerrar. */
+.fmt-reg-h-tabla .col-h-nom { width: 44mm; text-align: left !important; padding-left: 4px !important; }
+.fmt-reg-h-tabla .col-h-rpe { width: 16mm; }
+.fmt-reg-h-tabla .col-h-firma { width: 22mm; }
+.fmt-reg-h-tabla .col-h-area { width: 19mm; }
+.fmt-reg-h-tabla .col-h-lentes { width: 9.5mm; }
 .fmt-reg-h-tabla .col-h-grupo { font-size: 6.8pt; }
-.fmt-reg-h-tabla .col-h-carnaza { width: 12.5mm; }
-.fmt-reg-h-tabla .col-h-hyflex { width: 10.5mm; }
-.fmt-reg-h-tabla .col-h-nitrilo { width: 10.5mm; }
-.fmt-reg-h-tabla .col-h-tapones { width: 12mm; }
+.fmt-reg-h-tabla .col-h-guante { font-size: 6.2pt; letter-spacing: 0.3px; }
+.fmt-reg-h-tabla .col-h-cant { width: 7mm; }
+.fmt-reg-h-tabla th.col-h-cant { font-size: 4.8pt; letter-spacing: -0.1px; }
+.fmt-reg-h-tabla .col-h-talla { width: 13.5mm; }
+.fmt-reg-h-tabla th.col-h-talla { font-size: 5.4pt; line-height: 1.05; }
+.fmt-reg-h-tabla th.col-h-talla small { display: block; font-size: 4.4pt; font-weight: 500; }
+.fmt-reg-h-tabla .fmt-tallas { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.9mm; font-size: 6.6pt; line-height: 1; color: #8a8a8a !important; font-weight: 600; white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.fmt-reg-h-tabla .col-h-tapones { width: 11mm; }
 .fmt-reg-h-tabla .col-h-azul { width: 8.5mm; }
 .fmt-reg-h-tabla .col-h-negra { width: 9.5mm; }
 .fmt-reg-h-tabla .col-h-gris { width: 8.5mm; }
 .fmt-reg-h-tabla .col-h-polvo { width: 9.5mm; }
-.fmt-reg-h-tabla .col-h-fecha { width: 22mm; font-size: 6.5pt; line-height: 1.1; }
-.fmt-reg-h-tabla .col-h-hora { width: 13mm; }
-.fmt-reg-h-tabla .col-h-obs { width: 26mm; }
+.fmt-reg-h-tabla .col-h-fecha { width: 18mm; font-size: 6.5pt; line-height: 1.1; }
+.fmt-reg-h-tabla .col-h-hora { width: 11.4mm; }
+.fmt-reg-h-tabla .col-h-obs { width: 20mm; }
 .fmt-reg-h-tabla th.col-h-obs {
   font-size: 5.4pt !important;
   letter-spacing: -0.2px !important;

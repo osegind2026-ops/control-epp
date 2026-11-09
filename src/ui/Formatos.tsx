@@ -124,6 +124,26 @@ function FormatoContaminadoIndividual({ folioTexto }: { folioTexto: string }) {
 // =========================================================================
 // 2. FORMATO REGISTRO DE ENTREGA DE EPP 2026 (Firmas - Horizontal Landscape)
 // =========================================================================
+/** Tallas que se encierran en el registro (las mismas del catálogo de la app). */
+const TALLAS_GUANTE: { clase: string; nombre: string; tallas: string[][] }[] = [
+  { clase: 'carnaza', nombre: 'CARNAZA', tallas: [['CH', 'M'], ['G', 'XG']] },
+  { clase: 'hyflex', nombre: 'HYFLEX', tallas: [['6', '7', '8'], ['9', '10']] },
+  { clase: 'nitrilo', nombre: 'NITRILO', tallas: [['7', '8'], ['9', '10']] },
+]
+
+/** Casilla de talla con las opciones impresas en gris para encerrar la que se entregó. */
+function CeldaTalla({ tallas }: { tallas: string[][] }) {
+  return (
+    <td class="col-h-talla">
+      <span class="fmt-tallas">
+        {tallas.map((fila, i) => (
+          <span key={i}>{fila.join('\u2002')}</span>
+        ))}
+      </span>
+    </td>
+  )
+}
+
 function FormatoRegistroEntregaHorizontal({ paginaNum, anio = ANIO_ACTUAL }: { paginaNum: number; anio?: number }) {
   const renglones = Array.from({ length: 20 }, (_, i) => i)
   return (
@@ -147,26 +167,35 @@ function FormatoRegistroEntregaHorizontal({ paginaNum, anio = ANIO_ACTUAL }: { p
       <table class="fmt-reg-h-tabla">
         <thead>
           <tr>
-            <th rowspan={2} class="col-h-nom">NOMBRE</th>
-            <th rowspan={2} class="col-h-rpe">RPE</th>
-            <th rowspan={2} class="col-h-firma">FIRMA</th>
-            <th rowspan={2} class="col-h-area">ÁREA</th>
-            <th rowspan={2} class="col-h-lentes col-h-rot"><span class="col-v-txt">LENTES</span></th>
-            <th colspan={3} class="col-h-grupo">GUANTES</th>
-            <th rowspan={2} class="col-h-tapones col-h-rot"><span class="col-v-txt">TAPONES</span></th>
+            <th rowspan={3} class="col-h-nom">NOMBRE</th>
+            <th rowspan={3} class="col-h-rpe">RPE</th>
+            <th rowspan={3} class="col-h-firma">FIRMA</th>
+            <th rowspan={3} class="col-h-area">ÁREA</th>
+            <th rowspan={3} class="col-h-lentes col-h-rot"><span class="col-v-txt">LENTES</span></th>
+            <th colspan={6} class="col-h-grupo">GUANTES</th>
+            <th rowspan={3} class="col-h-tapones col-h-rot"><span class="col-v-txt">TAPONES</span></th>
             <th colspan={4} class="col-h-grupo">MASCARILLA</th>
-            <th rowspan={2} class="col-h-fecha">FECHA<br/><small>(DD/MM/AAA)</small></th>
-            <th rowspan={2} class="col-h-hora">HORA</th>
-            <th rowspan={2} class="col-h-obs">OBSERVACIONES</th>
+            <th rowspan={3} class="col-h-fecha">FECHA<br/><small>(DD/MM/AAAA)</small></th>
+            <th rowspan={3} class="col-h-hora">HORA</th>
+            <th rowspan={3} class="col-h-obs">OBSERVACIONES</th>
           </tr>
           <tr>
-            <th class="col-h-carnaza col-h-rot"><span class="col-v-txt">CARNAZA</span></th>
-            <th class="col-h-hyflex col-h-rot"><span class="col-v-txt">HYFLEX</span></th>
-            <th class="col-h-nitrilo col-h-rot"><span class="col-v-txt">NITRILO</span></th>
-            <th class="col-h-azul col-h-rot"><span class="col-v-txt">AZUL</span></th>
-            <th class="col-h-negra col-h-rot"><span class="col-v-txt">NEGRA</span></th>
-            <th class="col-h-gris col-h-rot"><span class="col-v-txt">GRIS</span></th>
-            <th class="col-h-polvo col-h-rot"><span class="col-v-txt">POLVO</span></th>
+            {TALLAS_GUANTE.map((g) => (
+              <th key={g.clase} colspan={2} class="col-h-guante">{g.nombre}</th>
+            ))}
+            <th rowspan={2} class="col-h-azul col-h-rot"><span class="col-v-txt">AZUL</span></th>
+            <th rowspan={2} class="col-h-negra col-h-rot"><span class="col-v-txt">NEGRA</span></th>
+            <th rowspan={2} class="col-h-gris col-h-rot"><span class="col-v-txt">GRIS</span></th>
+            <th rowspan={2} class="col-h-polvo col-h-rot"><span class="col-v-txt">POLVO</span></th>
+          </tr>
+          <tr>
+            {TALLAS_GUANTE.map((g) => [
+              <th key={`${g.clase}-c`} class="col-h-cant">CANT.</th>,
+              <th key={`${g.clase}-t`} class="col-h-talla">
+                TALLA
+                <small>(encierre)</small>
+              </th>,
+            ])}
           </tr>
         </thead>
         <tbody>
@@ -177,9 +206,10 @@ function FormatoRegistroEntregaHorizontal({ paginaNum, anio = ANIO_ACTUAL }: { p
               <td class="col-h-firma">&nbsp;</td>
               <td class="col-h-area">&nbsp;</td>
               <td class="col-h-lentes">&nbsp;</td>
-              <td class="col-h-carnaza">&nbsp;</td>
-              <td class="col-h-hyflex">&nbsp;</td>
-              <td class="col-h-nitrilo">&nbsp;</td>
+              {TALLAS_GUANTE.map((g) => [
+                <td key={`${g.clase}-c`} class="col-h-cant">&nbsp;</td>,
+                <CeldaTalla key={`${g.clase}-t`} tallas={g.tallas} />,
+              ])}
               <td class="col-h-tapones">&nbsp;</td>
               <td class="col-h-azul">&nbsp;</td>
               <td class="col-h-negra">&nbsp;</td>
@@ -694,7 +724,7 @@ export function PantallaFormatos() {
           <div>
             <h3>Registro de Entrega de EPP 2026 (Formato Horizontal)</h3>
             <p class="muted small">
-              Formato oficial en orientación <strong>horizontal (apaisado)</strong> con tabla completa de firmas por trabajador, área, desglose de lentes, guantes (carnaza, hyflex, nitrilo), tapones, mascarillas y foliado de páginas correlativo.
+              Formato oficial en orientación <strong>horizontal (apaisado)</strong> con tabla completa de firmas por trabajador, área, desglose de lentes, guantes con su talla para encerrar (carnaza, hyflex, nitrilo), tapones, mascarillas y foliado de páginas correlativo.
             </p>
           </div>
 
