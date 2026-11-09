@@ -97,6 +97,31 @@ export async function cambiarEquipo(t: Transporte, cfg: ConfigNube, objetivo: st
   await llamar(t, cfg.url, { accion: 'equipo', equipoId: cfg.equipoId, token: cfg.token, objetivo, ...cambios })
 }
 
+/** Estado del puente del servidor de la oficina con Google (para los celulares). */
+export interface EstadoPuente {
+  configurado: boolean
+  activo: boolean
+  hoja: string
+  minutos: number
+  estado?: { fecha: string; ok: boolean; mensaje: string; recibidos: number; enviados: number } | null
+  ultimoOk: string
+  ultimoCambio: string
+  pendientes: number
+  porConfirmar: number
+  ciclo: number
+}
+
+/** Solo el servidor de la oficina: ver, guardar, intercambiar ahora, pausar, reanudar o volver a mandar todo. */
+export async function puenteOficina(
+  t: Transporte,
+  cfg: ConfigNube,
+  op: 'ver' | 'guardar' | 'ahora' | 'pausar' | 'reanudar' | 'subirTodo',
+  extra: { hoja?: string; clave?: string; minutos?: number } = {},
+): Promise<EstadoPuente> {
+  const d = await llamar(t, cfg.url, { accion: 'puente', equipoId: cfg.equipoId, token: cfg.token, op, ...extra })
+  return d.puente as EstadoPuente
+}
+
 // ---------- Cambios locales ----------
 
 interface Cambio {

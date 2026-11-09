@@ -49,8 +49,9 @@ export function Intercambio() {
     <section class="card stack">
       <h2>Intercambio con {enRed ? 'celulares' : 'las PCs de la oficina'}</h2>
       <p class="muted small">
-        Las PCs (servidor de la oficina) y los celulares (Google) no se ven entre sí. Para juntar la información, pase un archivo de un lado al otro: se combina con las mismas reglas
-        de la sincronización (gana lo más reciente y no se duplica nada) y luego se sube solo {enRed ? 'al servidor de la oficina' : 'a Google'}. Hágalo al menos una vez al día.
+        Con el «Puente con los celulares» activo en la PC host, las PCs y los celulares se intercambian la información solos cada 5 minutos y esto queda solo como respaldo. Sin el
+        puente, pase un archivo de un lado al otro al menos una vez al día: se combina con las mismas reglas de la sincronización (gana lo más reciente y no se duplica nada) y luego
+        se sube solo {enRed ? 'al servidor de la oficina' : 'a Google'}.
       </p>
       <div class={`aviso ${viejo ? 'warn' : 'info'} small`}>
         <Icono n={viejo ? 'alerta' : 'info'} />

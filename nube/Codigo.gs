@@ -6,12 +6,17 @@
  * Extensiones → Apps Script de la hoja, ejecute «configurar» una vez y
  * publíquelo como aplicación web (Ejecutar como: yo · Acceso: cualquier persona).
  *
+ * Puente con la PC de la oficina (2.6.0): ejecute «instalarPuente» una vez. Crea un formulario y una
+ * hoja aparte con datos cifrados para que el servidor de la PC host intercambie la información cada
+ * 5 minutos (la red de la oficina solo deja pasar docs.google.com). También programa un respaldo
+ * diario de esta hoja en Google Drive.
+ *
  * Cada tabla de la app es una pestaña. Las columnas id, _rev, _borrado y _json
  * son las que usa la sincronización; el resto son columnas de consulta.
  * No edite las pestañas a mano: los cambios se hacen desde la app.
  */
 
-var VERSION_SERVIDOR = '2.5.0'
+var VERSION_SERVIDOR = '2.6.0'
 var ZONA = 'America/Mexico_City'
 var LIMITE_FILAS = 800
 var LIMITE_CARACTERES = 3000000
@@ -208,6 +213,13 @@ function configurar() {
     ['Correos para avisos', correosPrevios],
     ['Avisos', 'Además de la cuenta dueña, escriba en la celda de arriba otros correos separados por coma. Active el envío diario con «activarAvisosDiarios».'],
   ])
+  var hojaPuente = props.getProperty('PUENTE_HOJA')
+  if (hojaPuente) {
+    info.getRange(9, 1, 2, 2).setValues([
+      ['Puente con la PC · enlace', 'https://docs.google.com/spreadsheets/d/' + hojaPuente + '/edit'],
+      ['Puente · uso', 'Pegue este enlace y la clave de la oficina en la PC host: Ajustes → Servidor de la oficina → Puente con los celulares.'],
+    ])
+  }
   Logger.log('Clave de la oficina: ' + props.getProperty('CLAVE'))
   return props.getProperty('CLAVE')
 }
@@ -225,6 +237,10 @@ function onOpen() {
     .addItem('Recalcular existencias', 'recalcularExistencias')
     .addItem('Enviar avisos ahora', 'enviarAvisos')
     .addItem('Activar avisos diarios (7:00)', 'activarAvisosDiarios')
+    .addSeparator()
+    .addItem('Instalar / ver puente con la PC', 'instalarPuente')
+    .addItem('Intercambiar con la PC ahora', 'puenteCiclo')
+    .addItem('Respaldar esta hoja ahora', 'respaldoDiario')
     .addToUi()
 }
 
@@ -436,11 +452,14 @@ function contexto() {
   }
 }
 
-function sincronizar(pet) {
-  var equipo = autenticar(pet)
+/**
+ * Aplica cambios {tabla, id, borrado, datos} con las reglas de combinación (los de un equipo o los que
+ * llegan por el puente). `eco` (opcional) recibe «tabla|id» → rev de lo que quedó tal como llegó, para
+ * que el puente no se lo regrese a la PC que lo mandó.
+ */
+function aplicarCambios(cambios, eco) {
   var props = PropertiesService.getScriptProperties()
   var rev = Number(props.getProperty('REV') || '0')
-  var cambios = pet.cambios || []
   var ctx = contexto()
   var tablasLeidas = {}
   var errores = []
@@ -468,6 +487,7 @@ function sincronizar(pet) {
       var fila
       if (c.borrado) {
         rev++
+        if (eco) eco[tabla + '|' + id] = rev
         if (tabla === 'entregas') finalesEntregas.push({ id: id, borrado: true })
         if (pos === undefined) {
           fila = [id, String(rev), 'SI', '{}'].concat(TABLAS[tabla].cols.map(function () { return '' }))
@@ -486,6 +506,7 @@ function sincronizar(pet) {
       if (json.length > 49000) return errores.push('Registro demasiado grande (' + tabla + ' ' + id + '); reduzca la foto.')
       rev++
       if (pos === undefined) {
+        if (eco) eco[tabla + '|' + id] = rev
         if (tabla === 'entregas') finalesEntregas.push({ id: id, datos: c.datos })
         fila = [id, String(rev), '', json].concat(TABLAS[tabla].fila(c.datos, ctx))
         t.indice[id] = t.filas.length
@@ -501,6 +522,7 @@ function sincronizar(pet) {
         var gana = ganaEntrante(tabla, actual, c.datos)
         if (tabla === 'entregas') finalesEntregas.push({ id: id, datos: gana ? c.datos : actual })
         if (gana) {
+          if (eco) eco[tabla + '|' + id] = rev
           var nueva = [id, String(rev), '', json].concat(TABLAS[tabla].fila(c.datos, ctx))
           for (var k = 0; k < nueva.length; k++) fila[k] = nueva[k]
         } else {
@@ -525,6 +547,15 @@ function sincronizar(pet) {
 
   if (finalesEntregas.length) actualizarDetalle(finalesEntregas, ctx)
   if (tocadas.movimientos || tocadas.materiales || tocadas.ubicaciones) recalcularExistencias()
+  return { rev: rev, errores: errores, tablasLeidas: tablasLeidas }
+}
+
+function sincronizar(pet) {
+  var equipo = autenticar(pet)
+  var aplicado = aplicarCambios(pet.cambios || [])
+  var rev = aplicado.rev
+  var errores = aplicado.errores
+  var tablasLeidas = aplicado.tablasLeidas
 
   // 2) Devolver lo que el equipo aún no tiene
   var cursor = Number(pet.cursor || 0)
@@ -749,4 +780,319 @@ function activarAvisosDiarios() {
   })
   ScriptApp.newTrigger('enviarAvisos').timeBased().everyDays(1).atHour(7).inTimezone(ZONA).create()
   return 'Avisos diarios activados (7:00) para: ' + correosAviso().join(', ')
+}
+
+// ---------------------------------------------------------------------------
+// Puente con el servidor de la oficina (PC host)
+//
+// La red de la oficina no deja pasar script.google.com pero sí docs.google.com. Entonces:
+//  - la PC host manda sus cambios como respuestas de un FORMULARIO de Google (firmadas con la
+//    clave de la oficina; las que no traen la firma correcta se descartan);
+//  - Google deja lo nuevo de los celulares en una HOJA APARTE compartida como «Lector con el
+//    enlace», que solo contiene datos CIFRADOS con la clave de la oficina.
+// Cifrado: flujo SHA-256 en modo contador + HMAC-SHA256 (Apps Script no trae AES); el servidor de
+// la PC hace lo mismo con .NET. Las llaves salen de la clave de la oficina y nunca viajan.
+// ---------------------------------------------------------------------------
+
+var PUENTE_PARTE = 40000 // caracteres por celda (Sheets admite 50 000)
+var PUENTE_LOTE = 1500000 // caracteres de JSON por lote
+var PUENTE_DIAS = 14 // la hoja cifrada conserva dos semanas
+var SHA = Utilities.DigestAlgorithm.SHA_256
+
+function bytesDe(texto) {
+  return Utilities.newBlob(String(texto)).getBytes()
+}
+
+function llavesPuente() {
+  var clave = String(PropertiesService.getScriptProperties().getProperty('CLAVE') || '').trim().toUpperCase()
+  if (!clave) throw new Error('Ejecute «configurar» primero.')
+  return { cifra: Utilities.computeDigest(SHA, bytesDe('epp-puente-cifra|' + clave)), mac: Utilities.computeDigest(SHA, bytesDe('epp-puente-mac|' + clave)) }
+}
+
+/** Huella de la clave (no la revela): la PC la compara para avisar si tiene otra clave guardada. */
+function verificadorPuente(ll) {
+  return hex(Utilities.computeHmacSha256Signature(bytesDe('epp-puente-verifica'), ll.mac))
+}
+
+function hex(bytes) {
+  return bytes.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2) }).join('')
+}
+
+/** Flujo de cifra: bloque i = SHA-256(llave ‖ nonce ‖ i). Cifrar y descifrar es la misma operación. */
+function flujoPuente(bytes, llave, nonce) {
+  var salida = new Array(bytes.length)
+  var bloque = null
+  for (var i = 0; i < bytes.length; i++) {
+    if (i % 32 === 0) {
+      var n = i / 32
+      bloque = Utilities.computeDigest(SHA, llave.concat(nonce, [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].map(function (x) { return x > 127 ? x - 256 : x })))
+    }
+    salida[i] = bytes[i] ^ bloque[i % 32]
+  }
+  return salida
+}
+
+/** JSON → gzip → cifrado → base64 (nonce ‖ cifrado ‖ firma). */
+function cifrarPuente(obj, ll) {
+  var gz = Utilities.gzip(Utilities.newBlob(JSON.stringify(obj), 'application/json')).getBytes()
+  var nonce = Utilities.computeDigest(SHA, bytesDe(Utilities.getUuid() + Date.now())).slice(0, 16)
+  var cuerpo = nonce.concat(flujoPuente(gz, ll.cifra, nonce))
+  return Utilities.base64Encode(cuerpo.concat(Utilities.computeHmacSha256Signature(cuerpo, ll.mac)))
+}
+
+function hojaPuente() {
+  var id = PropertiesService.getScriptProperties().getProperty('PUENTE_HOJA')
+  if (!id) throw new Error('El puente no está instalado. Ejecute «instalarPuente».')
+  return SpreadsheetApp.openById(id)
+}
+
+/** Ejecutar una vez desde el editor (o el menú Control EPP). Se puede repetir: reutiliza lo que ya existe. */
+function instalarPuente() {
+  configurar()
+  var props = PropertiesService.getScriptProperties()
+  // 1) Formulario por el que la PC manda sus cambios
+  var form = null
+  if (props.getProperty('PUENTE_FORM')) {
+    try { form = FormApp.openById(props.getProperty('PUENTE_FORM')) } catch (e) { form = null }
+  }
+  if (!form) {
+    form = FormApp.create('Control EPP · puente con la PC (no editar)')
+    form.setDescription('Uso interno del servidor de Control EPP. No lo edite ni lo comparta.')
+    form.addParagraphTextItem().setTitle('datos')
+    props.setProperty('PUENTE_FORM', form.getId())
+  }
+  form.setCollectEmail(false)
+  form.setLimitOneResponsePerUser(false)
+  form.setAcceptingResponses(true)
+  try { form.setRequireLogin(false) } catch (e) {} // solo existe en cuentas de Workspace
+  try { if (form.setPublished) form.setPublished(true) } catch (e) {} // formularios nuevos nacen sin publicar
+  var item = form.getItems()[0].asParagraphTextItem()
+  var prellenado = form.createResponse().withItemResponse(item.createResponse('x')).toPrefilledUrl()
+  var campo = (prellenado.match(/(entry\.\d+)=/) || [])[1]
+  if (!campo) throw new Error('No se pudo leer el campo del formulario: ' + prellenado)
+  var accion = prellenado.split('/viewform')[0] + '/formResponse'
+
+  // 2) Hoja aparte con los datos cifrados para la PC
+  var ss = null
+  if (props.getProperty('PUENTE_HOJA')) {
+    try { ss = SpreadsheetApp.openById(props.getProperty('PUENTE_HOJA')) } catch (e) { ss = null }
+  }
+  if (!ss) {
+    ss = SpreadsheetApp.create('Control EPP · puente (solo datos cifrados)')
+    props.setProperty('PUENTE_HOJA', ss.getId())
+    props.setProperty('PUENTE_REV', '0')
+    props.setProperty('PUENTE_N', '0')
+  }
+  var salida = ss.getSheetByName('Salida') || ss.insertSheet('Salida')
+  if (salida.getLastRow() === 0) salida.getRange(1, 1, 1, 6).setValues([['lote', 'parte', 'partes', 'rev', 'datos', 'fecha']]).setFontWeight('bold')
+  salida.getRange('E:F').setNumberFormat('@')
+  var conf = ss.getSheetByName('Config') || ss.insertSheet('Config')
+  conf.clearContents()
+  conf.getRange(1, 1, 5, 2).setValues([['clave', 'valor'], ['formulario', accion], ['campo', campo], ['version', VERSION_SERVIDOR], ['verificador', verificadorPuente(llavesPuente())]])
+  var acuses = ss.getSheetByName('Recibidos') || ss.insertSheet('Recibidos')
+  if (acuses.getLastRow() === 0) acuses.getRange(1, 1, 1, 3).setValues([['lote', 'estado', 'fecha']]).setFontWeight('bold')
+  var sobra = ss.getSheetByName('Hoja 1') || ss.getSheetByName('Sheet1') || ss.getSheetByName('Hoja1')
+  if (sobra && ss.getSheets().length > 2) ss.deleteSheet(sobra)
+  // Solo contiene datos cifrados: se comparte para que la PC la lea sin iniciar sesión
+  DriveApp.getFileById(ss.getId()).setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW)
+
+  // 3) Disparadores: intercambio cada 5 minutos y respaldo diario a las 2:00
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (['puenteCiclo', 'respaldoDiario'].indexOf(t.getHandlerFunction()) >= 0) ScriptApp.deleteTrigger(t)
+  })
+  ScriptApp.newTrigger('puenteCiclo').timeBased().everyMinutes(5).create()
+  ScriptApp.newTrigger('respaldoDiario').timeBased().everyDays(1).atHour(2).inTimezone(ZONA).create()
+  configurar()
+  var url = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/edit'
+  Logger.log('Puente listo. En la PC host pegue este enlace y la clave de la oficina: ' + url)
+  return url
+}
+
+function leerEco() {
+  var h = hojaSimple('Puente eco', ['tabla|id', 'rev'])
+  h.hideSheet()
+  var n = h.getLastRow()
+  var eco = {}
+  if (n > 1) h.getRange(2, 1, n - 1, 2).getValues().forEach(function (f) { eco[String(f[0])] = Number(f[1]) })
+  return eco
+}
+
+/** Guarda solo lo que aún no se exporta (rev mayor que el último exportado). */
+function guardarEco(eco, hasta) {
+  var h = hojaSimple('Puente eco', ['tabla|id', 'rev'])
+  var filas = Object.keys(eco).filter(function (k) { return eco[k] > hasta }).map(function (k) { return [k, eco[k]] })
+  if (h.getLastRow() > 1) h.getRange(2, 1, h.getLastRow() - 1, 2).clearContent()
+  if (filas.length) h.getRange(2, 1, filas.length, 2).setValues(filas)
+}
+
+/** Lo que mandó la PC por el formulario: se juntan las partes de cada lote, se revisa la firma y se aplica. */
+function puenteImportar(ll, eco) {
+  var props = PropertiesService.getScriptProperties()
+  var form = FormApp.openById(props.getProperty('PUENTE_FORM'))
+  var lotes = {}
+  var resumen = { aplicados: 0, filas: 0, descartados: 0, errores: [], acuses: {} }
+  form.getResponses().forEach(function (r) {
+    var txt = String((r.getItemResponses()[0] || { getResponse: function () { return '' } }).getResponse() || '')
+    var p = txt.split('|')
+    // EPP1|lote|parte|partes|firma|datos
+    if (p.length < 6 || p[0] !== 'EPP1') {
+      form.deleteResponse(r.getId())
+      resumen.descartados++
+      return
+    }
+    var lote = p[1]
+    var parte = Number(p[2])
+    var partes = Number(p[3])
+    var datos = p.slice(5).join('|')
+    var firma = hex(Utilities.computeHmacSha256Signature(bytesDe(lote + '|' + parte + '|' + partes + '|' + datos), ll.mac))
+    if (firma !== p[4]) {
+      // Firma que no cuadra: otra clave o la respuesta llegó recortada. La PC lo ve en «Recibidos»
+      form.deleteResponse(r.getId())
+      resumen.descartados++
+      resumen.acuses[lote] = 'firma'
+      return
+    }
+    var l = (lotes[lote] = lotes[lote] || { partes: partes, trozos: {}, ids: [], fecha: r.getTimestamp() })
+    l.trozos[parte] = datos
+    l.ids.push(r.getId())
+  })
+  var limite = Date.now() - 2 * 864e5
+  Object.keys(lotes)
+    .sort()
+    .forEach(function (k) {
+      var l = lotes[k]
+      var completos = 0
+      for (var i = 1; i <= l.partes; i++) if (l.trozos[i] !== undefined) completos++
+      if (completos < l.partes) {
+        // Incompleto: se espera a que lleguen las demás partes (se descarta tras 2 días)
+        if (l.fecha.getTime() < limite) {
+          l.ids.forEach(function (id) { form.deleteResponse(id) })
+          resumen.acuses[k] = 'incompleto'
+        }
+        return
+      }
+      var texto = ''
+      for (var j = 1; j <= l.partes; j++) texto += l.trozos[j]
+      var obj = JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(texto), 'application/x-gzip')).getDataAsString('UTF-8'))
+      if (obj.tipo === 'reenviar') {
+        // La PC perdió lotes (estuvo apagada más de dos semanas o es nueva): se le manda todo otra vez
+        props.setProperty('PUENTE_REV', String(Number(obj.desde) || 0))
+        Object.keys(eco).forEach(function (x) { delete eco[x] })
+      } else {
+        var r = aplicarCambios(obj.filas || [], eco)
+        resumen.filas += (obj.filas || []).length
+        resumen.errores = resumen.errores.concat(r.errores)
+      }
+      resumen.aplicados++
+      if (resumen.acuses[k] !== 'firma') resumen.acuses[k] = 'ok'
+      l.ids.forEach(function (id) { form.deleteResponse(id) })
+    })
+  return resumen
+}
+
+/** Escribe en la hoja cifrada lo nuevo de los celulares (lo que no vino de la misma PC). */
+function puenteExportar(ll, eco) {
+  var props = PropertiesService.getScriptProperties()
+  var rev = Number(props.getProperty('REV') || '0')
+  var desde = Number(props.getProperty('PUENTE_REV') || '0')
+  if (desde >= rev) return 0
+  var filas = []
+  Object.keys(TABLAS).forEach(function (tabla) {
+    leerTabla(tabla).filas.forEach(function (f) {
+      var r = Number(f[COL_REV])
+      if (r <= desde || eco[tabla + '|' + f[COL_ID]] === r) return
+      filas.push({ tabla: tabla, id: String(f[COL_ID]), rev: r, borrado: f[COL_BORRADO] === 'SI', json: f[COL_JSON] })
+    })
+  })
+  filas.sort(function (a, b) { return a.rev - b.rev })
+  var salida = hojaPuente().getSheetByName('Salida')
+  var n = Number(props.getProperty('PUENTE_N') || '0')
+  var escritos = 0
+  var i = 0
+  while (i < filas.length && escritos < 6) {
+    var lote = []
+    var car = 0
+    while (i < filas.length && (!lote.length || car < PUENTE_LOTE)) {
+      var f = filas[i++]
+      car += f.json.length
+      lote.push({ tabla: f.tabla, id: f.id, borrado: f.borrado, datos: f.borrado ? null : JSON.parse(f.json) })
+    }
+    var hasta = i < filas.length ? filas[i - 1].rev : rev
+    var texto = cifrarPuente({ filas: lote }, ll)
+    var partes = Math.ceil(texto.length / PUENTE_PARTE)
+    n++
+    var fecha = Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd HH:mm:ss')
+    var celdas = []
+    // «x» al inicio: un texto que empieza con = o + se tomaría como fórmula
+    for (var k = 0; k < partes; k++) celdas.push([n, k + 1, partes, hasta, 'x' + texto.substr(k * PUENTE_PARTE, PUENTE_PARTE), fecha])
+    salida.getRange(salida.getLastRow() + 1, 1, celdas.length, 6).setValues(celdas)
+    props.setProperty('PUENTE_N', String(n))
+    props.setProperty('PUENTE_REV', String(hasta))
+    escritos++
+  }
+  if (!filas.length) props.setProperty('PUENTE_REV', String(rev))
+  return escritos
+}
+
+/** Acuse de recibo por lote (ok · firma · incompleto) para que la PC reenvíe lo que no llegó bien. */
+function puenteAcuses(acuses, ll) {
+  var ss = hojaPuente()
+  var h = ss.getSheetByName('Recibidos') || ss.insertSheet('Recibidos')
+  if (h.getLastRow() === 0) h.getRange(1, 1, 1, 3).setValues([['lote', 'estado', 'fecha']])
+  var fecha = Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd HH:mm:ss')
+  var filas = Object.keys(acuses).map(function (k) { return [k, acuses[k], fecha] })
+  if (filas.length) h.getRange(h.getLastRow() + 1, 1, filas.length, 3).setValues(filas)
+  if (h.getLastRow() > 501) h.deleteRows(2, h.getLastRow() - 501)
+  // La huella de la clave se renueva por si la clave cambió («nuevaClave»)
+  var conf = ss.getSheetByName('Config')
+  if (conf) conf.getRange(5, 1, 1, 2).setValues([['verificador', verificadorPuente(ll)]])
+}
+
+/** Borra de la hoja cifrada lo de más de dos semanas (siempre deja el último lote). */
+function puenteLimpiar() {
+  var salida = hojaPuente().getSheetByName('Salida')
+  var n = salida.getLastRow()
+  if (n < 3) return
+  var limite = Utilities.formatDate(new Date(Date.now() - PUENTE_DIAS * 864e5), ZONA, 'yyyy-MM-dd')
+  var fechas = salida.getRange(2, 6, n - 1, 1).getValues()
+  var viejas = 0
+  while (viejas < fechas.length - 1 && String(fechas[viejas][0]).slice(0, 10) < limite) viejas++
+  if (viejas) salida.deleteRows(2, viejas)
+}
+
+/** Lo ejecuta el disparador cada 5 minutos (también desde el menú). */
+function puenteCiclo() {
+  var ll = llavesPuente()
+  var resumen = conCandado(function () {
+    var eco = leerEco()
+    var r = puenteImportar(ll, eco)
+    r.lotesEnviados = puenteExportar(ll, eco)
+    guardarEco(eco, Number(PropertiesService.getScriptProperties().getProperty('PUENTE_REV') || '0'))
+    return r
+  })
+  puenteAcuses(resumen.acuses, ll)
+  delete resumen.acuses
+  puenteLimpiar()
+  PropertiesService.getScriptProperties().setProperty('PUENTE_ULTIMO', Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd HH:mm:ss') + ' · ' + JSON.stringify(resumen))
+  return resumen
+}
+
+// ---------------------------------------------------------------------------
+// Respaldo diario de esta hoja en Google Drive (carpeta «Control EPP · respaldos», últimos 30)
+// ---------------------------------------------------------------------------
+
+function respaldoDiario() {
+  var nombre = 'Control EPP · respaldos'
+  var carpetas = DriveApp.getFoldersByName(nombre)
+  var carpeta = carpetas.hasNext() ? carpetas.next() : DriveApp.createFolder(nombre)
+  var fecha = Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd HH.mm')
+  DriveApp.getFileById(libro().getId()).makeCopy('Control EPP · respaldo ' + fecha, carpeta)
+  var archivos = []
+  var it = carpeta.getFiles()
+  while (it.hasNext()) archivos.push(it.next())
+  archivos
+    .sort(function (a, b) { return b.getDateCreated().getTime() - a.getDateCreated().getTime() })
+    .slice(30)
+    .forEach(function (f) { f.setTrashed(true) })
+  return 'Respaldo guardado en «' + nombre + '» (' + fecha + ').'
 }

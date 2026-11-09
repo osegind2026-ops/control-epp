@@ -76,3 +76,32 @@ Envíe **solo la URL** (la que termina en `/exec`). No envíe la contraseña ni 
 - **Equipos**: los celulares y PC conectados. Para quitarle el acceso a uno, cambie su columna
   «Activo» de `SI` a `NO`.
 - No edite a mano las demás pestañas: los cambios se hacen desde la app.
+
+## 7. Puente con la PC de la oficina (versión 2.6.0 del código)
+
+La red de la oficina bloquea `script.google.com`, así que las PCs no pueden hablar con este servidor.
+El puente lo resuelve solo, cada 5 minutos, usando `docs.google.com` (que sí pasa):
+
+- el servidor de la **PC host** manda lo nuevo de las PCs como respuestas de un **formulario**
+  (firmadas con la clave de la oficina; lo que no trae la firma correcta se descarta);
+- Google deja lo nuevo de los celulares en una **hoja aparte** que solo tiene **datos cifrados**
+  con la clave de la oficina. Esa hoja se comparte como «Lector con el enlace» para que la PC la
+  lea sin iniciar sesión; sin la clave su contenido no se puede leer.
+
+Pasos (una sola vez):
+
+1. Pegue el `Codigo.gs` nuevo (paso 2), guarde y publique una **versión nueva** de la
+   aplicación web (paso 4, «Gestionar implementaciones → Editar → Nueva versión»).
+2. Recargue la hoja. En el menú **Control EPP** elija **Instalar / ver puente con la PC** y
+   acepte los permisos (Formularios, Drive y disparadores).
+3. En la pestaña **Configuración** aparece la fila **«Puente con la PC · enlace»**. En la PC host:
+   Ajustes → **Puente con los celulares**, pegue ese enlace y la clave de la oficina.
+
+Lo que se crea:
+
+- Formulario «Control EPP · puente con la PC (no editar)» y hoja «Control EPP · puente (solo
+  datos cifrados)» en su Drive. No los edite ni los borre.
+- Disparador cada 5 minutos (`puenteCiclo`) y respaldo diario a las 2:00 (`respaldoDiario`): una
+  copia de esta hoja en la carpeta «Control EPP · respaldos» de Drive; se conservan las últimas 30.
+
+Si cambia la clave con «nuevaClave», escríbala también en la PC host (la PC avisa si no coincide).

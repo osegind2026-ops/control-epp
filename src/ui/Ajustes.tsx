@@ -8,7 +8,7 @@ import * as S from '../state/store'
 import { avisar, confirmar, intentar, Modal } from './comunes'
 import { AjustesEquipos } from './AjustesEquipos'
 import { Icono } from './iconos'
-import { PanelEquipos, TarjetaNube } from './Nube'
+import { PanelEquipos, PanelPuente, TarjetaNube } from './Nube'
 import { PlantillaReportes } from './PlantillaReportes'
 import { Intercambio } from './Intercambio'
 import { SeccionUsuarios } from './Usuarios'
@@ -267,6 +267,7 @@ export function PantallaAjustes() {
       <h1>Ajustes</h1>
       <TarjetaNube />
       <PanelEquipos />
+      <PanelPuente />
       <Intercambio />
       <Respaldos />
       <RespaldoCompleto />

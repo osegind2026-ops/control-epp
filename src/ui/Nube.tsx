@@ -15,11 +15,12 @@ import {
   nube,
   pendientesNube,
   progresoNube,
+  puente,
   servidorLocal,
   sincronizarAhora,
   unirseDesdeNube,
 } from '../state/nube'
-import type { EquipoRegistrado } from '../sync/cliente'
+import type { EquipoRegistrado, EstadoPuente } from '../sync/cliente'
 import { esAdmin } from '../state/permisos'
 import { pantalla } from '../state/navegacion'
 import * as S from '../state/store'
@@ -421,6 +422,196 @@ export function PanelEquipos() {
           Otros códigos que aparecen en las entregas (celulares que se juntan por archivo u otros servidores):{' '}
           {[...otros].map(([c, x]) => `${c} (${plural(x.n, 'entrega', 'entregas')}, última ${x.ultima})`).join(' · ')}.
         </p>
+      )}
+    </section>
+  )
+}
+
+const horaServidor = (f?: string) => (f ? f.replace(' ', 'T') : undefined)
+
+/**
+ * Panel del administrador en la PC host: el servidor de la oficina intercambia solo con Google cada
+ * 5 minutos (formulario + hoja cifrada) para que los celulares tengan la información completa.
+ */
+export function PanelPuente() {
+  const cfg = nube.value
+  const [p, setP] = useState<EstadoPuente | null>(null)
+  const [error, setError] = useState('')
+  const [editar, setEditar] = useState(false)
+  const [hoja, setHoja] = useState('')
+  const [clave, setClave] = useState('')
+  const [trabajando, setTrabajando] = useState('')
+  const visible = !!cfg && esLocal(cfg.url) && esAdmin()
+
+  const cargar = async () => {
+    try {
+      setP(await puente('ver'))
+      setError('')
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+  useEffect(() => {
+    if (!visible) return
+    void cargar()
+    const t = setInterval(() => void cargar(), 10000)
+    return () => clearInterval(t)
+  }, [visible, cfg?.equipoId])
+  if (!visible) return null
+
+  const hacer = async (op: Parameters<typeof puente>[0], extra?: Parameters<typeof puente>[1], aviso?: string) => {
+    setTrabajando(op)
+    const ok = await intentar(async () => {
+      setP(await puente(op, extra))
+      return true
+    })
+    setTrabajando('')
+    if (ok && aviso) avisar(aviso, { ms: 6000 })
+    return ok
+  }
+  const guardar = async () => {
+    if (!hoja.trim()) return avisar('Pegue el enlace de la hoja «Control EPP · puente».')
+    if (!p?.configurado && !clave.trim()) return avisar('Escriba la clave de la oficina.')
+    if (await hacer('guardar', { hoja: hoja.trim(), clave: clave.trim() }, '✓ Puente guardado. El primer intercambio empieza en unos segundos.')) {
+      setClave('')
+      setEditar(false)
+    }
+  }
+  const subirTodo = async () => {
+    if (
+      !(await confirmar(
+        'Volver a mandar todo',
+        'El servidor vuelve a mandar a Google TODA la información de las PCs (no borra nada; lo repetido se ignora). Úselo si en los celulares falta algo que sí está en las PCs. Puede tardar varios ciclos de 5 minutos.',
+        'Mandar todo',
+      ))
+    )
+      return
+    await hacer('subirTodo', undefined, '✓ Se mandará todo en los próximos ciclos.')
+  }
+
+  const e = p?.estado
+  const formulario = !p?.configurado || editar
+  return (
+    <section class="card stack">
+      <div class="spread">
+        <h2>Puente con los celulares</h2>
+        {p?.configurado && (
+          <span class={`badge ${!p.activo ? '' : e && !e.ok ? 'bad' : 'ok'}`}>{!p.activo ? 'En pausa' : e && !e.ok ? 'Con error' : 'Activo'}</span>
+        )}
+      </div>
+      <p class="muted small">
+        Este servidor intercambia solo con Google cada {p?.minutos ?? 5} minutos: lo que se captura en las PCs llega a los celulares y lo de los celulares llega aquí, sin
+        respaldos manuales. Funciona mientras esta PC esté encendida. Usa docs.google.com (lo que la red de la oficina sí deja pasar) y una hoja que solo tiene datos cifrados
+        con la clave de la oficina.
+      </p>
+      {error && (
+        <div class="aviso bad small">
+          <Icono n="alerta" />
+          <span>
+            {error}
+            {/Acción desconocida/i.test(error) && ' Aplique en esta PC la actualización del servidor (versión 2.20.0 o posterior).'}
+          </span>
+        </div>
+      )}
+
+      {p?.configurado && !editar && (
+        <>
+          <div class="kpis">
+            <div class="kpi">
+              <span>Último intercambio</span>
+              <b style={{ fontSize: '1.05rem' }}>{e ? hace(horaServidor(e.fecha)) : 'aún no'}</b>
+            </div>
+            <div class="kpi">
+              <span>Recibidos de los celulares</span>
+              <b>{e?.recibidos ?? 0}</b>
+            </div>
+            <div class="kpi">
+              <span>Enviados a Google</span>
+              <b>{e?.enviados ?? 0}</b>
+            </div>
+            <div class="kpi">
+              <span>Por enviar</span>
+              <b>{p.pendientes}</b>
+            </div>
+          </div>
+          {e && !e.ok && (
+            <div class="aviso bad small">
+              <Icono n="alerta" />
+              <span>{e.mensaje}</span>
+            </div>
+          )}
+          {e?.ok && e.mensaje && <p class="aviso small">{e.mensaje}</p>}
+          <p class="muted small">
+            Último intercambio correcto: {p.ultimoOk ? hace(horaServidor(p.ultimoOk)) : 'aún no'} · último con cambios: {p.ultimoCambio ? hace(horaServidor(p.ultimoCambio)) : '—'}
+            {p.porConfirmar > 0 && ` · ${plural(p.porConfirmar, 'envío espera', 'envíos esperan')} la confirmación de Google`}.
+          </p>
+          <div class="row">
+            <button class="btn" disabled={!!trabajando || !p.activo} onClick={() => void hacer('ahora', undefined, 'Intercambiando… el estado se actualiza solo.')}>
+              <Icono n="repetir" /> Intercambiar ahora
+            </button>
+            {p.activo ? (
+              <button class="btn ghost" disabled={!!trabajando} onClick={() => void hacer('pausar', undefined, 'Puente en pausa.')}>
+                Pausar
+              </button>
+            ) : (
+              <button class="btn primary" disabled={!!trabajando} onClick={() => void hacer('reanudar', undefined, '✓ Puente activo.')}>
+                Reanudar
+              </button>
+            )}
+            <button class="btn ghost" disabled={!!trabajando} onClick={() => (setEditar(true), setHoja(`https://docs.google.com/spreadsheets/d/${p.hoja}/edit`))}>
+              Cambiar enlace o clave
+            </button>
+            <button class="btn ghost" disabled={!!trabajando} onClick={() => void subirTodo()}>
+              Volver a mandar todo
+            </button>
+          </div>
+        </>
+      )}
+
+      {formulario && (
+        <div class="stack">
+          {!p?.configurado && (
+            <ol class="small" style={{ margin: 0, paddingLeft: '1.2rem', display: 'grid', gap: '4px' }}>
+              <li>
+                En la hoja de Google de Control EPP: <b>Extensiones → Apps Script</b>, pegue el <b>Codigo.gs</b> nuevo (versión 2.6.0), guarde y publique una versión nueva
+                de la aplicación web.
+              </li>
+              <li>
+                En la hoja, menú <b>Control EPP → Instalar / ver puente con la PC</b> y acepte los permisos. Crea el formulario, la hoja cifrada y el respaldo diario.
+              </li>
+              <li>
+                En la pestaña <b>Configuración</b> copie el enlace de la fila <b>«Puente con la PC · enlace»</b> y péguelo abajo con la clave de la oficina.
+              </li>
+            </ol>
+          )}
+          <label class="campo">
+            Enlace de la hoja «Control EPP · puente»
+            <input class="input" id="puente-hoja" placeholder="https://docs.google.com/spreadsheets/d/…" value={hoja} onInput={(ev) => setHoja((ev.target as HTMLInputElement).value)} />
+          </label>
+          <label class="campo">
+            Clave de la oficina {p?.configurado && <span class="muted small">(déjela vacía para conservar la guardada)</span>}
+            <input
+              class="input"
+              id="puente-clave"
+              type="password"
+              autocomplete="off"
+              placeholder="XXXX-XXXX-XXXX"
+              value={clave}
+              onInput={(ev) => setClave((ev.target as HTMLInputElement).value)}
+            />
+          </label>
+          <p class="muted small">La clave no se guarda tal cual: el servidor guarda solo las llaves que salen de ella para cifrar y firmar.</p>
+          <div class="row">
+            <button class="btn primary" disabled={!!trabajando} onClick={() => void guardar()}>
+              {trabajando === 'guardar' ? 'Guardando…' : 'Guardar y conectar'}
+            </button>
+            {editar && (
+              <button class="btn ghost" onClick={() => (setEditar(false), setClave(''))}>
+                Cancelar
+              </button>
+            )}
+          </div>
+        </div>
       )}
     </section>
   )

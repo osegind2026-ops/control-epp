@@ -9,11 +9,13 @@ import {
   listarEquipos,
   marcarTodoPendiente,
   probarServidor,
+  puenteOficina,
   registrarEquipo,
   sincronizar,
   transporteFetch,
   type ConfigNube,
   type EquipoRegistrado,
+  type EstadoPuente,
 } from '../sync/cliente'
 import * as S from './store'
 
@@ -246,6 +248,12 @@ export async function equiposRegistrados(): Promise<EquipoRegistrado[]> {
 export async function cambiarEquipoRegistrado(objetivo: string, cambios: { activo?: boolean; nombre?: string }): Promise<void> {
   if (!nube.value) throw new ErrorNube('Este equipo no está conectado a un servidor.')
   await cambiarEquipo(transporteFetch, nube.value, objetivo, cambios)
+}
+
+/** Puente del servidor de la oficina con Google (lo usa el panel del administrador). */
+export async function puente(op: Parameters<typeof puenteOficina>[2], extra?: Parameters<typeof puenteOficina>[3]): Promise<EstadoPuente> {
+  if (!nube.value) throw new ErrorNube('Este equipo no está conectado a un servidor.')
+  return puenteOficina(transporteFetch, nube.value, op, extra)
 }
 
 /** Deja de sincronizar este equipo. Los datos locales se conservan. */
