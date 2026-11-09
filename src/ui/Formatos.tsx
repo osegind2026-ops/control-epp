@@ -1,18 +1,16 @@
 import { createPortal } from 'preact/compat'
-import { useEffect, useState } from 'preact/hooks'
-import { guardarConfig, leerConfig } from '../db/db'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { ultimoFolioCapturado } from '../domain/contaminado'
+import { hace } from '../lib/util'
+import { anteriorLocal, detalleUltimo, registrarImpresion, ultimoImpreso, type SerieFolio, type UltimoImpreso } from '../state/folios'
 import * as S from '../state/store'
-import { avisar } from './comunes'
+import { avisar, intentar } from './comunes'
 import { Icono } from './iconos'
 
 type Unidad = 'U1' | 'U2'
 type TipoFormato = 'contaminado' | 'registro_epp' | 'resguardo_economico' | 'pdf_externo'
 
 const ANIO_ACTUAL = new Date().getFullYear()
-
-/** Genera la clave de configuración para el contador de folios de EPP contaminado. */
-const claveFolioContaminado = (u: Unidad) => `folio_contaminado_${u}`
 
 /** Formato oficial de folio de EPP contaminado. */
 function formatoFolioContaminado(unidad: Unidad, n: number, anio = ANIO_ACTUAL): string {
@@ -301,16 +299,41 @@ function FormatoResguardoIndividual({ folioTexto }: { folioTexto: string }) {
   )
 }
 
+/**
+ * Imprime un PDF cargado: se abre en un marco oculto y se imprime cuando ya terminó de cargar
+ * (abrirlo en otra pestaña e imprimir de inmediato salía en blanco o lo bloqueaba el navegador).
+ */
+function imprimirPdf(url: string) {
+  document.getElementById('marco-impresion-pdf')?.remove()
+  const marco = document.createElement('iframe')
+  marco.id = 'marco-impresion-pdf'
+  marco.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden'
+  marco.src = url
+  marco.onload = () => {
+    try {
+      marco.contentWindow?.focus()
+      marco.contentWindow?.print()
+    } catch {
+      // Si el visor del navegador no deja imprimir desde el marco, se abre en otra pestaña
+      window.open(url, '_blank')
+    }
+  }
+  document.body.appendChild(marco)
+}
+
 // =========================================================================
 // VENTANA MODAL / PORTAL DE IMPRESIÓN
 // =========================================================================
 function VistaImpresionPortal({
   children,
   onCerrar,
+  onImprimir,
   orientacion = 'portrait',
 }: {
   children: preact.ComponentChildren
   onCerrar: () => void
+  /** Se llama al presionar «Imprimir» (antes de abrir el diálogo): ahí se guarda el consecutivo. */
+  onImprimir?: () => Promise<boolean>
   orientacion?: 'portrait' | 'landscape'
 }) {
   const [contenedor] = useState(() => {
@@ -344,7 +367,13 @@ function VistaImpresionPortal({
   return createPortal(
     <div class="portal-formatos-wrap">
       <div class="no-print barra-acciones-impresion">
-        <button class="btn primary" onClick={() => window.print()}>
+        <button
+          class="btn primary"
+          onClick={async () => {
+            if (onImprimir && !(await onImprimir())) return
+            window.print()
+          }}
+        >
           <Icono n="pdf" /> Imprimir / Guardar como PDF
         </button>
         <button class="btn ghost" onClick={onCerrar}>
@@ -360,6 +389,93 @@ function VistaImpresionPortal({
 }
 
 // =========================================================================
+// CONSECUTIVO DE FOLIOS IMPRESOS (compartido entre todos los equipos)
+// =========================================================================
+
+/**
+ * Folio inicial de una serie: sigue solo al último impreso en cualquier equipo (se sincroniza)
+ * hasta que el usuario lo cambia a mano, p. ej. para reimprimir un folio.
+ */
+function useConsecutivo(serie: SerieFolio, piso = 0) {
+  const [anterior, setAnterior] = useState(0)
+  const [detalle, setDetalle] = useState<UltimoImpreso>({ ultimo: 0 })
+  const [manual, setManual] = useState<number | null>(null)
+  useEffect(() => {
+    let vivo = true
+    void anteriorLocal(serie, ANIO_ACTUAL).then((n) => vivo && setAnterior(n))
+    void detalleUltimo(serie, ANIO_ACTUAL).then((d) => vivo && setDetalle(d))
+    return () => {
+      vivo = false
+    }
+  }, [serie, S.ajustes.value])
+  useEffect(() => setManual(null), [serie])
+  const impreso = Math.max(ultimoImpreso(S.ajustes.value, serie, ANIO_ACTUAL, anterior), detalle.ultimo)
+  const ultimo = Math.max(impreso, piso)
+  return {
+    serie,
+    impreso,
+    ultimo,
+    piso,
+    detalle,
+    siguiente: ultimo + 1,
+    inicio: manual ?? ultimo + 1,
+    cambiar: (n: number) => setManual(n),
+    seguir: () => setManual(null),
+  }
+}
+type Consecutivo = ReturnType<typeof useConsecutivo>
+
+/** Muestra el último folio impreso y avisa si el folio inicial reimprime o salta folios. */
+function AvisoConsecutivo({ c, fin, formato, nombre = 'folio' }: { c: Consecutivo; fin: number; formato: (n: number) => string; nombre?: string }) {
+  const d = c.detalle
+  const quien = d.ultimo === c.impreso && d.equipo ? ` en el equipo ${d.equipo}${d.fecha ? `, ${hace(d.fecha)}` : ''}` : ''
+  return (
+    <div class="stack" style={{ gap: '8px' }}>
+      <p class="muted small" style={{ margin: 0 }}>
+        {c.impreso ? (
+          <>
+            Último {nombre} impreso: <strong>{formato(c.impreso)}</strong>
+            {quien}.
+          </>
+        ) : (
+          `Aún no se ha impreso ningún ${nombre} en ${ANIO_ACTUAL}.`
+        )}
+        {c.piso > c.impreso && (
+          <>
+            {' '}
+            Último usado en un despacho: <strong>{formato(c.piso)}</strong>.
+          </>
+        )}{' '}
+        El consecutivo se comparte con todas las PCs y celulares.
+      </p>
+      {c.inicio <= c.ultimo && (
+        <div class="aviso warn small">
+          <Icono n="alerta" />
+          <span class="grow">
+            <strong>Reimpresión:</strong> {c.inicio === Math.min(fin, c.ultimo) ? `el ${nombre} ${formato(c.inicio)} ya se imprimió` : `del ${formato(c.inicio)} al ${formato(Math.min(fin, c.ultimo))} ya se imprimieron`}. Úselo solo para reponer
+            un formato dañado o perdido; el consecutivo no retrocede.
+          </span>
+          <button class="btn sm" onClick={c.seguir}>
+            Usar el siguiente ({formato(c.siguiente)})
+          </button>
+        </div>
+      )}
+      {c.inicio > c.siguiente && (
+        <div class="aviso warn small">
+          <Icono n="alerta" />
+          <span class="grow">
+            Se saltarán {c.inicio - c.siguiente === 1 ? `el ${nombre} ${formato(c.siguiente)}` : `del ${formato(c.siguiente)} al ${formato(c.inicio - 1)}`} (no se imprimen).
+          </span>
+          <button class="btn sm" onClick={c.seguir}>
+            Usar el siguiente ({formato(c.siguiente)})
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// =========================================================================
 // PANTALLA PRINCIPAL: FORMATOS
 // =========================================================================
 export function PantallaFormatos() {
@@ -367,51 +483,32 @@ export function PantallaFormatos() {
 
   // Estado para EPP Contaminado
   const [unidad, setUnidad] = useState<Unidad>('U1')
-  const [folioInicioContaminado, setFolioInicioContaminado] = useState(1)
   const [cantContaminado, setCantContaminado] = useState(8)
-  const [cargandoFolio, setCargandoFolio] = useState(true)
+  // Folios ya usados al capturar despachos de EPP contaminado (también cuentan para no repetir)
+  const capturado = ultimoFolioCapturado(S.entregas.value, unidad, ANIO_ACTUAL)
+  const consContaminado = useConsecutivo(`contaminado-${unidad}`, capturado)
+  const folioInicioContaminado = consContaminado.inicio
 
   // Estado para Registro de Entrega Horizontal
-  const [hojaInicioReg, setHojaInicioReg] = useState(1)
+  const consRegistro = useConsecutivo('registro')
+  const hojaInicioReg = consRegistro.inicio
   const [cantHojasReg, setCantHojasReg] = useState(5)
 
   // Estado para Resguardo Económico
-  const [folioInicioResg, setFolioInicioResg] = useState(1)
+  const consResg = useConsecutivo('resguardo')
+  const folioInicioResg = consResg.inicio
   const [cantResg, setCantResg] = useState(6)
   const [porHojaResg, setPorHojaResg] = useState<2 | 3>(2)
 
   // Estado para PDF Externo cargado
   const [pdfArchivo, setPdfArchivo] = useState<File | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
-  const [prefijoPdf, setPrefijoPdf] = useState('U1-SI-2026-')
+  const [prefijoPdf, setPrefijoPdf] = useState(`U1-SI-${ANIO_ACTUAL}-`)
   const [folioInicioPdf, setFolioInicioPdf] = useState(1)
   const [posicionFolio, setPosicionFolio] = useState<'arriba-der' | 'arriba-izq' | 'abajo-der'>('arriba-der')
 
   // Vista de impresión activa
   const [imprimiendo, setImprimiendo] = useState(false)
-
-  // Cargar último folio de EPP Contaminado de IndexedDB
-  useEffect(() => {
-    let montado = true
-    setCargandoFolio(true)
-    leerConfig<number>(claveFolioContaminado(unidad), 0).then((ultimo) => {
-      if (montado) {
-        // Sigue después del último impreso en este equipo o capturado en cualquier despacho (se sincroniza)
-        setFolioInicioContaminado(Math.max(ultimo, ultimoFolioCapturado(S.entregas.value, unidad, ANIO_ACTUAL)) + 1)
-        setCargandoFolio(false)
-      }
-    })
-    return () => {
-      montado = false
-    }
-  }, [unidad])
-
-  // Cargar último folio de Resguardo
-  useEffect(() => {
-    leerConfig<number>('ultimo_folio_resguardo_economico', 0).then((ultimo) => {
-      setFolioInicioResg(ultimo + 1)
-    })
-  }, [])
 
   // Limpiar URL de PDF externo al desmontar
   useEffect(() => {
@@ -432,16 +529,28 @@ export function PantallaFormatos() {
     }
   }
 
-  // Confirmar impresión y guardar nuevo consecutivo
-  const ejecutarImpresion = async () => {
-    if (tipo === 'contaminado') {
-      const nuevoUltimo = folioInicioContaminado + cantContaminado - 1
-      await guardarConfig(claveFolioContaminado(unidad), nuevoUltimo)
-    } else if (tipo === 'resguardo_economico') {
-      const nuevoUltimo = folioInicioResg + cantResg - 1
-      await guardarConfig('ultimo_folio_resguardo_economico', nuevoUltimo)
-    }
+  // Abre la vista previa; el consecutivo se guarda hasta presionar «Imprimir»
+  const ejecutarImpresion = () => {
+    impreso.current = false
     setImprimiendo(true)
+  }
+  const impreso = useRef(false)
+  const consActivo = tipo === 'contaminado' ? consContaminado : tipo === 'registro_epp' ? consRegistro : tipo === 'resguardo_economico' ? consResg : null
+  const cantActiva = tipo === 'contaminado' ? cantContaminado : tipo === 'registro_epp' ? cantHojasReg : cantResg
+  const guardarConsecutivo = async (): Promise<boolean> => {
+    if (!consActivo) return true
+    const c = consActivo
+    const ok = await intentar(async () => {
+      await registrarImpresion(c.serie, ANIO_ACTUAL, c.inicio, c.inicio + cantActiva - 1)
+      return true
+    })
+    if (ok) impreso.current = true
+    return !!ok
+  }
+  const cerrarImpresion = () => {
+    setImprimiendo(false)
+    // Lo siguiente que se imprima continúa después de lo impreso (incluso tras una reimpresión)
+    if (impreso.current) consActivo?.seguir()
   }
 
   // Agrupación en páginas para EPP Contaminado (exactamente 4 por hoja carta)
@@ -539,8 +648,7 @@ export function PantallaFormatos() {
                 type="number"
                 min={1}
                 value={folioInicioContaminado}
-                disabled={cargandoFolio}
-                onInput={(e) => setFolioInicioContaminado(Math.max(1, Number((e.target as HTMLInputElement).value)))}
+                onInput={(e) => consContaminado.cambiar(Math.max(1, Math.floor(Number((e.target as HTMLInputElement).value)) || 1))}
               />
             </label>
 
@@ -567,9 +675,10 @@ export function PantallaFormatos() {
             <Icono n="info" />
             <span>
               Se generarán folios del <strong>{formatoFolioContaminado(unidad, folioInicioContaminado)}</strong> al{' '}
-              <strong>{formatoFolioContaminado(unidad, folioInicioContaminado + cantContaminado - 1)}</strong>. Al imprimir se actualizará el consecutivo de la <strong>{unidad}</strong> para no duplicar folios.
+              <strong>{formatoFolioContaminado(unidad, folioInicioContaminado + cantContaminado - 1)}</strong>. Al presionar «Imprimir» se guarda el consecutivo de la <strong>{unidad}</strong> para no duplicar folios.
             </span>
           </div>
+          <AvisoConsecutivo c={consContaminado} fin={folioInicioContaminado + cantContaminado - 1} formato={(n) => formatoFolioContaminado(unidad, n)} />
 
           <div class="row">
             <button class="btn primary" onClick={ejecutarImpresion}>
@@ -598,7 +707,7 @@ export function PantallaFormatos() {
                 type="number"
                 min={1}
                 value={hojaInicioReg}
-                onInput={(e) => setHojaInicioReg(Math.max(1, Number((e.target as HTMLInputElement).value)))}
+                onInput={(e) => consRegistro.cambiar(Math.max(1, Math.floor(Number((e.target as HTMLInputElement).value)) || 1))}
               />
             </label>
 
@@ -622,12 +731,13 @@ export function PantallaFormatos() {
           <div class="aviso info small">
             <Icono n="info" />
             <span>
-              Se generará en orientación horizontal desde la <strong>PÁGINA No. {String(hojaInicioReg).padStart(3, '0')}</strong> hasta la <strong>PÁGINA No. {String(hojaInicioReg + cantHojasReg - 1).padStart(3, '0')}</strong>.
+              Se generará en orientación horizontal desde la <strong>PÁGINA No. {String(hojaInicioReg).padStart(3, '0')}</strong> hasta la <strong>PÁGINA No. {String(hojaInicioReg + cantHojasReg - 1).padStart(3, '0')}</strong>. Al presionar «Imprimir» se guarda la última página impresa.
             </span>
           </div>
+          <AvisoConsecutivo c={consRegistro} fin={hojaInicioReg + cantHojasReg - 1} formato={(n) => `PÁGINA No. ${String(n).padStart(3, '0')}`} nombre="página" />
 
           <div class="row">
-            <button class="btn primary" onClick={() => setImprimiendo(true)}>
+            <button class="btn primary" onClick={ejecutarImpresion}>
               <Icono n="eppEntrega" /> Imprimir {cantHojasReg} Página{cantHojasReg > 1 ? 's' : ''} en Horizontal
             </button>
           </div>
@@ -666,7 +776,7 @@ export function PantallaFormatos() {
                 type="number"
                 min={1}
                 value={folioInicioResg}
-                onInput={(e) => setFolioInicioResg(Math.max(1, Number((e.target as HTMLInputElement).value)))}
+                onInput={(e) => consResg.cambiar(Math.max(1, Math.floor(Number((e.target as HTMLInputElement).value)) || 1))}
               />
             </label>
 
@@ -692,9 +802,10 @@ export function PantallaFormatos() {
             <span>
               Se generarán folios del <strong>{formatoFolioResguardo(folioInicioResg)}</strong> al{' '}
               <strong>{formatoFolioResguardo(folioInicioResg + cantResg - 1)}</strong> impresos a{' '}
-              <strong>{porHojaResg} por hoja</strong> ({Math.ceil(cantResg / porHojaResg)} hoja{Math.ceil(cantResg / porHojaResg) > 1 ? 's' : ''} en total).
+              <strong>{porHojaResg} por hoja</strong> ({Math.ceil(cantResg / porHojaResg)} hoja{Math.ceil(cantResg / porHojaResg) > 1 ? 's' : ''} en total). Al presionar «Imprimir» se guarda el consecutivo.
             </span>
           </div>
+          <AvisoConsecutivo c={consResg} fin={folioInicioResg + cantResg - 1} formato={(n) => formatoFolioResguardo(n)} />
 
           <div class="row">
             <button class="btn primary" onClick={ejecutarImpresion}>
@@ -737,6 +848,7 @@ export function PantallaFormatos() {
                   Prefijo de folio
                   <input
                     class="input"
+                    id="pdf-prefijo"
                     value={prefijoPdf}
                     onInput={(e) => setPrefijoPdf((e.target as HTMLInputElement).value)}
                     placeholder="Ej. U1-SI-2026-"
@@ -746,6 +858,7 @@ export function PantallaFormatos() {
                   Folio inicial
                   <input
                     class="input"
+                    id="pdf-folio-inicio"
                     type="number"
                     min={1}
                     value={folioInicioPdf}
@@ -756,6 +869,7 @@ export function PantallaFormatos() {
                   Posición del folio
                   <select
                     class="input fmt-select"
+                    id="pdf-posicion"
                     value={posicionFolio}
                     onChange={(e) => setPosicionFolio((e.target as HTMLSelectElement).value as any)}
                   >
@@ -790,16 +904,13 @@ export function PantallaFormatos() {
                 </div>
               )}
 
+              <p class="muted small" style={{ margin: 0 }}>
+                El recuadro del folio solo se ve en la vista previa: por ahora el PDF se imprime tal como se cargó.
+              </p>
               <div class="row">
                 <button
                   class="btn primary"
-                  onClick={() => {
-                    if (pdfUrl) {
-                      const ventana = window.open(pdfUrl, '_blank')
-                      ventana?.focus()
-                      ventana?.print()
-                    }
-                  }}
+                  onClick={() => pdfUrl && imprimirPdf(pdfUrl)}
                 >
                   <Icono n="pdfSubir" /> Imprimir PDF Cargado
                 </button>
@@ -815,7 +926,8 @@ export function PantallaFormatos() {
       {imprimiendo && (
         <VistaImpresionPortal
           orientacion={tipo === 'registro_epp' ? 'landscape' : 'portrait'}
-          onCerrar={() => setImprimiendo(false)}
+          onImprimir={guardarConsecutivo}
+          onCerrar={cerrarImpresion}
         >
           {/* EPP Contaminado: exactamente 4 por página carta (Vertical) */}
           {tipo === 'contaminado' &&
