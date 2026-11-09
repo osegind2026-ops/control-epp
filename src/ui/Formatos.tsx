@@ -2,6 +2,7 @@ import { createPortal } from 'preact/compat'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { ultimoFolioCapturado } from '../domain/contaminado'
 import { hace } from '../lib/util'
+import { contarPaginasPdf, estamparFoliosPdf, textoFolioPdf, type PosicionFolio } from '../state/pdfFolio'
 import { anteriorLocal, detalleUltimo, registrarImpresion, ultimoImpreso, type SerieFolio, type UltimoImpreso } from '../state/folios'
 import * as S from '../state/store'
 import { avisar, intentar } from './comunes'
@@ -585,7 +586,13 @@ export function PantallaFormatos() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [prefijoPdf, setPrefijoPdf] = useState(`U1-SI-${ANIO_ACTUAL}-`)
   const [folioInicioPdf, setFolioInicioPdf] = useState(1)
-  const [posicionFolio, setPosicionFolio] = useState<'arriba-der' | 'arriba-izq' | 'abajo-der'>('arriba-der')
+  const [posicionFolio, setPosicionFolio] = useState<PosicionFolio>('arriba-der')
+  const [copiasPdf, setCopiasPdf] = useState(1)
+  const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null)
+  const [pdfPaginas, setPdfPaginas] = useState(0)
+  const [pdfFoliado, setPdfFoliado] = useState<string | null>(null)
+  const [pdfError, setPdfError] = useState('')
+  const [pdfGenerando, setPdfGenerando] = useState(false)
 
   // Vista de impresión activa
   const [imprimiendo, setImprimiendo] = useState(false)
@@ -597,16 +604,60 @@ export function PantallaFormatos() {
     }
   }, [pdfUrl])
 
-  const manejarArchivoPdf = (e: Event) => {
+  const manejarArchivoPdf = async (e: Event) => {
     const input = e.target as HTMLInputElement
     const file = input.files?.[0]
     if (file && file.type === 'application/pdf') {
       if (pdfUrl) URL.revokeObjectURL(pdfUrl)
       setPdfArchivo(file)
       setPdfUrl(URL.createObjectURL(file))
+      setPdfError('')
+      const bytes = await file.arrayBuffer()
+      setPdfBytes(bytes)
+      setPdfPaginas(await contarPaginasPdf(bytes.slice(0)).catch(() => 0))
     } else {
       avisar('Por favor seleccione un archivo PDF válido.', { tipo: 'bad' })
     }
+  }
+
+  // PDF con el folio estampado en la primera página de cada copia (se rehace al cambiar los datos)
+  useEffect(() => {
+    if (!pdfBytes) return
+    let vigente = true
+    let url: string | null = null
+    setPdfGenerando(true)
+    const t = setTimeout(async () => {
+      try {
+        const salida = await estamparFoliosPdf(pdfBytes.slice(0), { prefijo: prefijoPdf, inicio: folioInicioPdf, copias: copiasPdf, posicion: posicionFolio })
+        if (!vigente) return
+        url = URL.createObjectURL(new Blob([salida as BlobPart], { type: 'application/pdf' }))
+        setPdfFoliado(url)
+        setPdfError('')
+      } catch (err) {
+        if (vigente) {
+          setPdfFoliado(null)
+          setPdfError((err as Error).message)
+        }
+      } finally {
+        if (vigente) setPdfGenerando(false)
+      }
+    }, 350)
+    return () => {
+      vigente = false
+      clearTimeout(t)
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [pdfBytes, prefijoPdf, folioInicioPdf, copiasPdf, posicionFolio])
+
+  const descargarPdfFoliado = () => {
+    if (!pdfFoliado || !pdfArchivo) return
+    const a = document.createElement('a')
+    a.href = pdfFoliado
+    const fin = folioInicioPdf + copiasPdf - 1
+    a.download = `${pdfArchivo.name.replace(/\.pdf$/i, '')} folio ${folioInicioPdf}${fin > folioInicioPdf ? `-${fin}` : ''}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
   }
 
   // Abre la vista previa; el consecutivo se guarda hasta presionar «Imprimir»
@@ -928,7 +979,7 @@ export function PantallaFormatos() {
           <div>
             <h3>Cargar Formato PDF con Folios o Número de Página</h3>
             <p class="muted small">
-              Suba cualquier formato en PDF para imprimirlo o estamparle folios consecutivos.
+              Suba cualquier formato en PDF y la app le estampa el folio en la primera página de cada copia; las demás páginas salen tal cual.
             </p>
           </div>
 
@@ -947,7 +998,10 @@ export function PantallaFormatos() {
             <div class="stack" style={{ gap: '12px' }}>
               <div class="aviso ok small">
                 <Icono n="ok" />
-                <span>Archivo cargado: <strong>{pdfArchivo.name}</strong> ({Math.round(pdfArchivo.size / 1024)} KB)</span>
+                <span>
+                  Archivo cargado: <strong>{pdfArchivo.name}</strong> ({Math.round(pdfArchivo.size / 1024)} KB
+                  {pdfPaginas > 0 && `, ${pdfPaginas} ${pdfPaginas === 1 ? 'página' : 'páginas'}`})
+                </span>
               </div>
 
               <div class="filtros" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -973,6 +1027,18 @@ export function PantallaFormatos() {
                   />
                 </label>
                 <label class="campo">
+                  Copias (un folio cada una)
+                  <input
+                    class="input"
+                    id="pdf-copias"
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={copiasPdf}
+                    onInput={(e) => setCopiasPdf(Math.max(1, Math.min(200, Number((e.target as HTMLInputElement).value) || 1)))}
+                  />
+                </label>
+                <label class="campo">
                   Posición del folio
                   <select
                     class="input fmt-select"
@@ -987,39 +1053,36 @@ export function PantallaFormatos() {
                 </label>
               </div>
 
-              {pdfUrl && (
-                <div style={{ border: '1px solid var(--rule)', borderRadius: '8px', overflow: 'hidden', height: '420px', position: 'relative' }}>
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: posicionFolio.startsWith('arriba') ? '12px' : 'auto',
-                      bottom: posicionFolio === 'abajo-der' ? '12px' : 'auto',
-                      right: posicionFolio.endsWith('der') ? '18px' : 'auto',
-                      left: posicionFolio === 'arriba-izq' ? '18px' : 'auto',
-                      background: 'rgba(255, 255, 255, 0.95)',
-                      padding: '4px 10px',
-                      borderRadius: '4px',
-                      border: '1px solid #111',
-                      fontWeight: 'bold',
-                      fontSize: '13px',
-                      zIndex: 2,
-                    }}
-                  >
-                    No. {prefijoPdf}{String(folioInicioPdf).padStart(3, '0')}
-                  </div>
-                  <iframe src={pdfUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="Vista previa PDF" />
+              <p class="muted small" style={{ margin: 0 }}>
+                {copiasPdf > 1
+                  ? `Se generan ${copiasPdf} copias: folios ${textoFolioPdf(prefijoPdf, folioInicioPdf)} a ${textoFolioPdf(prefijoPdf, folioInicioPdf + copiasPdf - 1)}`
+                  : `Folio: ${textoFolioPdf(prefijoPdf, folioInicioPdf)}`}
+                {pdfPaginas > 1 && ` · solo en la primera de las ${pdfPaginas} páginas de cada copia`}
+                {pdfGenerando && ' · preparando…'}
+              </p>
+
+              {pdfError && (
+                <div class="aviso bad small">
+                  <Icono n="alerta" />
+                  <span>{pdfError}</span>
                 </div>
               )}
 
-              <p class="muted small" style={{ margin: 0 }}>
-                El recuadro del folio solo se ve en la vista previa: por ahora el PDF se imprime tal como se cargó.
-              </p>
-              <div class="row">
-                <button
-                  class="btn primary"
-                  onClick={() => pdfUrl && imprimirPdf(pdfUrl)}
-                >
-                  <Icono n="pdfSubir" /> Imprimir PDF Cargado
+              {pdfFoliado && !pdfError && (
+                <div style={{ border: '1px solid var(--rule)', borderRadius: '8px', overflow: 'hidden', height: '420px' }}>
+                  <iframe src={pdfFoliado} style={{ width: '100%', height: '100%', border: 'none' }} title="Vista previa del PDF con folios" />
+                </div>
+              )}
+
+              <div class="row" style={{ flexWrap: 'wrap' }}>
+                <button class="btn primary" disabled={!pdfFoliado || !!pdfError || pdfGenerando} onClick={() => pdfFoliado && imprimirPdf(pdfFoliado)}>
+                  <Icono n="pdfSubir" /> Imprimir con folios
+                </button>
+                <button class="btn" disabled={!pdfFoliado || !!pdfError || pdfGenerando} onClick={descargarPdfFoliado}>
+                  <Icono n="pdf" /> Descargar PDF con folios
+                </button>
+                <button class="btn ghost" disabled={!pdfUrl} onClick={() => pdfUrl && imprimirPdf(pdfUrl)}>
+                  Imprimir sin folio
                 </button>
               </div>
             </div>
