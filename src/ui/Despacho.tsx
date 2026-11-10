@@ -1,0 +1,980 @@
+import { signal } from '@preact/signals'
+import { useEffect, useMemo, useState } from 'preact/hooks'
+import { MAS_PEDIDOS_BASE } from '../db/semilla'
+import { aplicarKit, existencia, posiblesDuplicados, lecturaEscanerValida, masPedidos, materialesRecurrentes, REGLA_RECURRENCIA, type MaterialRecurrente, nivelStock, prestamosVencidos, resolverRpe, sumarDias, tieneTallas, variantesDe } from '../domain/logica'
+import { entregaConFolio, normalizarFolioContaminado, NOTA_CONTAMINADO, UNIDADES_FOLIO, type UnidadFolio } from '../domain/contaminado'
+import type { DatosPrestamo, Entrega, EppContaminado, Material, Trabajador } from '../domain/types'
+import { fechaLocal, hace, normalizar, plural } from '../lib/util'
+import { deshacerEntrega, registrarEntrega, type LineaTicket } from '../state/servicios'
+import { pantalla } from '../state/navegacion'
+import { registrarTrabajoEnCurso } from '../state/versionRed'
+import * as S from '../state/store'
+import { avisar, confirmar, FotoMaterial, intentar, Modal, Talla } from './comunes'
+import { puedeInventario } from '../state/permisos'
+import { DetalleEntrega } from './DetalleEntrega'
+import { Icono } from './iconos'
+import { BuscadorTrabajador, FormTrabajador, TarjetaTrabajador } from './Trabajador'
+
+// El ticket vive fuera del componente para no perderse al cambiar de pantalla.
+interface Linea extends LineaTicket {
+  clave: string
+}
+const ticket = signal<Linea[]>([])
+const trabajadorSel = signal<Trabajador | null>(null)
+const observaciones = signal('')
+const notaRecurrencia = signal('')
+/** Día de la entrega cuando se capturan registros anteriores ('' = hoy). Solo almacén o administrador. */
+const fechaCaptura = signal('')
+const diaEntrega = () => fechaCaptura.value || fechaLocal()
+registrarTrabajoEnCurso(() => ticket.value.length > 0 || !!trabajadorSel.value)
+
+/** Cambio de EPP contaminado: se respalda con el formato en papel; aquí solo es obligatorio su folio. */
+interface EstadoContaminado {
+  activo: boolean
+  unidad: UnidadFolio
+  folio: string
+  /** null = todo el material del ticket */
+  materiales: string[] | null
+  actividad: string
+  supervisor: string
+  hora: string
+  vistoBueno: string
+}
+const SIN_CONTAMINADO: EstadoContaminado = { activo: false, unidad: 'U1', folio: '', materiales: null, actividad: '', supervisor: '', hora: '', vistoBueno: '' }
+const contaminado = signal<EstadoContaminado>(SIN_CONTAMINADO)
+const anioDespacho = () => Number(diaEntrega().slice(0, 4))
+const folioContaminado = () => normalizarFolioContaminado(contaminado.value.folio, contaminado.value.unidad, anioDespacho())
+const materialesContaminadosTicket = () => {
+  const ids = [...new Set(ticket.value.map((l) => l.materialId))]
+  const sel = contaminado.value.materiales
+  return sel ? ids.filter((id) => sel.includes(id)) : ids
+}
+
+const fechaLarga = (fecha: string) => new Date(fecha + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+
+/**
+ * Fecha de la entrega. Por defecto es hoy; un administrador o encargado de almacén puede
+ * indicar un día anterior para capturar registros atrasados y cuadrar el inventario.
+ * La fecha se conserva entre entregas (para capturar varias del mismo día) hasta volver a hoy.
+ */
+function FechaEntrega() {
+  const [abierto, setAbierto] = useState(false)
+  if (!puedeInventario()) return null
+  const hoy = fechaLocal()
+  const atrasada = !!fechaCaptura.value && fechaCaptura.value !== hoy
+  if (!atrasada && !abierto) {
+    return (
+      <button class="btn ghost sm" style={{ justifySelf: 'start' }} onClick={() => setAbierto(true)}>
+        <Icono n="historial" /> Fecha de la entrega: hoy · cambiar
+      </button>
+    )
+  }
+  return (
+    <div class={`aviso ${atrasada ? 'warn' : 'info'} fecha-entrega`}>
+      <label class="campo" style={{ width: '100%' }}>
+        Fecha en que se entregó
+        <input
+          class="input"
+          id="fecha-entrega"
+          type="date"
+          max={hoy}
+          value={fechaCaptura.value || hoy}
+          onInput={(e) => {
+            const v = (e.target as HTMLInputElement).value
+            fechaCaptura.value = !v || v >= hoy ? '' : v
+          }}
+        />
+      </label>
+      <div class="spread small" style={{ width: '100%' }}>
+        <span>{atrasada ? `Se registrará con fecha del ${fechaLarga(fechaCaptura.value)}.` : 'Elija el día real de la entrega (no puede ser posterior a hoy).'}</span>
+        <button
+          class="btn ghost sm"
+          onClick={() => {
+            fechaCaptura.value = ''
+            setAbierto(false)
+          }}
+        >
+          {atrasada ? 'Volver a hoy' : 'Cerrar'}
+        </button>
+      </div>
+    </div>
+  )
+}
+const datosPrestamo = signal<DatosPrestamo>({ supervisor: { nombre: '', rpe: '', extension: '' }, vence: '' })
+
+const fechaCorta = (fecha: string) => {
+  const [a, m, d] = fecha.split('-').map(Number)
+  const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+  return `${d} ${meses[m - 1]}${a !== new Date().getFullYear() ? ` ${a}` : ''}`
+}
+
+/** Consumibles del ticket que esta persona ya recibió de forma recurrente. */
+function recurrentesDelTicket(t: Trabajador | null): MaterialRecurrente[] {
+  if (!t) return []
+  const ids = ticket.value.filter((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'consumible').map((l) => l.materialId)
+  return materialesRecurrentes(S.entregas.value, t.rpe, ids, diaEntrega())
+}
+
+let ultimoAvisoRecurrencia = ''
+const MOTIVOS_RECURRENCIA = ['EPP Contaminado', 'Desgaste por el trabajo', 'Se dañó o rompió', 'Extravío', 'Talla incorrecta', 'Para su cuadrilla']
+
+/**
+ * Bajo los datos del trabajador: lista desplegable con sus últimas entregas. Se resaltan
+ * las que incluyen el mismo material que está en el ticket (reincidencia), para detectar
+ * solicitudes repetidas. Al tocar una entrega se abre su detalle.
+ */
+function HistorialTrabajador({ t }: { t: Trabajador }) {
+  const [detalle, setDetalle] = useState<Entrega | null>(null)
+  const [todas, setTodas] = useState(false)
+  const enTicket = new Set(ticket.value.map((l) => l.materialId))
+  const recurrentes = new Set(recurrentesDelTicket(t).map((r) => r.materialId))
+  const entregas = useMemo(() => S.entregas.value.filter((e) => e.rpe === t.rpe && e.estado === 'registrada').reverse(), [S.entregas.value, t.rpe])
+  const repetidas = entregas.filter((e) => e.lineas.some((l) => enTicket.has(l.materialId)))
+  // Se abre sola cuando hay reincidencia; si no, queda plegada hasta que se toque
+  const [abierto, setAbierto] = useState<boolean | null>(null)
+  const mostrar = abierto ?? repetidas.length > 0
+  useEffect(() => {
+    setAbierto(null)
+    setTodas(false)
+  }, [t.rpe])
+  if (!entregas.length) return null
+  const visibles = todas ? entregas.slice(0, 40) : entregas.slice(0, 5)
+  return (
+    <div class={`card historial-trab ${repetidas.length ? 'con-repetidas' : ''}`}>
+      <button class="historial-cab" aria-expanded={mostrar} onClick={() => setAbierto(!mostrar)}>
+        <span class="grow">
+          <strong>Historial de entregas</strong> <span class="muted small">· {plural(entregas.length, 'entrega', 'entregas')}</span>
+        </span>
+        {repetidas.length > 0 && (
+          <span class={`badge ${recurrentes.size ? 'bad' : 'warn'}`}>
+            {repetidas.length} con el mismo material
+          </span>
+        )}
+        <span class="historial-flecha" aria-hidden="true">
+          {mostrar ? '▴' : '▾'}
+        </span>
+      </button>
+      {mostrar && (
+        <div class="historial-lista">
+          {visibles.map((e) => {
+            const repetida = e.lineas.some((l) => enTicket.has(l.materialId))
+            return (
+              <button key={e.id} class={`historial-fila ${repetida ? 'repetida' : ''}`} onClick={() => setDetalle(e)} title={`Ver la entrega ${e.folio}`}>
+                <span class="historial-fecha">
+                  <strong>{fechaCorta(e.fecha)}</strong>
+                  <span class="muted small">{hace(e.ts)}</span>
+                </span>
+                <span class="grow small">
+                  {e.lineas.map((l, i) => (
+                    <span key={i} class={enTicket.has(l.materialId) ? 'mat-repetido' : ''}>
+                      {i > 0 && ', '}
+                      {S.nombreMaterial(l.materialId)}
+                      {l.varianteId && ` ${l.varianteId}`} ×{l.cantidad}
+                    </span>
+                  ))}
+                  {e.recurrencia?.nota && <span class="muted"> · «{e.recurrencia.nota}»</span>}
+                </span>
+                {repetida && <span class={`badge ${e.lineas.some((l) => recurrentes.has(l.materialId)) ? 'bad' : 'warn'}`}>Mismo material</span>}
+              </button>
+            )
+          })}
+          {entregas.length > 5 && (
+            <button class="btn ghost sm" style={{ justifySelf: 'start' }} onClick={() => setTodas(!todas)}>
+              {todas ? 'Ver solo las últimas 5' : `Ver las ${Math.min(entregas.length, 40)} entregas`}
+            </button>
+          )}
+        </div>
+      )}
+      {detalle && <DetalleEntrega e={S.entregas.value.find((x) => x.id === detalle.id) ?? detalle} onCerrar={() => setDetalle(null)} />}
+    </div>
+  )
+}
+
+/** Aviso en el ticket cuando algo se entrega de forma recurrente, con comentario para dar seguimiento. */
+function AvisoRecurrencia({ t }: { t: Trabajador | null }) {
+  const [detalle, setDetalle] = useState<Entrega | null>(null)
+  const recurrentes = recurrentesDelTicket(t)
+  const cuantos = recurrentes.length
+  useEffect(() => {
+    // El ticket se dibuja dos veces (escritorio y celular): el aviso sale una sola vez por caso
+    const clave = cuantos && t ? `${t.rpe}|${recurrentes.map((r) => r.materialId).join(',')}` : ''
+    if (clave === ultimoAvisoRecurrencia) return
+    ultimoAvisoRecurrencia = clave
+    if (cuantos && t) avisar(`${t.nombre.split(' ').slice(0, 2).join(' ')} ya recibió ${cuantos === 1 ? S.nombreMaterial(recurrentes[0].materialId) : `${cuantos} de estos materiales`} varias veces en los últimos ${REGLA_RECURRENCIA.dias} días.`, { tipo: 'bad', ms: 6000 })
+  }, [cuantos, t?.rpe])
+  if (!cuantos) return null
+  return (
+    <div class="aviso warn recurrencia">
+      <div class="stack" style={{ gap: '6px', width: '100%' }}>
+        <strong class="small">
+          <Icono n="repetir" /> Entrega recurrente (últimos {REGLA_RECURRENCIA.dias} días)
+        </strong>
+        {recurrentes.map((r) => (
+          <div key={r.materialId} class="small">
+            {S.nombreMaterial(r.materialId)}: {r.previas.length} veces ·{' '}
+            {r.previas.slice(0, 4).map((p, i) => (
+              <span key={p.entrega.id}>
+                {i > 0 && ', '}
+                <button class="enlace" onClick={() => setDetalle(p.entrega)}>
+                  {fechaCorta(p.entrega.fecha)} (×{p.cantidad})
+                </button>
+              </span>
+            ))}
+          </div>
+        ))}
+        <input
+          class="input"
+          id="nota-recurrencia"
+          placeholder="Comentario: ¿por qué lo solicita otra vez?"
+          value={notaRecurrencia.value}
+          onInput={(e) => (notaRecurrencia.value = (e.target as HTMLInputElement).value)}
+        />
+        <div class="row" style={{ gap: '4px' }}>
+          {MOTIVOS_RECURRENCIA.map((m) => (
+            <button
+              key={m}
+              class="chip"
+              aria-pressed={notaRecurrencia.value === m}
+              onClick={() => {
+                notaRecurrencia.value = m
+                if (m === NOTA_CONTAMINADO && !contaminado.value.activo) contaminado.value = { ...contaminado.value, activo: true }
+              }}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      </div>
+      {detalle && <DetalleEntrega e={S.entregas.value.find((x) => x.id === detalle.id) ?? detalle} onCerrar={() => setDetalle(null)} />}
+    </div>
+  )
+}
+
+/**
+ * Casilla «EPP contaminado» del ticket. Al marcarla se pide el folio del formato en papel
+ * (obligatorio) y qué material se cambia; actividad, supervisor, hora y visto bueno de PR son opcionales.
+ */
+function PanelContaminado() {
+  const c = contaminado.value
+  const [detalles, setDetalles] = useState(false)
+  const cambiar = (x: Partial<EstadoContaminado>) => (contaminado.value = { ...contaminado.value, ...x })
+  if (!ticket.value.length && !c.activo) return null
+  if (!c.activo) {
+    return (
+      <label class="row small contaminado-casilla">
+        <input type="checkbox" id="chk-contaminado" checked={false} onChange={() => cambiar({ activo: true })} />
+        <span>
+          <Icono n="alerta" /> EPP contaminado (cambio con formato de Protección Radiológica)
+        </span>
+      </label>
+    )
+  }
+  const folio = folioContaminado()
+  const usado = folio ? entregaConFolio(S.entregas.value, folio) : undefined
+  const ids = [...new Set(ticket.value.map((l) => l.materialId))]
+  const marcados = materialesContaminadosTicket()
+  const alternar = (id: string) => {
+    const actual = new Set(marcados)
+    if (actual.has(id)) actual.delete(id)
+    else actual.add(id)
+    cambiar({ materiales: ids.filter((x) => actual.has(x)) })
+  }
+  const texto = (k: 'actividad' | 'supervisor' | 'hora' | 'vistoBueno', etiqueta: string, ph: string) => (
+    <label class="campo">
+      {etiqueta}
+      <input class="input" id={`cont-${k}`} placeholder={ph} value={c[k]} onInput={(e) => cambiar({ [k]: (e.target as HTMLInputElement).value })} />
+    </label>
+  )
+  return (
+    <div class="aviso warn contaminado">
+      <div class="stack" style={{ gap: '8px', width: '100%' }}>
+        <label class="row small" style={{ fontWeight: 600 }}>
+          <input type="checkbox" id="chk-contaminado" checked onChange={() => (contaminado.value = { ...SIN_CONTAMINADO, unidad: c.unidad })} />
+          <span>EPP contaminado</span>
+        </label>
+        <div class="row" style={{ gap: '6px', flexWrap: 'nowrap', alignItems: 'end' }}>
+          <label class="campo" style={{ width: '76px', flex: 'none' }}>
+            Unidad
+            <select class="input" id="cont-unidad" value={c.unidad} onChange={(e) => cambiar({ unidad: (e.target as HTMLSelectElement).value as UnidadFolio })}>
+              {UNIDADES_FOLIO.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="campo grow">
+            Folio del formato
+            <input
+              class={`input ${folio && !usado ? '' : 'falta'}`}
+              id="cont-folio"
+              autoComplete="off"
+              placeholder="Número, p. ej. 3"
+              value={c.folio}
+              onInput={(e) => cambiar({ folio: (e.target as HTMLInputElement).value })}
+              onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
+            />
+          </label>
+        </div>
+        <span class="small">
+          {usado ? (
+            <strong>
+              El folio {folio} ya se capturó en la entrega {usado.folio} ({usado.nombre}, {fechaCorta(usado.fecha)}).
+            </strong>
+          ) : folio ? (
+            <>
+              Se registrará con el folio <strong class="mono">{folio}</strong>
+            </>
+          ) : c.folio.trim() ? (
+            'Folio no válido: escriba el número del formato o el folio completo (U1-SI-2026-003).'
+          ) : (
+            'Escriba el número del formato en papel o léalo con el escáner.'
+          )}
+        </span>
+        {ids.length > 1 && (
+          <div class="stack" style={{ gap: '4px' }}>
+            <span class="small">Material contaminado:</span>
+            <div class="row" style={{ gap: '4px' }}>
+              {ids.map((id) => (
+                <button key={id} class="chip" aria-pressed={marcados.includes(id)} onClick={() => alternar(id)}>
+                  {S.nombreMaterial(id)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {detalles || c.actividad || c.supervisor || c.hora || c.vistoBueno ? (
+          <div class="stack" style={{ gap: '6px' }}>
+            {texto('actividad', 'Actividad que estaba realizando', 'Opcional')}
+            <div class="row" style={{ gap: '6px', flexWrap: 'nowrap' }}>
+              <div class="grow">{texto('supervisor', 'Supervisor', 'Opcional')}</div>
+              <div style={{ width: '96px', flex: 'none' }}>{texto('hora', 'Hora', 'hh:mm')}</div>
+            </div>
+            {texto('vistoBueno', 'Visto bueno de Protección Radiológica', 'Nombre o RPE (opcional)')}
+          </div>
+        ) : (
+          <button class="btn ghost sm" style={{ justifySelf: 'start' }} onClick={() => setDetalles(true)}>
+            <Icono n="nota" /> Agregar datos del formato (opcional)
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function lineasPrestamo(): Linea[] {
+  return ticket.value.filter((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'prestamo')
+}
+
+/** Fecha límite sugerida: hoy + el plazo más corto de los equipos prestados. */
+function venceSugerido(): string {
+  const plazos = lineasPrestamo().map((l) => S.materialesPorId.value.get(l.materialId)?.plazoDias ?? 1)
+  return sumarDias(diaEntrega(), plazos.length ? Math.min(...plazos) : 1)
+}
+
+const claveLinea = (materialId: string, varianteId: string) => `${materialId}|${varianteId}`
+
+function motivoPorDefecto(t: Trabajador | null, materialId: string): string | undefined {
+  const m = S.materialesPorId.value.get(materialId)
+  if (!m || m.tipo !== 'resguardo') return undefined
+  const yaTiene = t && S.resguardosActivos.value.some((r) => r.rpe === t.rpe && r.materialId === materialId)
+  return yaTiene ? '' : 'ent_primera'
+}
+
+function agregar(materialId: string, varianteId: string, cantidad = 1) {
+  const clave = claveLinea(materialId, varianteId)
+  const lista = [...ticket.value]
+  const i = lista.findIndex((l) => l.clave === clave)
+  const tipo = S.materialesPorId.value.get(materialId)?.tipo
+  if (i >= 0) lista[i] = { ...lista[i], cantidad: tipo === 'resguardo' ? 1 : lista[i].cantidad + cantidad }
+  else lista.push({ clave, materialId, varianteId, cantidad, motivoId: motivoPorDefecto(trabajadorSel.value, materialId) })
+  ticket.value = lista
+}
+
+function cambiarLinea(clave: string, cambios: Partial<Linea>) {
+  ticket.value = ticket.value
+    .map((l) => {
+      if (l.clave !== clave) return l
+      const n = { ...l, ...cambios }
+      n.clave = claveLinea(n.materialId, n.varianteId)
+      return n
+    })
+    .filter((l) => l.cantidad > 0)
+  // Si al cambiar la talla quedaron dos renglones iguales, se juntan
+  const unidos = new Map<string, Linea>()
+  for (const l of ticket.value) {
+    const previo = unidos.get(l.clave)
+    unidos.set(l.clave, previo ? { ...previo, cantidad: previo.cantidad + l.cantidad } : l)
+  }
+  ticket.value = [...unidos.values()]
+}
+
+/** Agrega un material usando la talla que el trabajador pidió la última vez, si existe. */
+function agregarConTalla(m: Material, pedirTalla: (m: Material) => void) {
+  if (!tieneTallas(m)) return agregar(m.id, '')
+  const recordada = trabajadorSel.value?.tallas[m.id]
+  if (recordada && variantesDe(m).includes(recordada)) return agregar(m.id, recordada)
+  pedirTalla(m)
+}
+
+function elegirTrabajador(t: Trabajador) {
+  trabajadorSel.value = t
+  datosPrestamo.value = { supervisor: t.supervisor ?? { nombre: '', rpe: '', extension: '' }, vence: datosPrestamo.value.vence }
+  // Recalcular motivos de resguardo según lo que el trabajador ya tiene
+  ticket.value = ticket.value.map((l) => ({ ...l, motivoId: l.motivoId || motivoPorDefecto(t, l.materialId) }))
+}
+
+// ---------- Selector de talla ----------
+
+function SelectorTalla({ m, onElegir, onCerrar }: { m: Material; onElegir: (v: string) => void; onCerrar: () => void }) {
+  const ubi = S.ubicacionDespacho.value?.id
+  return (
+    <Modal titulo={`${m.nombre} · talla`} onCerrar={onCerrar}>
+      <div class="tallas">
+        {m.variantes
+          .filter((v) => v.activo)
+          .map((v) => {
+            const disp = existencia(S.existencias.value, m.id, v.id, ubi)
+            return (
+              <button key={v.id} onClick={() => onElegir(v.id)} class={disp <= 0 ? 'sin' : ''}>
+                {v.color && <span class="swatch grande" style={{ background: v.color }} />}
+                <b>{v.id}</b>
+                {v.etiqueta !== v.id && <span class="small">{v.etiqueta.replace(/^\S+\s·\s/, '')}</span>}
+                <span class="mono small">Disp. {disp}</span>
+              </button>
+            )
+          })}
+      </div>
+    </Modal>
+  )
+}
+
+// ---------- Renglón del ticket ----------
+
+function Renglon({ l, trabajador }: { l: Linea; trabajador: Trabajador | null }) {
+  const m = S.materialesPorId.value.get(l.materialId)
+  const [verTallas, setVerTallas] = useState(!l.varianteId)
+  if (!m) return null
+  const ubi = S.ubicacionDespacho.value?.id
+  const disp = l.varianteId || !tieneTallas(m) ? existencia(S.existencias.value, m.id, l.varianteId, ubi) : null
+  const otras = S.ubicacionesActivas.value.filter((u) => u.id !== ubi)
+  const enOtras = disp !== null ? otras.map((u) => ({ u, n: existencia(S.existencias.value, m.id, l.varianteId, u.id) })).filter((x) => x.n > 0) : []
+  const minimo = m.stockMin[l.varianteId] ?? 0
+  const previo = trabajador && m.tipo !== 'consumible' ? S.resguardosActivos.value.find((r) => r.rpe === trabajador.rpe && r.materialId === m.id) : undefined
+  // Si ya tiene uno en resguardo, solo se permiten motivos que cierren el anterior
+  const motivosLinea = S.motivosDe('entrega').filter((mo) => !previo || mo.cierraPrevio)
+
+  return (
+    <div class="renglon">
+      <div class="renglon-top">
+        <FotoMaterial materialId={m.id} mini />
+        <div class="grow stack" style={{ gap: '2px' }}>
+          <strong>{m.nombre}</strong>
+          {tieneTallas(m) && (
+            <button class={`talla-btn ${l.varianteId ? '' : 'falta'}`} onClick={() => setVerTallas(!verTallas)}>
+              {l.varianteId ? (
+                <>
+                  Talla <Talla materialId={m.id} varianteId={l.varianteId} />
+                </>
+              ) : (
+                'Elegir talla'
+              )}
+            </button>
+          )}
+        </div>
+        <div class="stepper">
+          <button onClick={() => cambiarLinea(l.clave, { cantidad: l.cantidad - 1 })} aria-label="Quitar una pieza">
+            <Icono n="menos" />
+          </button>
+          <span aria-live="polite">{l.cantidad}</span>
+          <button onClick={() => cambiarLinea(l.clave, { cantidad: l.cantidad + 1 })} disabled={m.tipo === 'resguardo'} aria-label="Agregar una pieza">
+            <Icono n="mas1" />
+          </button>
+        </div>
+      </div>
+      {tieneTallas(m) && (verTallas || !l.varianteId) && (
+        <div class="row" style={{ gap: '6px' }}>
+          {m.variantes
+            .filter((v) => v.activo)
+            .map((v) => (
+              <button
+                key={v.id}
+                class="chip"
+                aria-pressed={v.id === l.varianteId}
+                onClick={() => {
+                  cambiarLinea(l.clave, { varianteId: v.id })
+                  setVerTallas(false)
+                }}
+              >
+                {v.color && <span class="swatch" style={{ background: v.color, marginRight: '4px' }} />}
+                {v.id}
+              </button>
+            ))}
+        </div>
+      )}
+      {m.tipo === 'resguardo' && (
+        <label class="motivo-resg">
+          <span>Resguardo · motivo</span>
+          <select
+            id={`motivo-${l.clave}`}
+            class={`input ${l.motivoId ? '' : 'falta'}`}
+            value={l.motivoId ?? ''}
+            onChange={(e) => cambiarLinea(l.clave, { motivoId: (e.target as HTMLSelectElement).value })}
+          >
+            <option value="">Elija el motivo…</option>
+            {motivosLinea.map((mo) => (
+              <option key={mo.id} value={mo.id}>
+                {mo.texto}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {m.tipo === 'prestamo' && <span class="badge prest" style={{ justifySelf: 'start' }}>Préstamo · se devuelve</span>}
+      {previo && m.tipo === 'resguardo' && (
+        <div class="aviso warn small">
+          <Icono n="alerta" />
+          <span>
+            Ya tiene {S.nombreMaterial(previo.materialId, previo.varianteId)} en resguardo desde {previo.fechaEntrega} ({previo.folioSI}). Elija el motivo de la reposición: el anterior se cierra solo.
+          </span>
+        </div>
+      )}
+      {previo && m.tipo === 'prestamo' && (
+        <div class="aviso bad small">
+          <Icono n="alerta" />
+          <span>
+            No ha devuelto el {m.nombre} que se le prestó el {previo.fechaEntrega} ({previo.folioSI}). Registre primero la devolución.
+          </span>
+        </div>
+      )}
+      {disp !== null && l.cantidad > disp && (
+        <div class="aviso bad small">
+          <Icono n="alerta" />
+          <span>
+            Solo hay {Math.max(disp, 0)} en {S.ubicacionDespacho.value?.nombre}.
+            {enOtras.length > 0 && ` Hay ${enOtras.map((x) => `${x.n} en ${x.u.nombre}`).join(', ')}.`}
+          </span>
+        </div>
+      )}
+      {disp !== null && l.cantidad <= disp && disp - l.cantidad <= minimo && (
+        <div class="muted small">Quedarán {disp - l.cantidad} (mínimo {minimo})</div>
+      )}
+    </div>
+  )
+}
+
+// ---------- Datos del préstamo ----------
+
+function PanelPrestamo() {
+  const dp = datosPrestamo.value
+  const cambiar = (c: Partial<DatosPrestamo['supervisor']>) => (datosPrestamo.value = { ...dp, supervisor: { ...dp.supervisor, ...c } })
+  const buscarSupervisor = (rpe: string) => {
+    const s = S.personal.value.get(rpe.trim().toUpperCase())
+    cambiar({ rpe: rpe.toUpperCase(), ...(s && !dp.supervisor.nombre ? { nombre: s.nombre } : {}) })
+  }
+  return (
+    <fieldset class="panel-prestamo">
+      <legend>Préstamo · datos del supervisor</legend>
+      <div class="row" style={{ alignItems: 'start', flexWrap: 'nowrap' }}>
+        <label class="campo" style={{ width: '96px', flex: 'none' }}>
+          RPE
+          <input class="input" id="sup-rpe" value={dp.supervisor.rpe} maxLength={8} onInput={(e) => buscarSupervisor((e.target as HTMLInputElement).value)} />
+        </label>
+        <label class="campo grow">
+          Nombre
+          <input class="input" id="sup-nombre" value={dp.supervisor.nombre} onInput={(e) => cambiar({ nombre: (e.target as HTMLInputElement).value })} />
+        </label>
+      </div>
+      <div class="row" style={{ alignItems: 'start', flexWrap: 'nowrap' }}>
+        <label class="campo" style={{ width: '96px', flex: 'none' }}>
+          Extensión
+          <input class="input" id="sup-ext" inputMode="tel" value={dp.supervisor.extension} onInput={(e) => cambiar({ extension: (e.target as HTMLInputElement).value })} />
+        </label>
+        <label class="campo grow">
+          Devolver a más tardar
+          <input class="input" id="prest-vence" type="date" min={fechaLocal()} value={dp.vence} onInput={(e) => (datosPrestamo.value = { ...dp, vence: (e.target as HTMLInputElement).value })} />
+        </label>
+      </div>
+    </fieldset>
+  )
+}
+
+// ---------- Ticket ----------
+
+function Ticket({ onEntregado }: { onEntregado: () => void }) {
+  const t = trabajadorSel.value
+  const lineas = ticket.value
+  const [confirmarFalta, setConfirmarFalta] = useState(false)
+  const [nota, setNota] = useState(false)
+  const [enviando, setEnviando] = useState(false)
+  const piezas = lineas.reduce((s, l) => s + l.cantidad, 0)
+  const ubi = S.ubicacionDespacho.value?.id
+  const faltaTalla = lineas.filter((l) => {
+    const m = S.materialesPorId.value.get(l.materialId)
+    return m && tieneTallas(m) && !l.varianteId
+  }).length
+  const faltaMotivo = lineas.filter((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'resguardo' && !l.motivoId).length
+  const sinExistencia = lineas.filter((l) => l.varianteId !== undefined && l.cantidad > existencia(S.existencias.value, l.materialId, l.varianteId, ubi)).length
+  const hayPrestamo = lineas.some((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'prestamo')
+  const dp = datosPrestamo.value
+  const faltaPrestamo = hayPrestamo && (!dp.supervisor.nombre.trim() || !dp.supervisor.rpe.trim() || !dp.supervisor.extension.trim() || !dp.vence)
+  const prestamoPendiente = !!t && lineas.some((l) => {
+    const m = S.materialesPorId.value.get(l.materialId)
+    return m?.tipo === 'prestamo' && S.resguardosActivos.value.some((r) => r.rpe === t.rpe && r.materialId === m.id)
+  })
+
+  useEffect(() => setConfirmarFalta(false), [lineas, t])
+  useEffect(() => {
+    if (hayPrestamo && !datosPrestamo.value.vence) datosPrestamo.value = { ...datosPrestamo.value, vence: venceSugerido() }
+  }, [hayPrestamo])
+
+  let bloqueo = ''
+  if (!t) bloqueo = 'Identifique al trabajador'
+  else if (!lineas.length) bloqueo = 'Agregue materiales'
+  else if (faltaTalla) bloqueo = `Falta la talla en ${faltaTalla} ${faltaTalla > 1 ? 'renglones' : 'renglón'}`
+  else if (faltaMotivo) bloqueo = `Falta el motivo en ${faltaMotivo} resguardo${faltaMotivo > 1 ? 's' : ''}`
+  else if (prestamoPendiente) bloqueo = 'Tiene un préstamo sin devolver'
+  else if (faltaPrestamo) bloqueo = 'Faltan los datos del supervisor para el préstamo'
+  else if (contaminado.value.activo && !folioContaminado()) bloqueo = 'Falta el folio del formato de EPP contaminado'
+  else if (contaminado.value.activo && entregaConFolio(S.entregas.value, folioContaminado())) bloqueo = 'Ese folio de EPP contaminado ya se capturó'
+  else if (contaminado.value.activo && !materialesContaminadosTicket().length) bloqueo = 'Marque el material contaminado'
+
+  const entregar = async () => {
+    if (bloqueo || !t || enviando) return
+    if (sinExistencia && !confirmarFalta) return setConfirmarFalta(true)
+    // ¿Ya se capturó hoy (o en el día elegido) lo mismo para esta persona?
+    const consumibles = lineas.filter((l) => S.materialesPorId.value.get(l.materialId)?.tipo === 'consumible')
+    const dups = posiblesDuplicados(S.entregas.value, t.rpe, diaEntrega(), consumibles)
+    if (dups.length) {
+      const identica = dups.some((d) => d.identica)
+      const detalle = dups
+        .slice(0, 4)
+        .map((d) => `• ${d.entrega.folio} · ${d.entrega.hora} · ${d.entrega.usuarioNombre}: ${d.entrega.lineas.map((l) => `${S.nombreMaterial(l.materialId)}${l.varianteId ? ` ${l.varianteId}` : ''} ×${l.cantidad}`).join(', ')}`)
+        .join('\n')
+      const dia = diaEntrega() === fechaLocal() ? 'hoy' : `el ${fechaCorta(diaEntrega())}`
+      const seguir = await confirmar(
+        identica ? 'Posible registro duplicado' : 'Ya recibió este material ese día',
+        `${t.nombre} ya tiene ${identica ? 'una entrega idéntica' : `entregas con ${[...new Set(dups.flatMap((d) => d.materiales))].map((m) => S.nombreMaterial(m)).join(', ')}`} ${dia}:\n${detalle}\n\n¿Registrar de todos modos otra entrega?`,
+        'Sí, registrar otra',
+        true,
+      )
+      if (!seguir) return
+    }
+    setEnviando(true)
+    const c = contaminado.value
+    const datosContaminado: EppContaminado | undefined = c.activo
+      ? { folio: folioContaminado(), materiales: materialesContaminadosTicket(), actividad: c.actividad, supervisor: c.supervisor, hora: c.hora, vistoBueno: c.vistoBueno }
+      : undefined
+    const r = await intentar(() => registrarEntrega(t, lineas, observaciones.value, hayPrestamo ? datosPrestamo.value : undefined, notaRecurrencia.value, fechaCaptura.value, datosContaminado))
+    setEnviando(false)
+    if (!r) return
+    const { entrega, deshacer } = r
+    const anteriorTicket = ticket.value
+    const anteriorTrabajador = t
+    const anteriorNota = observaciones.value
+    const anteriorRecurrencia = notaRecurrencia.value
+    const anteriorPrestamo = datosPrestamo.value
+    const anteriorContaminado = contaminado.value
+    ticket.value = []
+    trabajadorSel.value = null
+    observaciones.value = ''
+    notaRecurrencia.value = ''
+    datosPrestamo.value = { supervisor: { nombre: '', rpe: '', extension: '' }, vence: '' }
+    contaminado.value = { ...SIN_CONTAMINADO, unidad: anteriorContaminado.unidad }
+    setNota(false)
+    onEntregado()
+    avisar(`✓ ${entrega.folio} · ${entrega.nombre.split(' ').slice(0, 2).join(' ')} · ${piezas} pieza${piezas > 1 ? 's' : ''}${entrega.capturada ? ` · fecha ${fechaCorta(entrega.fecha)}` : ''}${entrega.contaminado ? ` · contaminado ${entrega.contaminado.folio}` : ''}`, {
+      ms: 12000,
+      accion: {
+        texto: 'Deshacer',
+        fn: async () => {
+          await intentar(() => deshacerEntrega(deshacer))
+          ticket.value = anteriorTicket
+          trabajadorSel.value = S.personal.value.get(anteriorTrabajador.rpe) ?? anteriorTrabajador
+          observaciones.value = anteriorNota
+          notaRecurrencia.value = anteriorRecurrencia
+          datosPrestamo.value = anteriorPrestamo
+          contaminado.value = anteriorContaminado
+          avisar('Entrega deshecha')
+        },
+      },
+    })
+  }
+
+  return (
+    <div class="ticket">
+      <div class="ticket-cab spread">
+        <h2>Ticket</h2>
+        {lineas.length > 0 && (
+          <button class="btn ghost sm" onClick={() => (ticket.value = [])}>
+            Vaciar
+          </button>
+        )}
+      </div>
+      <div class="ticket-lineas">
+        {lineas.length === 0 ? (
+          <p class="muted small" style={{ padding: '24px 16px', textAlign: 'center' }}>
+            Toque un material para agregarlo. Cada toque suma una pieza.
+          </p>
+        ) : (
+          lineas.map((l) => <Renglon key={l.clave} l={l} trabajador={t} />)
+        )}
+      </div>
+      <div class="ticket-pie">
+        <FechaEntrega />
+        {hayPrestamo && <PanelPrestamo />}
+        <AvisoRecurrencia t={t} />
+        <PanelContaminado />
+        {nota || observaciones.value ? (
+          <input
+            class="input"
+            id="obs-despacho"
+            placeholder="Observaciones (opcional)"
+            value={observaciones.value}
+            onInput={(e) => (observaciones.value = (e.target as HTMLInputElement).value)}
+          />
+        ) : (
+          <button class="btn ghost sm" style={{ justifySelf: 'start' }} onClick={() => setNota(true)}>
+            <Icono n="nota" /> Agregar observación
+          </button>
+        )}
+        <div class="spread small">
+          <span class="muted">{bloqueo || `${lineas.length} ${lineas.length === 1 ? 'renglón' : 'renglones'}`}</span>
+          <strong>
+            {piezas} pieza{piezas === 1 ? '' : 's'}
+          </strong>
+        </div>
+        <button class={`btn block entregar ${confirmarFalta ? 'warn' : 'primary'}`} disabled={!!bloqueo || enviando} onClick={entregar}>
+          {confirmarFalta ? `Entregar aunque falte existencia (${sinExistencia})` : fechaCaptura.value ? `REGISTRAR · ${fechaCorta(fechaCaptura.value).toUpperCase()}` : 'ENTREGAR'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------- Pantalla ----------
+
+export function PantallaDespacho() {
+  // La captura de días anteriores es solo para almacén o administrador
+  if (fechaCaptura.value && (!puedeInventario() || fechaCaptura.value >= fechaLocal())) fechaCaptura.value = ''
+  const [cat, setCat] = useState('top')
+  const [buscar, setBuscar] = useState('')
+  const [tallaDe, setTallaDe] = useState<Material | null>(null)
+  const [ticketAbierto, setTicketAbierto] = useState(false)
+  const [editar, setEditar] = useState(false)
+  const [, refrescar] = useState(0)
+  const t = trabajadorSel.value
+  const ubi = S.ubicacionDespacho.value?.id
+
+  // Lector de código de barras USB/Bluetooth: escribe rápido y termina con Enter.
+  useEffect(() => {
+    let buffer = ''
+    let ultimo = 0
+    const tecla = (e: KeyboardEvent) => {
+      const destino = e.target as HTMLElement
+      if (destino.matches('input, textarea, select') || document.querySelector('.velo')) return
+      const ahora = Date.now()
+      if (ahora - ultimo > 100) buffer = ''
+      ultimo = ahora
+      if (e.key === 'Enter') {
+        if (buffer.length >= 4 && !lecturaEscanerValida(buffer)) {
+          avisar(`Lectura incompleta del gafete («${buffer}»). Vuelva a escanear.`, { tipo: 'bad' })
+        } else if (buffer.length >= 4) {
+          const rpe = resolverRpe(buffer, (r) => S.personal.value.has(r))
+          const tr = S.personal.value.get(rpe)
+          if (tr) elegirTrabajador(tr)
+          else avisar(`RPE ${rpe} no está en el padrón`, { tipo: 'bad' })
+        }
+        buffer = ''
+      } else if (e.key.length === 1) buffer += e.key
+    }
+    window.addEventListener('keydown', tecla)
+    return () => window.removeEventListener('keydown', tecla)
+  }, [])
+
+  const categorias = S.categorias.value.filter((c) => S.materialesActivos.value.some((m) => m.categoriaId === c.id))
+  const top = useMemo(() => {
+    const desde = new Date(Date.now() - 60 * 86400000).toISOString()
+    const lineas = S.entregas.value.filter((e) => e.ts >= desde && e.estado === 'registrada').flatMap((e) => e.lineas)
+    return masPedidos(lineas, MAS_PEDIDOS_BASE, 8)
+  }, [S.entregas.value])
+
+  const visibles = useMemo(() => {
+    const activos = S.materialesActivos.value
+    if (buscar.trim()) {
+      const q = normalizar(buscar)
+      return activos.filter((m) => normalizar(m.nombre).includes(q))
+    }
+    if (cat === 'top') return top.map((id) => S.materialesPorId.value.get(id)).filter((m): m is Material => !!m && m.activo)
+    return activos.filter((m) => m.categoriaId === cat)
+  }, [cat, buscar, top, S.materialesActivos.value])
+
+  const ultimaEntrega = t ? [...S.entregas.value].reverse().find((e) => e.rpe === t.rpe && e.estado === 'registrada') : undefined
+
+  const repetir = () => {
+    if (!ultimaEntrega) return
+    const consumibles = ultimaEntrega.lineas.filter((l) => !l.esResguardo && !l.esPrestamo)
+    if (!consumibles.length) return avisar('La última entrega solo tenía equipo de resguardo o préstamo.')
+    for (const l of consumibles) agregar(l.materialId, l.varianteId, l.cantidad)
+  }
+
+  const usarKit = (kitId: string) => {
+    const kit = S.kits.value.find((k) => k.id === kitId)
+    if (!kit || !t) return
+    const r = aplicarKit(kit, t, S.resguardosActivos.value.filter((x) => x.rpe === t.rpe), S.materialesPorId.value)
+    for (const l of r.lineas) {
+      const m = S.materialesPorId.value.get(l.materialId)!
+      const recordada = t.tallas[m.id]
+      const talla = tieneTallas(m) ? (recordada && variantesDe(m).includes(recordada) ? recordada : '') : ''
+      agregar(m.id, talla, l.cantidad)
+    }
+    if (r.omitidas.length) avisar(`No se agregó ${r.omitidas.map((o) => S.nombreMaterial(o.materialId)).join(', ')}: ya ${r.omitidas.length > 1 ? 'los tiene' : 'lo tiene'} en resguardo.`)
+    if (!r.lineas.some((l) => l.materialId.startsWith('g_'))) avisar(`El kit no define guantes para ${t.area}. Agréguelos si aplica.`)
+  }
+
+  const conteoEnTicket = (id: string) => ticket.value.filter((l) => l.materialId === id).reduce((s, l) => s + l.cantidad, 0)
+  const piezas = ticket.value.reduce((s, l) => s + l.cantidad, 0)
+
+  const vencidos = prestamosVencidos(S.resguardosActivos.value, fechaLocal())
+
+  return (
+    <div class="despacho">
+      <section class="despacho-main">
+        {vencidos.length > 0 && (
+          <button class="aviso bad" style={{ border: 0, textAlign: 'left', cursor: 'pointer' }} onClick={() => (pantalla.value = 'devolucion')}>
+            <Icono n="alerta" />
+            <span>
+              <strong>
+                {vencidos.length} préstamo{vencidos.length > 1 ? 's' : ''} sin devolver a tiempo:
+              </strong>{' '}
+              {vencidos
+                .slice(0, 3)
+                .map((r) => `${S.nombreMaterial(r.materialId)} · ${r.nombre.split(' ').slice(0, 2).join(' ')}`)
+                .join('; ')}
+              {vencidos.length > 3 && '…'} Toque para ver.
+            </span>
+          </button>
+        )}
+        {fechaCaptura.value && (
+          <div class="aviso warn">
+            <Icono n="historial" />
+            <span class="grow">
+              <strong>Captura de un día anterior:</strong> las entregas se registran con fecha del {fechaLarga(fechaCaptura.value)}.
+            </span>
+            <button class="btn sm" onClick={() => (fechaCaptura.value = '')}>
+              Volver a hoy
+            </button>
+          </div>
+        )}
+        <div class="card" style={{ padding: '12px' }}>
+          {t ? (
+            <TarjetaTrabajador t={t} onQuitar={() => (trabajadorSel.value = null)} onEditar={() => setEditar(true)} />
+          ) : (
+            <BuscadorTrabajador onElegir={elegirTrabajador} />
+          )}
+        </div>
+
+        {t && <HistorialTrabajador t={t} />}
+
+        {t && (
+          <div class="rapidos">
+            <button class="btn soft" disabled={!ultimaEntrega} onClick={repetir}>
+              <Icono n="repetir" /> Repetir última
+            </button>
+            {S.kits.value
+              .filter((k) => k.activo)
+              .map((k) => (
+                <button key={k.id} class="btn soft" onClick={() => usarKit(k.id)} title={k.descripcion}>
+                  <Icono n="kit" /> {k.nombre}
+                </button>
+              ))}
+          </div>
+        )}
+
+        <div class="categorias">
+          <div class="campo-buscar mini">
+            <Icono n="buscar" />
+            <input class="input" id="buscar-material" placeholder="Buscar material" value={buscar} onInput={(e) => setBuscar((e.target as HTMLInputElement).value)} />
+          </div>
+          <button class="cat" aria-pressed={!buscar && cat === 'top'} onClick={() => (setCat('top'), setBuscar(''))}>
+            Más pedidos
+          </button>
+          {categorias.map((c) => (
+            <button key={c.id} class="cat" aria-pressed={!buscar && cat === c.id} onClick={() => (setCat(c.id), setBuscar(''))}>
+              {c.nombre}
+            </button>
+          ))}
+        </div>
+
+        <div class="mosaico">
+          {visibles.map((m) => {
+            const vars = variantesDe(m)
+            const total = vars.reduce((s, v) => s + existencia(S.existencias.value, m.id, v, ubi), 0)
+            const nivel = Math.max(...vars.map((v) => nivelStock(existencia(S.existencias.value, m.id, v, ubi), m.stockMin[v] ?? 0)))
+            const n = conteoEnTicket(m.id)
+            return (
+              <button key={m.id} class={`tile ${m.tipo === 'resguardo' ? 'resg' : m.tipo === 'prestamo' ? 'prest' : ''}`} onClick={() => agregarConTalla(m, setTallaDe)}>
+                {n > 0 && <span class="contador">{n}</span>}
+                <FotoMaterial materialId={m.id} />
+                <span class="tile-nombre">{m.nombre}</span>
+                <span class={`tile-stock ${nivel >= 2 ? 'bajo' : nivel === 1 ? 'reorden' : ''}`}>
+                  {tieneTallas(m) ? `${vars.length} tallas · ` : ''}
+                  {total} disp.
+                </span>
+                {m.tipo === 'resguardo' && <span class="badge resg">Resguardo</span>}
+                {m.tipo === 'prestamo' && <span class="badge prest">Préstamo</span>}
+              </button>
+            )
+          })}
+          {visibles.length === 0 && <p class="muted">No hay materiales que coincidan.</p>}
+        </div>
+      </section>
+
+      <aside class="despacho-ticket">
+        <Ticket onEntregado={() => refrescar((x) => x + 1)} />
+      </aside>
+
+      <div class="barra-ticket">
+        <button class="btn grow" onClick={() => setTicketAbierto(true)}>
+          Ticket · {piezas} pieza{piezas === 1 ? '' : 's'}
+        </button>
+        <button class="btn primary" disabled={!t || !ticket.value.length} onClick={() => setTicketAbierto(true)}>
+          Revisar y entregar
+        </button>
+      </div>
+
+      {ticketAbierto && (
+        <div class="velo" onClick={(e) => e.target === e.currentTarget && setTicketAbierto(false)}>
+          <div class="modal ticket-movil" role="dialog" aria-modal="true" aria-label="Ticket">
+            <button class="btn ghost sm" style={{ justifySelf: 'end' }} onClick={() => setTicketAbierto(false)}>
+              <Icono n="cerrar" /> Seguir agregando
+            </button>
+            <Ticket onEntregado={() => setTicketAbierto(false)} />
+          </div>
+        </div>
+      )}
+
+      {tallaDe && (
+        <SelectorTalla
+          m={tallaDe}
+          onCerrar={() => setTallaDe(null)}
+          onElegir={(v) => {
+            agregar(tallaDe.id, v)
+            setTallaDe(null)
+          }}
+        />
+      )}
+
+      {editar && t && (
+        <FormTrabajador
+          inicial={t}
+          onCerrar={() => setEditar(false)}
+          onListo={(nuevo) => {
+            trabajadorSel.value = nuevo
+            setEditar(false)
+          }}
+        />
+      )}
+    </div>
+  )
+}
