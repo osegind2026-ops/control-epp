@@ -1685,3 +1685,5 @@ details > summary { list-style: revert; }
 .hoja-tendencia .tdz-escenarios td:first-child { text-align: left; }
 .hoja-tendencia .tdz-tallas { display: grid; grid-template-columns: 52mm 1fr; gap: 4mm; align-items: center; }
 .hoja-tendencia .tdz-tallas img { width: 100%; height: auto; max-height: 52mm; object-fit: contain; }
+.hoja-tendencia .tdz-cajas.tdz-cajas-2 { grid-template-columns: 1fr 1fr; }
+.tend-plan { border-top: 1px solid var(--rule); padding-top: 12px; display: grid; gap: 10px; }

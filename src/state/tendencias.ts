@@ -1,6 +1,6 @@
 // Análisis de Tendencias guardados en este equipo (Ajustes de la pantalla Tendencias).
 import { guardarConfig, leerConfig } from '../db/db'
-import { analizarMaterial, periodoDe, sumarDias, type AnalisisMaterial, type ConfigMaterial, type UnidadPeriodo } from '../domain/tendencias'
+import { analizarMaterial, compararPlan, periodoDe, sumarDias, type AnalisisMaterial, type ComparacionPlan, type ConfigMaterial, type PlanMaterial, type UnidadPeriodo } from '../domain/tendencias'
 import { fechaLocal } from '../lib/util'
 import type { EstiloGrafica, PaletaGrafica } from '../reportes/graficasTendencia'
 import * as S from './store'
@@ -8,6 +8,8 @@ import * as S from './store'
 export interface MaterialTendencia extends ConfigMaterial {
   /** Cómo se cuenta: pares, piezas, cajas… */
   unidad: string
+  /** Plan contra el que se compara lo real (fijado de la proyección o capturado a mano). */
+  plan?: PlanMaterial | null
 }
 
 export interface ConfigTendencia {
@@ -110,3 +112,14 @@ export function analizar(c: ConfigTendencia, hoy = fechaLocal()): AnalisisMateri
     .filter((a): a is AnalisisMaterial => !!a)
 }
 
+
+/** Planeado vs real de cada material que tiene un plan. */
+export function compararPlanes(c: ConfigTendencia, hoy = fechaLocal()): Map<string, ComparacionPlan> {
+  const ubicaciones = S.ubicacionesActivas.value.map((u) => u.id)
+  const r = new Map<string, ComparacionPlan>()
+  for (const cm of c.materiales) {
+    if (!cm.plan || !S.materialesPorId.value.get(cm.materialId)) continue
+    r.set(cm.materialId, compararPlan({ plan: cm.plan, entregas: S.entregas.value, movimientos: S.movimientos.value, ubicaciones, materialId: cm.materialId, hoy }))
+  }
+  return r
+}

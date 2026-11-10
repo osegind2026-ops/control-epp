@@ -2,8 +2,8 @@
 import type { ComponentChildren } from 'preact'
 import type { Plantilla } from './plantilla'
 import type { ConfigTendencia } from '../state/tendencias'
-import type { Bloque, ContenidoMaterial } from './tendenciaDoc'
-import type { ImagenesMaterial } from './imagenesTendencia'
+import type { Bloque, ContenidoMaterial, ContenidoPlan } from './tendenciaDoc'
+import type { ImagenesMaterial, ImagenesPlan } from './imagenesTendencia'
 
 function Hoja({ p, c, children }: { p: Plantilla; c: ConfigTendencia; children: ComponentChildren }) {
   return (
@@ -183,4 +183,24 @@ export function hojaComparativa(
       <p class="tdz-nota">{d.nota}</p>
     </Hoja>
   )
+}
+
+export function hojasPlan(p: Plantilla, c: ConfigTendencia, t: ContenidoPlan, img: ImagenesPlan, fecha: string, clave = '') {
+  return [
+    <Hoja key={`${clave}pa`} p={p} c={c}>
+      <Titulo titulo={t.titulo} subtitulo="Comparación de la tendencia planeada contra el consumo real registrado" fecha={fecha} />
+      <p class="tdz-parrafo">{t.intro}</p>
+      <div class="tdz-cajas tdz-cajas-2">
+        <Pares filas={t.resumen} destacar={2} />
+        <Pares filas={t.fechas} destacar={1} />
+      </div>
+      <p class="tdz-parrafo tdz-conclusion">{t.conclusion}</p>
+      <img class="tdz-grafica" src={img.consumo} alt="" />
+    </Hoja>,
+    <Hoja key={`${clave}pb`} p={p} c={c}>
+      <img class="tdz-grafica" src={img.existencia} alt="" />
+      <TablaBloques bloques={t.bloques} />
+      <p class="tdz-nota">{t.nota}</p>
+    </Hoja>,
+  ]
 }

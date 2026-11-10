@@ -1,8 +1,8 @@
 // Contenido del documento de Tendencias. Lo usan el PDF (ReporteTendencia) y el Word
 // (tendenciaWord) para que los dos digan exactamente lo mismo.
 import {
-  AYUDA_ESCENARIO, NOMBRE_ESCENARIO, coberturaTexto, conclusion, cuandoTexto, fechaLarga, miles, porUnidad, unidadTexto,
-  type AnalisisMaterial, type Escenario, type Periodo, type UnidadPeriodo,
+  AYUDA_ESCENARIO, NOMBRE_ESCENARIO, coberturaTexto, conclusion, conclusionPlan, cuandoTexto, fechaLarga, miles, porUnidad, unidadTexto,
+  type AnalisisMaterial, type ComparacionPlan, type Escenario, type Periodo, type UnidadPeriodo,
 } from '../domain/tendencias'
 import type { ConfigTendencia } from '../state/tendencias'
 import { VERSION } from '../version'
@@ -156,3 +156,52 @@ export function filasComparativas(lista: { a: AnalisisMaterial; unidad: string }
 }
 
 export const nombreArchivo = (titulo: string, hoy: string) => `${titulo.replace(/[\\/:*?"<>|]+/g, '').trim()} ${hoy}`
+
+// ---------------- Planeado vs real ----------------
+export interface ContenidoPlan {
+  titulo: string
+  intro: string
+  bloques: Bloque[]
+  resumen: [string, string][]
+  fechas: [string, string][]
+  conclusion: string
+  nota: string
+}
+
+const signo = (n: number) => (n > 0 ? `+${miles(n)}` : miles(n))
+
+export function contenidoPlan(cp: ComparacionPlan, nombre: string, unidad: string): ContenidoPlan {
+  const u = cp.plan.unidad
+  const Un = `${unidad[0].toUpperCase()}${unidad.slice(1)}`
+  const bloques = trozos(cp.filas, 12).map<Bloque>((t) => ({
+    etiquetas: t.map((f) => (f.enCurso ? `${f.periodo.etiqueta}*` : f.periodo.etiqueta)),
+    filas: [
+      { nombre: `${Un} planeados`, valores: t.map((f) => miles(f.planeado)) },
+      { nombre: `${Un} reales`, valores: t.map((f) => miles(f.real)) },
+      { nombre: 'Diferencia', valores: t.map((f) => signo(f.diferencia)), rojo: t.map((f) => f.diferencia > 0) },
+      { nombre: 'Existencia planeada', valores: t.map((f) => miles(f.existPlaneada)), rojo: t.map((f) => f.existPlaneada < 0) },
+      { nombre: 'Existencia real', valores: t.map((f) => miles(f.existReal)) },
+      { nombre: 'Entradas al almacén', valores: t.map((f) => (f.entradas ? miles(f.entradas) : '—')) },
+    ],
+  }))
+  const dif = cp.totalReal - cp.totalPlaneado
+  const origen = cp.plan.origen === 'manual' ? 'capturado a mano' : 'fijado con la proyección de la app'
+  return {
+    titulo: `Planeado vs Real – ${nombre}`,
+    intro: `Comparación entre el plan ${origen} el ${fechaLarga(cp.plan.creado)} (${miles(cp.plan.consumo)} ${unidad} ${porUnidad(u)} a partir de ${cp.inicio.largo.startsWith('Semana') ? 'la ' : ''}${cp.inicio.largo}, con ${miles(cp.plan.existenciaInicial)} ${unidad} en existencia) y lo registrado realmente en las entregas.`,
+    bloques,
+    resumen: [
+      [`Planeado (${cp.completos} ${unidadTexto(u, cp.completos)} completas)`, `${miles(cp.totalPlaneado)} ${unidad}`],
+      ['Real registrado', `${miles(cp.totalReal)} ${unidad}`],
+      ['Diferencia', `${signo(dif)} (${cp.desviacionPct > 0 ? '+' : ''}${cp.desviacionPct}%)`],
+      ['Consumo real promedio', `${miles(cp.promedioReal)} ${porUnidad(u)}`],
+    ],
+    fechas: [
+      ['Según el plan alcanzaba hasta', cp.agotamientoPlan ? cuandoTexto(cp.agotamientoPlan, u).replace(/^la /, '') : 'No se agotaba'],
+      ['Al ritmo real alcanzaría hasta', cp.completos ? (cp.agotamientoReal ? cuandoTexto(cp.agotamientoReal, u).replace(/^la /, '') : 'No se agota') : 'Sin datos aún'],
+      ['Existencia real hoy', `${miles(cp.existenciaHoy)} ${unidad}`],
+    ],
+    conclusion: conclusionPlan(cp, nombre, unidad),
+    nota: `*${unidadTexto(u, 1)[0].toUpperCase()}${unidadTexto(u, 1).slice(1)} en curso: todavía no termina y no se cuenta en los totales. La existencia real incluye las entradas al almacén (pedidos que llegaron), por eso puede subir aunque haya consumo.`,
+  }
+}

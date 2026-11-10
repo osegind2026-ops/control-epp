@@ -329,3 +329,120 @@ export function conclusion(a: AnalisisMaterial, unidadMaterial: string): string 
   }
   return t
 }
+
+// ---------------- Planeado vs real ----------------
+/** Plan fijado (o capturado a mano): consumo constante por periodo desde una semana o mes. */
+export interface PlanMaterial {
+  /** Día en que se fijó el plan. */
+  creado: string
+  /** Primer día del periodo en que empieza el plan. */
+  inicio: string
+  unidad: UnidadPeriodo
+  existenciaInicial: number
+  consumo: number
+  /** De dónde salió: proyección de la app o captura manual. */
+  origen: 'proyeccion' | 'manual'
+}
+
+export interface FilaPlanReal {
+  periodo: Periodo
+  enCurso: boolean
+  planeado: number
+  real: number
+  diferencia: number // real - planeado
+  acumPlaneado: number
+  acumReal: number
+  /** Existencia al iniciar el periodo según el plan y según el kardex. */
+  existPlaneada: number
+  existReal: number
+  /** Entradas de material registradas en el periodo (pedidos que llegaron). */
+  entradas: number
+}
+
+export interface ComparacionPlan {
+  plan: PlanMaterial
+  inicio: Periodo
+  filas: FilaPlanReal[]
+  /** Periodos completos ya transcurridos (sin el que va en curso). */
+  completos: number
+  totalPlaneado: number
+  totalReal: number
+  desviacionPct: number // (real - planeado) / planeado de los periodos completos
+  promedioReal: number
+  agotamientoPlan: Periodo | null
+  /** Con el consumo real promedio y la existencia real de hoy. */
+  agotamientoReal: Periodo | null
+  existenciaHoy: number
+}
+
+const fechaDeTs = (ts: string) => {
+  const d = new Date(ts)
+  return isNaN(d.getTime()) ? ts.slice(0, 10) : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+export function compararPlan(o: { plan: PlanMaterial; entregas: Entrega[]; movimientos: Movimiento[]; ubicaciones: string[]; materialId: string; hoy: string }): ComparacionPlan {
+  const u = o.plan.unidad
+  const inicio = periodoDe(o.plan.inicio, u)
+  const actual = periodoDe(o.hoy, u)
+  const periodos = actual.clave >= inicio.clave ? periodosEntre(inicio.inicio, actual.fin, u) : []
+  const consumo = consumoPorPeriodo(o.entregas, o.materialId, periodos)
+  const ok = new Set(o.ubicaciones)
+  const movs = o.movimientos.filter((m) => m.materialId === o.materialId && ok.has(m.ubicacionId)).map((m) => ({ f: fechaDeTs(m.ts), c: m.cantidad, entrada: m.tipo === 'ENTRADA' }))
+  const existenciaAl = (f: string) => movs.reduce((s, m) => (m.f < f ? s + m.c : s), 0)
+  let acumP = 0
+  let acumR = 0
+  const filas = consumo.map<FilaPlanReal>((c, i) => {
+    acumP += o.plan.consumo
+    acumR += c.cantidad
+    return {
+      periodo: c.periodo,
+      enCurso: c.periodo.clave === actual.clave,
+      planeado: o.plan.consumo,
+      real: c.cantidad,
+      diferencia: c.cantidad - o.plan.consumo,
+      acumPlaneado: acumP,
+      acumReal: acumR,
+      existPlaneada: o.plan.existenciaInicial - o.plan.consumo * i,
+      existReal: existenciaAl(c.periodo.inicio),
+      entradas: movs.reduce((s, m) => (m.entrada && m.f >= c.periodo.inicio && m.f <= c.periodo.fin ? s + m.c : s), 0),
+    }
+  })
+  const completas = filas.filter((f) => !f.enCurso)
+  const totalPlaneado = completas.reduce((s, f) => s + f.planeado, 0)
+  const totalReal = completas.reduce((s, f) => s + f.real, 0)
+  const promedioReal = completas.length ? Math.round(totalReal / completas.length) : 0
+  const existenciaHoy = movs.reduce((s, m) => s + m.c, 0)
+  const sig = siguientePeriodo(actual, u)
+  return {
+    plan: o.plan,
+    inicio,
+    filas,
+    completos: completas.length,
+    totalPlaneado,
+    totalReal,
+    desviacionPct: totalPlaneado ? Math.round(((totalReal - totalPlaneado) / totalPlaneado) * 100) : 0,
+    promedioReal,
+    agotamientoPlan: proyectar(o.plan.existenciaInicial, o.plan.consumo, inicio, u).agotamiento,
+    agotamientoReal: completas.length ? proyectar(existenciaHoy, promedioReal, sig, u).agotamiento : null,
+    existenciaHoy,
+  }
+}
+
+/** Conclusión del planeado vs real en lenguaje sencillo. */
+export function conclusionPlan(c: ComparacionPlan, nombre: string, unidadMaterial: string): string {
+  const u = c.plan.unidad
+  if (!c.completos) return `El plan empieza ${c.inicio.largo.startsWith('Semana') ? 'en la ' : 'en '}${c.inicio.largo}; todavía no hay ${unidadTexto(u)} completas para comparar con lo real.`
+  const n = `${c.completos} ${unidadTexto(u, c.completos)}`
+  const dif = Math.abs(c.desviacionPct)
+  let t =
+    dif <= 5
+      ? `En ${n}, el consumo real de ${nombre.toLowerCase()} (${miles(c.totalReal)} ${unidadMaterial}) se ha comportado como se planeó (${miles(c.totalPlaneado)}).`
+      : `En ${n} se consumieron ${miles(c.totalReal)} ${unidadMaterial} de ${nombre.toLowerCase()} contra ${miles(c.totalPlaneado)} planeados: ${dif}% ${c.desviacionPct > 0 ? 'más' : 'menos'} de lo previsto.`
+  const ap = c.agotamientoPlan
+  const ar = c.agotamientoReal
+  if (ap && ar) {
+    if (ar.clave === ap.clave) t += ` Al ritmo real (${miles(c.promedioReal)} ${porUnidad(u)}) el material alcanzaría hasta ${cuandoTexto(ar, u)}, igual que en el plan.`
+    else t += ` Al ritmo real (${miles(c.promedioReal)} ${porUnidad(u)}) y con la existencia de hoy (${miles(c.existenciaHoy)}), el material alcanzaría hasta ${cuandoTexto(ar, u)}; el plan indicaba ${cuandoTexto(ap, u)}.`
+  } else if (!ar) t += ` Con el consumo real registrado el material no se agotaría.`
+  return t
+}

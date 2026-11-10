@@ -566,3 +566,181 @@ export function graficaDona(datos: { etiqueta: string; valor: number }[], o: Opc
   })
   return c
 }
+
+// ---------------- planeado vs real (varias series) ----------------
+export interface Serie {
+  nombre: string
+  valores: (number | null)[]
+  color: string
+  /** Línea punteada (para lo planeado). */
+  punteada?: boolean
+}
+
+/** Columnas agrupadas (sombra/3D) o líneas (área/líneas) con varias series. */
+export function graficaSeries(d: { titulo: string; subtitulo?: string; etiquetas: string[]; series: Serie[]; lineas?: boolean }, o: OpcionesGrafica): HTMLCanvasElement {
+  const ancho = o.ancho ?? 1600
+  const alto = o.alto ?? 760
+  const k = ancho / 1600
+  const { c, g } = lienzo(ancho, alto)
+  titulo(g, d.titulo, ancho, k, d.subtitulo)
+  const n = Math.max(1, d.etiquetas.length)
+  const x0 = 120 * k
+  const x1 = ancho - 40 * k
+  const y1 = (d.subtitulo ? 128 : 96) * k
+  const y0 = alto - ((n > 8 ? 150 : 100) * k + 44 * k)
+  const todos = d.series.flatMap((s) => s.valores.filter((v): v is number => v != null))
+  const minV = Math.min(0, ...todos)
+  const { tope, paso } = escalaBonita(Math.max(1, ...todos) * 1.1)
+  const base = minV < 0 ? -Math.ceil(-minV / paso) * paso : 0
+  const Y = (v: number) => y0 - ((v - base) / (tope - base)) * (y0 - y1)
+  const banda = (x1 - x0) / n
+  const X = (i: number) => x0 + banda * (i + 0.5)
+  g.font = `500 ${23 * k}px ${FUENTE}`
+  g.textBaseline = 'middle'
+  for (let v = base; v <= tope + 1e-9; v += paso) {
+    g.strokeStyle = v === 0 ? '#9AA1A8' : '#DDE1E5'
+    g.lineWidth = v === 0 ? 2 * k : 1.2 * k
+    g.setLineDash(v === 0 ? [] : [6 * k, 6 * k])
+    g.beginPath()
+    g.moveTo(x0, Y(v))
+    g.lineTo(x1, Y(v))
+    g.stroke()
+    g.setLineDash([])
+    g.fillStyle = '#5B6168'
+    g.textAlign = 'right'
+    g.fillText(miles(v), x0 - 12 * k, Y(v))
+  }
+  const lineas = d.lineas || o.estilo === 'area' || o.estilo === 'lineas'
+  const ns = d.series.length
+  if (!lineas) {
+    const grupo = Math.min(banda * 0.78, 190 * k)
+    const w = grupo / ns
+    d.series.forEach((s, si) => {
+      s.valores.forEach((v, i) => {
+        if (v == null) return
+        const x = X(i) - grupo / 2 + w * si + w * 0.08
+        const ww = w * 0.84
+        const y = Y(Math.max(0, v))
+        const yb = Y(Math.min(0, v))
+        const h = Math.max(2 * k, yb - y)
+        g.save()
+        g.shadowColor = 'rgba(0,0,0,0.33)'
+        g.shadowBlur = 10 * k
+        g.shadowOffsetX = 4 * k
+        g.shadowOffsetY = 4 * k
+        const gr = g.createLinearGradient(x, 0, x + ww, 0)
+        gr.addColorStop(0, tono(s.color, 0.2))
+        gr.addColorStop(0.5, s.color)
+        gr.addColorStop(1, tono(s.color, -0.3))
+        g.fillStyle = gr
+        if (o.estilo === '3d') g.fillRect(x, y, ww, h)
+        else {
+          rectRedondo(g, x, y, ww, h, 5 * k)
+          g.fill()
+        }
+        g.restore()
+        if (s.punteada) {
+          // Lo planeado lleva rayado para distinguirlo también en blanco y negro
+          g.save()
+          g.beginPath()
+          g.rect(x, y, ww, h)
+          g.clip()
+          g.strokeStyle = 'rgba(255,255,255,0.35)'
+          g.lineWidth = 3 * k
+          for (let t = -h; t < ww + h; t += 12 * k) {
+            g.beginPath()
+            g.moveTo(x + t, y + h)
+            g.lineTo(x + t + h, y)
+            g.stroke()
+          }
+          g.restore()
+        }
+        if (n * ns <= 30) etiquetaValor(g, miles(v), x + ww / 2, y - 6 * k, k, v < 0 ? '#C0392B' : '#2B2F33')
+      })
+    })
+  } else {
+    d.series.forEach((s) => {
+      const pts = s.valores.map((v, i) => (v == null ? null : ([X(i), Y(v)] as const)))
+      const validos = pts.filter((p): p is readonly [number, number] => !!p)
+      if (!validos.length) return
+      if (o.estilo === 'area' && !s.punteada) {
+        const gr = g.createLinearGradient(0, y1, 0, y0)
+        gr.addColorStop(0, alfa(s.color, 0.45))
+        gr.addColorStop(1, alfa(s.color, 0.03))
+        g.fillStyle = gr
+        g.beginPath()
+        g.moveTo(validos[0][0], Y(Math.max(0, base)))
+        validos.forEach(([x, y]) => g.lineTo(x, y))
+        g.lineTo(validos[validos.length - 1][0], Y(Math.max(0, base)))
+        g.closePath()
+        g.fill()
+      }
+      g.save()
+      g.shadowColor = alfa(s.color, 0.45)
+      g.shadowBlur = 10 * k
+      g.shadowOffsetY = 4 * k
+      g.strokeStyle = s.color
+      g.lineWidth = 5 * k
+      g.lineJoin = 'round'
+      g.setLineDash(s.punteada ? [16 * k, 10 * k] : [])
+      g.beginPath()
+      validos.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)))
+      g.stroke()
+      g.restore()
+      validos.forEach(([x, y]) => {
+        g.fillStyle = '#fff'
+        g.beginPath()
+        g.arc(x, y, 8 * k, 0, Math.PI * 2)
+        g.fill()
+        g.fillStyle = s.color
+        g.beginPath()
+        g.arc(x, y, 5.5 * k, 0, Math.PI * 2)
+        g.fill()
+      })
+      // Lo planeado lleva sus números abajo de la línea y lo real arriba, para que no se encimen
+      if (n <= 16) s.valores.forEach((v, i) => v != null && etiquetaValor(g, miles(v), X(i), Y(v) + (s.punteada ? 36 : -14) * k, k, tono(s.color, -0.35)))
+    })
+  }
+  // eje X
+  g.fillStyle = '#4A4F55'
+  g.font = `600 ${(n > 26 ? 17 : 22) * k}px ${FUENTE}`
+  d.etiquetas.forEach((et, i) => {
+    g.save()
+    if (n > 8) {
+      g.translate(X(i) + 4 * k, y0 + 14 * k)
+      g.rotate(-Math.PI / 4)
+      g.textAlign = 'right'
+      g.textBaseline = 'middle'
+      g.fillText(et, 0, 0)
+    } else {
+      g.textAlign = 'center'
+      g.textBaseline = 'top'
+      g.fillText(et, X(i), y0 + 12 * k)
+    }
+    g.restore()
+  })
+  // leyenda
+  g.font = `600 ${22 * k}px ${FUENTE}`
+  const anchos = d.series.map((s) => g.measureText(s.nombre).width + 60 * k)
+  let lx = (ancho - anchos.reduce((s, a) => s + a, 0)) / 2
+  const ly = alto - 30 * k
+  d.series.forEach((s, i) => {
+    g.fillStyle = s.color
+    g.strokeStyle = s.color
+    if (lineas) {
+      g.lineWidth = 5 * k
+      g.setLineDash(s.punteada ? [8 * k, 5 * k] : [])
+      g.beginPath()
+      g.moveTo(lx, ly)
+      g.lineTo(lx + 30 * k, ly)
+      g.stroke()
+      g.setLineDash([])
+    } else g.fillRect(lx, ly - 10 * k, 28 * k, 20 * k)
+    g.fillStyle = '#3A3F44'
+    g.textAlign = 'left'
+    g.textBaseline = 'middle'
+    g.fillText(s.nombre, lx + 38 * k, ly)
+    lx += anchos[i]
+  })
+  return c
+}

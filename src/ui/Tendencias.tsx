@@ -2,17 +2,17 @@
 // documento en PDF y Word con gráficas.
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
-  AYUDA_ESCENARIO, NOMBRE_ESCENARIO, coberturaTexto, cuandoTexto, miles, porUnidad, unidadTexto,
-  type AnalisisMaterial, type Escenario, type FilaConsumo, type UnidadPeriodo,
+  AYUDA_ESCENARIO, NOMBRE_ESCENARIO, coberturaTexto, cuandoTexto, miles, periodoDe, porUnidad, unidadTexto,
+  type AnalisisMaterial, type ComparacionPlan, type Escenario, type FilaConsumo, type PlanMaterial, type UnidadPeriodo,
 } from '../domain/tendencias'
 import { fechaLocal } from '../lib/util'
 import { cargarPlantilla, type Plantilla } from '../reportes/plantilla'
 import { ESTILOS, PALETAS, type EstiloGrafica, type PaletaGrafica } from '../reportes/graficasTendencia'
-import { imagenComparativa, imagenesMaterial, type ImagenesMaterial } from '../reportes/imagenesTendencia'
-import { contenidoMaterial, fechaDocumento, filasComparativas, nombreArchivo, rangoTexto } from '../reportes/tendenciaDoc'
-import { hojaComparativa, hojasMaterial } from '../reportes/ReporteTendencia'
+import { imagenComparativa, imagenesMaterial, imagenesPlan, type ImagenesMaterial, type ImagenesPlan } from '../reportes/imagenesTendencia'
+import { contenidoMaterial, contenidoPlan, fechaDocumento, filasComparativas, nombreArchivo, rangoTexto } from '../reportes/tendenciaDoc'
+import { hojaComparativa, hojasMaterial, hojasPlan } from '../reportes/ReporteTendencia'
 import {
-  analizar, ENCABEZADO_POR_DEFECTO, guardarTendencias, leerTendencias, NOTA_POR_DEFECTO, nuevaConfig, PIE_POR_DEFECTO, tituloDe,
+  analizar, compararPlanes, ENCABEZADO_POR_DEFECTO, guardarTendencias, leerTendencias, NOTA_POR_DEFECTO, nuevaConfig, PIE_POR_DEFECTO, tituloDe,
   ultimosPeriodos, unidadSugerida, type ConfigTendencia, type MaterialTendencia,
 } from '../state/tendencias'
 import * as S from '../state/store'
@@ -343,7 +343,163 @@ function Historico({ a, unidad }: { a: AnalisisMaterial; unidad: string }) {
   )
 }
 
-function ResultadoMaterial({ a, unidad, img }: { a: AnalisisMaterial; unidad: string; img: ImagenesMaterial }) {
+function PlanVsReal({ a, unidad, cp, img, plan, onPlan }: { a: AnalisisMaterial; unidad: string; cp?: ComparacionPlan; img?: ImagenesPlan; plan?: PlanMaterial | null; onPlan: (p: PlanMaterial | null) => void }) {
+  const hoy = fechaLocal()
+  if (!plan) {
+    return (
+      <div class="tend-plan">
+        <h3 style={{ margin: 0 }}>Planeado vs real</h3>
+        <p class="muted small" style={{ margin: 0 }}>
+          Fije la proyección de hoy como plan y, conforme pasen las semanas, la app la compara contra lo que realmente se entregue. También puede capturar un plan que ya tenga
+          (por ejemplo, el de un reporte anterior).
+        </p>
+        <div class="row" style={{ flexWrap: 'wrap' }}>
+          <button
+            class="btn"
+            onClick={() =>
+              onPlan({ creado: hoy, inicio: a.inicioProyeccion.inicio, unidad: a.unidad, existenciaInicial: a.existencia, consumo: a.escenarios.promedio.consumo, origen: 'proyeccion' })
+            }
+          >
+            <Icono n="ok" /> Fijar esta proyección como plan
+          </button>
+          <button class="btn ghost" onClick={() => onPlan({ creado: hoy, inicio: periodoDe(hoy, a.unidad).inicio, unidad: a.unidad, existenciaInicial: 0, consumo: 0, origen: 'manual' })}>
+            <Icono n="editar" /> Capturar un plan a mano
+          </button>
+        </div>
+      </div>
+    )
+  }
+  const u = plan.unidad
+  const cambiar = (p: Partial<PlanMaterial>) => onPlan({ ...plan, ...p, origen: p.origen ?? 'manual' })
+  const texto = cp ? contenidoPlan(cp, a.material.nombre, unidad) : null
+  return (
+    <div class="tend-plan">
+      <div class="spread">
+        <h3 style={{ margin: 0 }}>Planeado vs real</h3>
+        <button class="btn ghost sm" onClick={() => onPlan(null)}>
+          <Icono n="cerrar" /> Quitar plan
+        </button>
+      </div>
+      <div class="filtros" style={{ alignItems: 'flex-end' }}>
+        <label class="campo">
+          El plan empieza {u === 'semana' ? `(${periodoDe(plan.inicio, u).etiqueta})` : ''}
+          <input class="input" type="date" value={plan.inicio} onInput={(e) => cambiar({ inicio: periodoDe((e.target as HTMLInputElement).value || plan.inicio, u).inicio })} />
+        </label>
+        <label class="campo">
+          Existencia al empezar
+          <input class="input" type="number" min={0} value={plan.existenciaInicial} onInput={(e) => cambiar({ existenciaInicial: Math.max(0, Number((e.target as HTMLInputElement).value) || 0) })} />
+        </label>
+        <label class="campo">
+          Consumo planeado {porUnidad(u)}
+          <input class="input" type="number" min={0} value={plan.consumo} onInput={(e) => cambiar({ consumo: Math.max(0, Number((e.target as HTMLInputElement).value) || 0) })} />
+        </label>
+        <label class="campo">
+          Por
+          <select
+            class="input"
+            value={u}
+            onChange={(e) => {
+              const nu = (e.target as HTMLSelectElement).value as UnidadPeriodo
+              cambiar({ unidad: nu, inicio: periodoDe(plan.inicio, nu).inicio })
+            }}
+          >
+            <option value="semana">Semana</option>
+            <option value="mes">Mes</option>
+          </select>
+        </label>
+      </div>
+      <p class="muted small" style={{ margin: 0 }}>
+        Plan {plan.origen === 'manual' ? 'capturado o corregido a mano' : 'fijado con la proyección de la app'} el {fechaCorta(plan.creado)}.
+      </p>
+      {cp && texto && (
+        <>
+          <div class="kpis">
+            <div class="kpi">
+              <span>
+                Planeado ({cp.completos} {unidadTexto(u, cp.completos)})
+              </span>
+              <b>{miles(cp.totalPlaneado)}</b>
+              <small class="muted">{unidad}</small>
+            </div>
+            <div class="kpi">
+              <span>Real registrado</span>
+              <b>{miles(cp.totalReal)}</b>
+              <small class="muted">
+                {unidad} · {miles(cp.promedioReal)} {porUnidad(u)}
+              </small>
+            </div>
+            <div class={`kpi ${cp.desviacionPct > 5 ? 'bad' : ''}`}>
+              <span>Diferencia</span>
+              <b>
+                {cp.desviacionPct > 0 ? '+' : ''}
+                {cp.desviacionPct}%
+              </b>
+              <small class="muted">{cp.desviacionPct > 0 ? 'se consumió más de lo planeado' : cp.desviacionPct < 0 ? 'se consumió menos de lo planeado' : 'igual a lo planeado'}</small>
+            </div>
+            <div class="kpi">
+              <span>Alcanzaría hasta</span>
+              <b style={{ fontSize: '22px' }}>{cp.completos ? (cp.agotamientoReal ? `${cp.agotamientoReal.etiqueta} ${cp.agotamientoReal.clave.slice(0, 4)}` : 'No se agota') : '—'}</b>
+              <small class="muted">plan: {cp.agotamientoPlan ? `${cp.agotamientoPlan.etiqueta} ${cp.agotamientoPlan.clave.slice(0, 4)}` : 'no se agotaba'}</small>
+            </div>
+          </div>
+          <p style={{ margin: 0 }}>
+            <b>{texto.conclusion}</b>
+          </p>
+          {cp.filas.length > 0 && (
+            <div class="tabla-wrap">
+              <table class="tabla-tend">
+                <thead>
+                  <tr>
+                    <th>Periodo</th>
+                    {cp.filas.map((f) => (
+                      <th key={f.periodo.clave} title={f.enCurso ? 'En curso: no cuenta en los totales' : f.periodo.largo}>
+                        {f.periodo.etiqueta}
+                        {f.enCurso ? '*' : ''}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {texto.bloques
+                    .flatMap((b) => b.filas)
+                    .reduce<{ nombre: string; valores: string[]; rojo: boolean[] }[]>((acc, f) => {
+                      const ya = acc.find((x) => x.nombre === f.nombre)
+                      if (ya) {
+                        ya.valores.push(...f.valores)
+                        ya.rojo.push(...(f.rojo ?? f.valores.map(() => false)))
+                      } else acc.push({ nombre: f.nombre, valores: [...f.valores], rojo: [...(f.rojo ?? f.valores.map(() => false))] })
+                      return acc
+                    }, [])
+                    .map((f) => (
+                      <tr key={f.nombre}>
+                        <th>{f.nombre}</th>
+                        {f.valores.map((v, j) => (
+                          <td key={j} style={{ color: f.rojo[j] ? 'var(--bad)' : undefined }}>
+                            {v}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {img && cp.filas.length > 0 && (
+            <div class="tend-graficas">
+              <img src={img.consumo} alt={`Gráfica de consumo planeado contra real de ${a.material.nombre}`} />
+              <img src={img.existencia} alt={`Gráfica de existencia planeada contra real de ${a.material.nombre}`} />
+            </div>
+          )}
+          <p class="muted small" style={{ margin: 0 }}>
+            {texto.nota}
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+function ResultadoMaterial({ a, unidad, img, extra }: { a: AnalisisMaterial; unidad: string; img: ImagenesMaterial; extra?: preact.ComponentChildren }) {
   const p = a.escenarios.promedio
   const u = a.unidad
   return (
@@ -439,6 +595,7 @@ function ResultadoMaterial({ a, unidad, img }: { a: AnalisisMaterial; unidad: st
           Nota: {a.escenarios.promedio.filas.find((f) => f.periodo.clave.endsWith('-S53'))!.periodo.clave.slice(0, 4)} tiene semana 53 en el calendario ISO; ya está considerada en el cálculo.
         </p>
       )}
+      {extra}
     </div>
   )
 }
@@ -472,6 +629,16 @@ export function PantallaTendencias() {
   const analisis = useMemo(() => (c ? analizar(c, hoy) : []), [c, hoy, S.entregas.value, S.movimientos.value, S.materiales.value])
   const conUnidad = useMemo(() => (c ? analisis.map((a) => ({ a, unidad: c.materiales.find((m) => m.materialId === a.material.id)?.unidad || 'piezas' })) : []), [analisis, c])
   const imagenes = useMemo(() => (c ? conUnidad.map(({ a, unidad }) => imagenesMaterial(a, c, unidad)) : []), [conUnidad, c?.estilo, c?.paleta])
+  const planes = useMemo(() => (c ? compararPlanes(c, hoy) : new Map<string, ComparacionPlan>()), [c, hoy, S.entregas.value, S.movimientos.value])
+  const imgPlanes = useMemo(() => {
+    const r = new Map<string, ImagenesPlan>()
+    if (c)
+      for (const { a, unidad } of conUnidad) {
+        const cp = planes.get(a.material.id)
+        if (cp && cp.filas.length) r.set(a.material.id, imagenesPlan(cp, a.material.nombre, unidad, c))
+      }
+    return r
+  }, [planes, conUnidad, c?.estilo, c?.paleta])
   const comparativa = useMemo(() => (c && conUnidad.length > 1 ? imagenComparativa(conUnidad, c) : ''), [conUnidad, c?.estilo, c?.paleta])
 
   if (!lista || !c) return <p class="muted">Cargando…</p>
@@ -481,7 +648,15 @@ export function PantallaTendencias() {
   const titulo = tituloDe(c)
 
   const documento = () => {
-    const materiales = conUnidad.map(({ a, unidad }, i) => ({ t: contenidoMaterial(a, c, unidad, conUnidad.length === 1 ? titulo : undefined), img: imagenes[i] }))
+    const materiales = conUnidad.map(({ a, unidad }, i) => {
+      const cp = planes.get(a.material.id)
+      const ip = imgPlanes.get(a.material.id)
+      return {
+        t: contenidoMaterial(a, c, unidad, conUnidad.length === 1 ? titulo : undefined),
+        img: imagenes[i],
+        plan: cp && ip ? { t: contenidoPlan(cp, a.material.nombre, unidad), img: ip } : undefined,
+      }
+    })
     const comp =
       conUnidad.length > 1
         ? {
@@ -606,7 +781,28 @@ export function PantallaTendencias() {
           </div>
         </div>
       )}
-      {listo && conUnidad.map(({ a, unidad }, i) => <ResultadoMaterial key={a.material.id} a={a} unidad={unidad} img={imagenes[i]} />)}
+      {listo &&
+        conUnidad.map(({ a, unidad }, i) => {
+          const cm = c.materiales.find((m) => m.materialId === a.material.id)
+          return (
+            <ResultadoMaterial
+              key={a.material.id}
+              a={a}
+              unidad={unidad}
+              img={imagenes[i]}
+              extra={
+                <PlanVsReal
+                  a={a}
+                  unidad={unidad}
+                  plan={cm?.plan}
+                  cp={planes.get(a.material.id)}
+                  img={imgPlanes.get(a.material.id)}
+                  onPlan={(plan) => cambiar({ materiales: c.materiales.map((m) => (m.materialId === a.material.id ? { ...m, plan } : m)) })}
+                />
+              }
+            />
+          )
+        })}
 
       {imprimiendo && plantilla && listo && (
         <VistaImpresionPortal onCerrar={() => setImprimiendo(false)}>
@@ -614,7 +810,10 @@ export function PantallaTendencias() {
             const { materiales, comp } = documento()
             return [
               comp && hojaComparativa(plantilla, c, { ...comp, fecha, nota: c.nota }),
-              ...materiales.flatMap(({ t, img }, i) => hojasMaterial(plantilla, c, t, img, fecha, c.nota, `m${i}`)),
+              ...materiales.flatMap(({ t, img, plan }, i) => [
+                ...hojasMaterial(plantilla, c, t, img, fecha, c.nota, `m${i}`),
+                ...(plan ? hojasPlan(plantilla, c, plan.t, plan.img, fecha, `m${i}`) : []),
+              ]),
             ]
           })()}
         </VistaImpresionPortal>

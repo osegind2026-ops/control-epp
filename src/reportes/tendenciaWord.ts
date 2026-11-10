@@ -2,8 +2,8 @@
 // las gráficas van como imagen de alta resolución (idénticas al PDF).
 import type { Plantilla } from './plantilla'
 import type { ConfigTendencia } from '../state/tendencias'
-import type { Bloque, ContenidoMaterial } from './tendenciaDoc'
-import type { ImagenesMaterial } from './imagenesTendencia'
+import type { Bloque, ContenidoMaterial, ContenidoPlan } from './tendenciaDoc'
+import type { ImagenesMaterial, ImagenesPlan } from './imagenesTendencia'
 import { paleta } from './graficasTendencia'
 
 export interface DatosWord {
@@ -11,7 +11,7 @@ export interface DatosWord {
   config: ConfigTendencia
   fecha: string
   comparativa?: { titulo: string; intro: string; imagen: string; tabla: { encabezado: string[]; filas: string[][] } }
-  materiales: { t: ContenidoMaterial; img: ImagenesMaterial }[]
+  materiales: { t: ContenidoMaterial; img: ImagenesMaterial; plan?: { t: ContenidoPlan; img: ImagenesPlan } }[]
 }
 
 function bytesDe(dataUrl: string): Uint8Array {
@@ -181,7 +181,7 @@ export async function generarWord(d: DatosWord): Promise<Blob> {
     cuerpo.push(tablaSimple(d.comparativa.tabla))
     cuerpo.push(parrafo(d.config.nota, { tam: 16, italica: true, antes: 120 }))
   }
-  for (const [i, { t, img }] of d.materiales.entries()) {
+  for (const [i, { t, img, plan }] of d.materiales.entries()) {
     cuerpo.push(...titulo(t.titulo, t.subtitulo, !!d.comparativa || i > 0))
     cuerpo.push(parrafo(t.intro))
     cuerpo.push(...tablaBloques(t.historico))
@@ -206,6 +206,34 @@ export async function generarWord(d: DatosWord): Promise<Blob> {
       if (img.tallas) cuerpo.push(await imagen(img.tallas, 420))
     }
     cuerpo.push(parrafo(t.fuente, { tam: 15, color: '6F7271' }))
+    if (plan) {
+      cuerpo.push(...titulo(plan.t.titulo, 'Comparación de la tendencia planeada contra el consumo real registrado', true))
+      cuerpo.push(parrafo(plan.t.intro))
+      cuerpo.push(
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          borders: sinBordes,
+          rows: [
+            new TableRow({
+              children: [plan.t.resumen, plan.t.fechas].map(
+                (f, j) =>
+                  new TableCell({
+                    borders: { top: sinBorde, bottom: sinBorde, left: sinBorde, right: sinBorde },
+                    width: { size: 50, type: WidthType.PERCENTAGE },
+                    margins: { left: 50, right: 50 },
+                    children: [tablaPares(f, j === 0 ? 2 : 1)],
+                  }),
+              ),
+            }),
+          ],
+        }),
+      )
+      cuerpo.push(parrafo(plan.t.conclusion, { negrita: true, antes: 140 }))
+      cuerpo.push(await imagen(plan.img.consumo, ANCHO_PX))
+      cuerpo.push(await imagen(plan.img.existencia, ANCHO_PX))
+      cuerpo.push(...tablaBloques(plan.t.bloques))
+      cuerpo.push(parrafo(plan.t.nota, { tam: 16, italica: true }))
+    }
   }
 
   const doc = new Document({

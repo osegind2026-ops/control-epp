@@ -85,3 +85,37 @@ describe('tendencia de consumo (caso del reporte de guantes de carnaza)', () => 
     expect(b.escenarios.bajo.sobrante).toBe(92)
   })
 })
+
+describe('planeado vs real', () => {
+  it('compara el consumo y la existencia por semana contra el plan', async () => {
+    const { compararPlan, conclusionPlan } = await import('./tendencias')
+    // Plan: 2300 pares desde la SEM 40 de 2026, 152 por semana
+    const plan = { creado: '2026-09-24', inicio: '2026-09-28', unidad: 'semana' as const, existenciaInicial: 2300, consumo: 152, origen: 'manual' as const }
+    const ents = [
+      entrega('2026-09-29', [['carnaza', 'G', 100]]),
+      entrega('2026-10-06', [['carnaza', 'G', 120]]),
+      entrega('2026-10-14', [['carnaza', 'G', 90]]),
+    ]
+    const movs: Movimiento[] = [
+      { ...mov('carnaza', 2300), ts: '2026-09-20T12:00:00Z' },
+      { ...mov('carnaza', -100), ts: '2026-09-29T12:00:00Z', tipo: 'SALIDA' },
+      { ...mov('carnaza', -120), ts: '2026-10-06T12:00:00Z', tipo: 'SALIDA' },
+      { ...mov('carnaza', 500), ts: '2026-10-07T12:00:00Z' },
+      { ...mov('carnaza', -90), ts: '2026-10-14T12:00:00Z', tipo: 'SALIDA' },
+    ]
+    const c = compararPlan({ plan, entregas: ents, movimientos: movs, ubicaciones: ['alm'], materialId: 'carnaza', hoy: '2026-10-21' })
+    expect(c.filas.map((f) => f.periodo.etiqueta)).toEqual(['SEM 40', 'SEM 41', 'SEM 42', 'SEM 43'])
+    expect(c.filas[3].enCurso).toBe(true)
+    expect(c.completos).toBe(3)
+    expect(c.totalPlaneado).toBe(456)
+    expect(c.totalReal).toBe(310)
+    expect(c.desviacionPct).toBe(-32)
+    expect(c.filas.map((f) => f.existPlaneada)).toEqual([2300, 2148, 1996, 1844])
+    expect(c.filas.map((f) => f.existReal)).toEqual([2300, 2200, 2580, 2490])
+    expect(c.filas[1].entradas).toBe(500)
+    expect(c.existenciaHoy).toBe(2490)
+    expect(c.promedioReal).toBe(103)
+    expect(c.agotamientoPlan?.clave).toBe('2027-S02')
+    expect(conclusionPlan(c, 'Guantes de carnaza', 'pares')).toContain('32% menos de lo previsto')
+  })
+})

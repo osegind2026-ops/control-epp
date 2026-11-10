@@ -1,7 +1,7 @@
 // Imágenes de las gráficas de un análisis de Tendencias (las mismas en pantalla, PDF y Word).
-import { miles, porUnidad, type AnalisisMaterial } from '../domain/tendencias'
+import { miles, porUnidad, type AnalisisMaterial, type ComparacionPlan } from '../domain/tendencias'
 import type { ConfigTendencia } from '../state/tendencias'
-import { graficaColumnas, graficaComparativa, graficaDona, paleta } from './graficasTendencia'
+import { graficaColumnas, graficaComparativa, graficaDona, graficaSeries, paleta } from './graficasTendencia'
 import { rangoTexto } from './tendenciaDoc'
 
 export interface ImagenesMaterial {
@@ -64,3 +64,41 @@ export function imagenComparativa(lista: { a: AnalisisMaterial; unidad: string }
     { estilo: c.estilo, paleta: c.paleta, titulo: '¿Hasta cuándo alcanzan las existencias?', subtitulo: 'Comparativa entre materiales con el consumo del periodo analizado' },
   ).toDataURL('image/png')
 }
+
+export interface ImagenesPlan {
+  consumo: string
+  existencia: string
+}
+
+export function imagenesPlan(cp: ComparacionPlan, nombre: string, unidad: string, c: ConfigTendencia): ImagenesPlan {
+  const o = { estilo: c.estilo, paleta: c.paleta }
+  const pal = paleta(c.paleta)
+  const etiquetas = cp.filas.map((f) => (f.enCurso ? `${f.periodo.etiqueta}*` : f.periodo.etiqueta))
+  const consumo = graficaSeries(
+    {
+      titulo: `Planeado vs Real – ${nombre}`,
+      subtitulo: `Consumo ${porUnidad(cp.plan.unidad)} (${unidad})`,
+      etiquetas,
+      series: [
+        { nombre: 'Planeado', valores: cp.filas.map((f) => f.planeado), color: pal.acento, punteada: true },
+        { nombre: 'Real registrado', valores: cp.filas.map((f) => f.real), color: pal.principal },
+      ],
+    },
+    { ...o, alto: 700 },
+  ).toDataURL('image/png')
+  const existencia = graficaSeries(
+    {
+      titulo: `Existencia planeada vs real – ${nombre}`,
+      subtitulo: `Al inicio de cada periodo (${unidad}); la real incluye las entradas al almacén`,
+      etiquetas,
+      lineas: true,
+      series: [
+        { nombre: 'Existencia planeada', valores: cp.filas.map((f) => f.existPlaneada), color: pal.acento, punteada: true },
+        { nombre: 'Existencia real', valores: cp.filas.map((f) => f.existReal), color: pal.principal },
+      ],
+    },
+    { ...o, estilo: o.estilo === 'lineas' ? 'lineas' : 'area', alto: 700 },
+  ).toDataURL('image/png')
+  return { consumo, existencia }
+}
+
