@@ -2,18 +2,20 @@
 // documento en PDF y Word con gráficas.
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
-  AYUDA_ESCENARIO, NOMBRE_ESCENARIO, coberturaTexto, cuandoTexto, miles, periodoDe, porUnidad, unidadTexto,
-  type AnalisisMaterial, type ComparacionPlan, type Escenario, type FilaConsumo, type PlanMaterial, type UnidadPeriodo,
+  AYUDA_ESCENARIO, NOMBRE_ESCENARIO, coberturaTexto, conclusionEscenario, conclusionPlan, cuandoTexto, miles, periodoDe, porUnidad, unidadTexto,
+  type AnalisisMaterial, type ComparacionPlan, type FilaConsumo, type PlanMaterial, type UnidadPeriodo,
 } from '../domain/tendencias'
+import { tieneTallas } from '../domain/logica'
 import { fechaLocal } from '../lib/util'
 import { cargarPlantilla, type Plantilla } from '../reportes/plantilla'
 import { ESTILOS, PALETAS, type EstiloGrafica, type PaletaGrafica } from '../reportes/graficasTendencia'
-import { imagenComparativa, imagenesMaterial, imagenesPlan, type ImagenesMaterial, type ImagenesPlan } from '../reportes/imagenesTendencia'
-import { contenidoMaterial, contenidoPlan, fechaDocumento, filasComparativas, nombreArchivo, rangoTexto } from '../reportes/tendenciaDoc'
-import { hojaComparativa, hojasMaterial, hojasPlan } from '../reportes/ReporteTendencia'
+import { imagenConsumoTallas, imagenCobertura, imagenesMaterial, imagenesPlan, type ImagenesMaterial, type ImagenesPlan } from '../reportes/imagenesTendencia'
+import { conclusionTallas, construirDocumento, filasPlan, nombreArchivo, notaPlan, rangoTexto, tablaTallas, textoTendencia, type Item } from '../reportes/tendenciaDoc'
+import { DocumentoTendencia } from '../reportes/ReporteTendencia'
 import {
-  analizar, compararPlanes, ENCABEZADO_POR_DEFECTO, guardarTendencias, leerTendencias, NOTA_POR_DEFECTO, nuevaConfig, PIE_POR_DEFECTO, tituloDe,
-  ultimosPeriodos, unidadSugerida, type ConfigTendencia, type MaterialTendencia,
+  analizar, analizaSeparadas, compararPlanes, ENCABEZADO_POR_DEFECTO, escenarioPrincipal, escenariosDe, existenciaApp, guardarTendencias, leerTendencias,
+  NOTA_POR_DEFECTO, nuevaConfig, ORDEN_ESCENARIOS, PIE_POR_DEFECTO, planDe, sujetosDe, tallasElegidas, tituloDe, ultimosPeriodos, unidadSugerida,
+  type ConfigTendencia, type GrupoTendencia, type MaterialTendencia, type VistaEscenarios,
 } from '../state/tendencias'
 import * as S from '../state/store'
 import { avisar, intentar } from './comunes'
@@ -34,6 +36,103 @@ function descargar(blob: Blob, nombre: string) {
 const fechaCorta = (f: string) => `${f.slice(8, 10)}/${f.slice(5, 7)}/${f.slice(0, 4)}`
 
 // ---------------- Configuración ----------------
+function NumeroManual({ app, valor, onCambio, etiqueta }: { app: number; valor: number | null | undefined; onCambio: (v: number | null) => void; etiqueta: string }) {
+  return (
+    <input
+      class="input"
+      type="number"
+      min={0}
+      aria-label={etiqueta}
+      title={valor == null ? `Según la app: ${miles(app)}` : 'Capturado a mano (borre o ponga el valor de la app para regresar)'}
+      style={valor != null ? { borderColor: 'var(--warn, #d9822b)' } : undefined}
+      value={valor ?? app}
+      onInput={(e) => {
+        const v = (e.target as HTMLInputElement).value
+        onCambio(v === '' || Number(v) === app ? null : Math.max(0, Number(v)))
+      }}
+    />
+  )
+}
+
+function EditorTallas({ cm, cambiarMat }: { cm: MaterialTendencia; cambiarMat: (p: Partial<MaterialTendencia>) => void }) {
+  const m = S.materialesPorId.value.get(cm.materialId)
+  if (!m || !tieneTallas(m)) return null
+  const vigentes = m.variantes.filter((v) => v.activo)
+  const elegidas = tallasElegidas(cm)
+  const juntas = cm.juntas !== false
+  const separadas = !!cm.separadas
+  const alternar = (id: string) => {
+    const nuevas = elegidas.includes(id) ? elegidas.filter((t) => t !== id) : [...elegidas, id]
+    if (!nuevas.length) return
+    cambiarMat({ tallas: vigentes.map((v) => v.id).filter((t) => nuevas.includes(t)) })
+  }
+  return (
+    <div class="tend-tallas">
+      <div class="chips" role="group" aria-label={`Tallas de ${m.nombre}`}>
+        <span class="small muted">Tallas:</span>
+        {vigentes.map((v) => (
+          <button key={v.id} class="chip" aria-pressed={elegidas.includes(v.id)} onClick={() => alternar(v.id)}>
+            {v.etiqueta}
+          </button>
+        ))}
+        {elegidas.length < vigentes.length && (
+          <button class="btn ghost sm" onClick={() => cambiarMat({ tallas: undefined })}>
+            Todas
+          </button>
+        )}
+      </div>
+      <div class="row" style={{ flexWrap: 'wrap', gap: '14px' }}>
+        <label class="check">
+          <input type="checkbox" checked={juntas || !separadas} disabled={!separadas} onChange={(e) => cambiarMat({ juntas: (e.target as HTMLInputElement).checked })} />
+          Analizar juntas {elegidas.length < vigentes.length ? `(${elegidas.length} tallas)` : '(total)'}
+        </label>
+        <label class="check">
+          <input type="checkbox" checked={separadas} onChange={(e) => cambiarMat({ separadas: (e.target as HTMLInputElement).checked, juntas: (e.target as HTMLInputElement).checked ? juntas : true })} />
+          Cada talla por separado (con comparativa de tallas)
+        </label>
+      </div>
+      {separadas && (
+        <div class="tabla-wrap">
+          <table class="tabla-tallas">
+            <thead>
+              <tr>
+                <th>Talla</th>
+                <th>Almacén</th>
+                <th>Pedido por llegar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {elegidas.map((t) => (
+                <tr key={t}>
+                  <th>{m.variantes.find((v) => v.id === t)?.etiqueta ?? t}</th>
+                  <td>
+                    <NumeroManual
+                      etiqueta={`Almacén talla ${t}`}
+                      app={existenciaApp(cm.materialId, [t])}
+                      valor={cm.existenciaTalla?.[t]}
+                      onCambio={(v) => cambiarMat({ existenciaTalla: { ...cm.existenciaTalla, [t]: v } })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      class="input"
+                      type="number"
+                      min={0}
+                      aria-label={`Pedido talla ${t}`}
+                      value={cm.pedidoTalla?.[t] ?? 0}
+                      onInput={(e) => cambiarMat({ pedidoTalla: { ...cm.pedidoTalla, [t]: Math.max(0, Number((e.target as HTMLInputElement).value) || 0) } })}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EditorMateriales({ c, cambiar }: { c: ConfigTendencia; cambiar: (p: Partial<ConfigTendencia>) => void }) {
   const [elegido, setElegido] = useState('')
   const usados = new Set(c.materiales.map((m) => m.materialId))
@@ -42,8 +141,6 @@ function EditorMateriales({ c, cambiar }: { c: ConfigTendencia; cambiar: (p: Par
     .map((cat) => ({ cat, mats: disponibles.filter((m) => m.categoriaId === cat.id) }))
     .filter((x) => x.mats.length)
   const sinCat = disponibles.filter((m) => !S.categorias.value.some((cat) => cat.id === m.categoriaId))
-  const ubis = S.ubicacionesActivas.value.map((u) => u.id)
-  const enApp = (id: string) => S.movimientos.value.reduce((s, mv) => (mv.materialId === id && ubis.includes(mv.ubicacionId) ? s + mv.cantidad : s), 0)
   const cambiarMat = (id: string, p: Partial<MaterialTendencia>) => cambiar({ materiales: c.materiales.map((m) => (m.materialId === id ? { ...m, ...p } : m)) })
   const agregar = (id: string) => {
     const m = S.materialesPorId.value.get(id)
@@ -78,7 +175,9 @@ function EditorMateriales({ c, cambiar }: { c: ConfigTendencia; cambiar: (p: Par
       {!c.materiales.length && <p class="muted small">Agregue uno o más materiales. Con varios, el documento incluye una hoja comparativa.</p>}
       {c.materiales.map((cm) => {
         const m = S.materialesPorId.value.get(cm.materialId)
-        const app = enApp(cm.materialId)
+        const elegidas = tallasElegidas(cm)
+        const app = existenciaApp(cm.materialId, elegidas.length ? elegidas : undefined)
+        const porTalla = analizaSeparadas(cm)
         return (
           <div key={cm.materialId} class="tend-mat">
             <div class="spread">
@@ -92,29 +191,21 @@ function EditorMateriales({ c, cambiar }: { c: ConfigTendencia; cambiar: (p: Par
                 Se cuenta en
                 <input class="input" value={cm.unidad} onInput={(e) => cambiarMat(cm.materialId, { unidad: (e.target as HTMLInputElement).value || 'piezas' })} placeholder="pares, piezas…" />
               </label>
-              <label class="campo">
-                Almacén {cm.existenciaManual == null ? `(según la app: ${miles(app)})` : '(capturado a mano)'}
-                <input
-                  class="input"
-                  type="number"
-                  min={0}
-                  value={cm.existenciaManual ?? app}
-                  onInput={(e) => {
-                    const v = (e.target as HTMLInputElement).value
-                    cambiarMat(cm.materialId, { existenciaManual: v === '' || Number(v) === app ? null : Math.max(0, Number(v)) })
-                  }}
-                />
-              </label>
-              <label class="campo">
-                Pedido por llegar
-                <input class="input" type="number" min={0} value={cm.pedido} onInput={(e) => cambiarMat(cm.materialId, { pedido: Math.max(0, Number((e.target as HTMLInputElement).value) || 0) })} />
-              </label>
-              {cm.existenciaManual != null && (
-                <button class="btn sm" onClick={() => cambiarMat(cm.materialId, { existenciaManual: null })}>
-                  Usar la de la app
-                </button>
+              {!porTalla && (
+                <>
+                  <label class="campo">
+                    Almacén {cm.existenciaManual == null ? `(según la app: ${miles(app)})` : '(capturado a mano)'}
+                    <NumeroManual etiqueta="Almacén" app={app} valor={cm.existenciaManual} onCambio={(v) => cambiarMat(cm.materialId, { existenciaManual: v })} />
+                  </label>
+                  <label class="campo">
+                    Pedido por llegar
+                    <input class="input" type="number" min={0} value={cm.pedido} onInput={(e) => cambiarMat(cm.materialId, { pedido: Math.max(0, Number((e.target as HTMLInputElement).value) || 0) })} />
+                  </label>
+                </>
               )}
             </div>
+            {porTalla && <p class="muted small" style={{ margin: 0 }}>Con tallas por separado, el almacén y el pedido se capturan por talla; el total es la suma.</p>}
+            <EditorTallas cm={cm} cambiarMat={(p) => cambiarMat(cm.materialId, p)} />
           </div>
         )
       })}
@@ -210,6 +301,41 @@ function Configuracion({ c, cambiar }: { c: ConfigTendencia; cambiar: (p: Partia
           </select>
         </label>
       </div>
+
+      <h3 style={{ margin: 0 }}>Escenarios en pantalla y en el reporte</h3>
+      <div class="chips" role="group" aria-label="Escenarios">
+        {ORDEN_ESCENARIOS.map((e) => {
+          const sel = escenariosDe(c)
+          const activo = sel.includes(e)
+          return (
+            <button
+              key={e}
+              class="chip"
+              aria-pressed={activo}
+              title={AYUDA_ESCENARIO[e]}
+              onClick={() => {
+                const nuevos = activo ? sel.filter((x) => x !== e) : [...sel, e]
+                if (nuevos.length) cambiar({ escenarios: ORDEN_ESCENARIOS.filter((x) => nuevos.includes(x)) })
+              }}
+            >
+              {NOMBRE_ESCENARIO[e]}
+            </button>
+          )
+        })}
+      </div>
+      {escenariosDe(c).length > 1 && (
+        <label class="campo" style={{ maxWidth: '360px' }}>
+          Gráficas de proyección
+          <select class="input" id="tend-vista" value={c.vistaEscenarios ?? 'comparativa'} onChange={(e) => cambiar({ vistaEscenarios: (e.target as HTMLSelectElement).value as VistaEscenarios })}>
+            <option value="comparativa">Comparativa (todos los escenarios en una gráfica)</option>
+            <option value="separadas">Por separado (una gráfica por escenario)</option>
+            <option value="ambas">Ambas</option>
+          </select>
+        </label>
+      )}
+      <p class="muted small" style={{ margin: 0 }}>
+        Bajo: periodo de menor consumo · Promedio: promedio del periodo · Conservador: periodo de mayor consumo. La conclusión principal usa el promedio si está elegido.
+      </p>
 
       <button class="btn ghost sm" style={{ justifySelf: 'start' }} aria-expanded={mas} onClick={() => setMas(!mas)}>
         {mas ? '▾' : '▸'} Textos del documento
@@ -371,7 +497,7 @@ function PlanVsReal({ a, unidad, cp, img, plan, onPlan }: { a: AnalisisMaterial;
   }
   const u = plan.unidad
   const cambiar = (p: Partial<PlanMaterial>) => onPlan({ ...plan, ...p, origen: p.origen ?? 'manual' })
-  const texto = cp ? contenidoPlan(cp, a.material.nombre, unidad) : null
+  const texto = cp ? { conclusion: conclusionPlan(cp, a.nombre, unidad), filas: filasPlan(cp, unidad), nota: notaPlan(cp.plan.unidad) } : null
   return (
     <div class="tend-plan">
       <div class="spread">
@@ -460,21 +586,11 @@ function PlanVsReal({ a, unidad, cp, img, plan, onPlan }: { a: AnalisisMaterial;
                   </tr>
                 </thead>
                 <tbody>
-                  {texto.bloques
-                    .flatMap((b) => b.filas)
-                    .reduce<{ nombre: string; valores: string[]; rojo: boolean[] }[]>((acc, f) => {
-                      const ya = acc.find((x) => x.nombre === f.nombre)
-                      if (ya) {
-                        ya.valores.push(...f.valores)
-                        ya.rojo.push(...(f.rojo ?? f.valores.map(() => false)))
-                      } else acc.push({ nombre: f.nombre, valores: [...f.valores], rojo: [...(f.rojo ?? f.valores.map(() => false))] })
-                      return acc
-                    }, [])
-                    .map((f) => (
+                  {texto.filas.map((f) => (
                       <tr key={f.nombre}>
                         <th>{f.nombre}</th>
                         {f.valores.map((v, j) => (
-                          <td key={j} style={{ color: f.rojo[j] ? 'var(--bad)' : undefined }}>
+                          <td key={j} style={{ color: f.rojo?.[j] ? 'var(--bad)' : undefined }}>
                             {v}
                           </td>
                         ))}
@@ -486,8 +602,8 @@ function PlanVsReal({ a, unidad, cp, img, plan, onPlan }: { a: AnalisisMaterial;
           )}
           {img && cp.filas.length > 0 && (
             <div class="tend-graficas">
-              <img src={img.consumo} alt={`Gráfica de consumo planeado contra real de ${a.material.nombre}`} />
-              <img src={img.existencia} alt={`Gráfica de existencia planeada contra real de ${a.material.nombre}`} />
+              <img src={img.consumo.src} alt={`Gráfica de consumo planeado contra real de ${a.nombre}`} />
+              <img src={img.existencia.src} alt={`Gráfica de existencia planeada contra real de ${a.nombre}`} />
             </div>
           )}
           <p class="muted small" style={{ margin: 0 }}>
@@ -499,15 +615,13 @@ function PlanVsReal({ a, unidad, cp, img, plan, onPlan }: { a: AnalisisMaterial;
   )
 }
 
-function ResultadoMaterial({ a, unidad, img, extra }: { a: AnalisisMaterial; unidad: string; img: ImagenesMaterial; extra?: preact.ComponentChildren }) {
-  const p = a.escenarios.promedio
+function ResultadoMaterial({ a, unidad, img, c, extra }: { a: AnalisisMaterial; unidad: string; img: ImagenesMaterial; c: ConfigTendencia; extra?: preact.ComponentChildren }) {
+  const sel = escenariosDe(c)
+  const principal = escenarioPrincipal(c)
+  const p = a.escenarios[principal]
   const u = a.unidad
   return (
-    <div class="card stack" style={{ padding: '16px', gap: '14px' }}>
-      <div class="spread">
-        <h2 style={{ margin: 0 }}>{a.material.nombre}</h2>
-        <span class="muted small">{rangoTexto(a.historico.map((f) => f.periodo), u).replace(/^de (la )?/, '')}</span>
-      </div>
+    <div class="stack" style={{ gap: '14px' }}>
       <div class="kpis">
         <div class="kpi">
           <span>Salidas del periodo</span>
@@ -515,10 +629,10 @@ function ResultadoMaterial({ a, unidad, img, extra }: { a: AnalisisMaterial; uni
           <small class="muted">{unidad}</small>
         </div>
         <div class="kpi">
-          <span>Consumo promedio</span>
+          <span>{NOMBRE_ESCENARIO[principal]}</span>
           <b>{miles(p.consumo)}</b>
           <small class="muted">
-            {unidad} {porUnidad(u)} · {a.pctConsumo}% de las existencias
+            {unidad} {porUnidad(u)} · {a.existencia ? Math.round((p.consumo / a.existencia) * 100) : 0}% de las existencias
           </small>
         </div>
         <div class="kpi">
@@ -532,17 +646,19 @@ function ResultadoMaterial({ a, unidad, img, extra }: { a: AnalisisMaterial; uni
         <div class={`kpi ${p.agotamiento && p.cobertura < 4 ? 'bad' : ''}`}>
           <span>Alcanza hasta</span>
           <b style={{ fontSize: '24px' }}>{p.agotamiento ? `${p.agotamiento.etiqueta} ${p.agotamiento.clave.slice(0, 4)}` : 'No se agota'}</b>
-          <small class="muted">{coberturaTexto(p, u)} con el promedio</small>
+          <small class="muted">{coberturaTexto(p, u)}</small>
         </div>
         {a.objetivo && (
           <div class={`kpi ${p.faltante ? 'bad' : ''}`}>
-            <span>Para {a.objetivo.etiqueta} {a.objetivo.clave.slice(0, 4)}</span>
+            <span>
+              Para {a.objetivo.etiqueta} {a.objetivo.clave.slice(0, 4)}
+            </span>
             <b>{p.faltante ? miles(p.faltante) : '✓'}</b>
             <small class="muted">{p.faltante ? `${unidad} hacen falta (se necesitan ${miles(p.necesario!)})` : `alcanza, sobran ${miles(p.sobrante!)}`}</small>
           </div>
         )}
         <div class="kpi">
-          <span>No recibieron este material</span>
+          <span>No recibieron {a.talla ? 'esta talla' : 'este material'}</span>
           <b>{a.pctSinMaterial}%</b>
           <small class="muted">
             {miles(a.sinMaterial)} de {miles(a.solicitudes)} solicitudes
@@ -562,10 +678,10 @@ function ResultadoMaterial({ a, unidad, img, extra }: { a: AnalisisMaterial; uni
             </tr>
           </thead>
           <tbody>
-            {(['bajo', 'promedio', 'alto'] as Escenario[]).map((e) => {
+            {sel.map((e) => {
               const r = a.escenarios[e]
               return (
-                <tr key={e} class={e === 'promedio' ? 'tend-fila-destacada' : ''}>
+                <tr key={e} class={e === principal ? 'tend-fila-destacada' : ''}>
                   <td>
                     <b>{NOMBRE_ESCENARIO[e]}</b>
                     <br />
@@ -583,19 +699,76 @@ function ResultadoMaterial({ a, unidad, img, extra }: { a: AnalisisMaterial; uni
           </tbody>
         </table>
       </div>
+      <p style={{ margin: 0 }}>
+        <b>{conclusionEscenario(a, principal, unidad)}</b>
+        {sel
+          .filter((e) => e !== principal)
+          .map((e) => (
+            <span key={e}> {conclusionEscenario(a, e, unidad)}</span>
+          ))}
+      </p>
+      <p class="muted small" style={{ margin: 0 }}>
+        {textoTendencia(a, unidad)}
+      </p>
 
       <Historico a={a} unidad={unidad} />
       <div class="tend-graficas">
-        <img src={img.proyeccion} alt={`Gráfica de la existencia proyectada de ${a.material.nombre}`} />
-        <img src={img.historico} alt={`Gráfica del consumo registrado de ${a.material.nombre}`} />
-        {img.tallas && <img src={img.tallas} alt={`Entregas de ${a.material.nombre} por talla`} />}
+        <img src={img.historico.src} alt={`Gráfica del consumo registrado de ${a.nombre}`} />
+        {img.comparada && <img src={img.comparada.src} alt={`Gráfica comparativa de escenarios de ${a.nombre}`} />}
+        {sel.map((e) => img.proyeccion[e] && <img key={e} src={img.proyeccion[e]!.src} alt={`Existencia proyectada de ${a.nombre}, ${NOMBRE_ESCENARIO[e].toLowerCase()}`} />)}
+        {img.tallas && <img src={img.tallas.src} alt={`Entregas de ${a.nombre} por talla`} />}
       </div>
-      {u === 'semana' && a.escenarios.promedio.filas.some((f) => f.periodo.clave.endsWith('-S53')) && (
+      {u === 'semana' && p.filas.some((f) => f.periodo.clave.endsWith('-S53')) && (
         <p class="muted small" style={{ margin: 0 }}>
-          Nota: {a.escenarios.promedio.filas.find((f) => f.periodo.clave.endsWith('-S53'))!.periodo.clave.slice(0, 4)} tiene semana 53 en el calendario ISO; ya está considerada en el cálculo.
+          Nota: {p.filas.find((f) => f.periodo.clave.endsWith('-S53'))!.periodo.clave.slice(0, 4)} tiene semana 53 en el calendario ISO; ya está considerada en el cálculo.
         </p>
       )}
       {extra}
+    </div>
+  )
+}
+
+/** Comparativa de las tallas de un material: consumo, hasta cuándo alcanza cada una y qué comprar. */
+function ComparativaTallas({ g, c }: { g: GrupoTendencia; c: ConfigTendencia }) {
+  const nombre = S.materialesPorId.value.get(g.materialId)?.nombre ?? ''
+  const consumo = useMemo(() => imagenConsumoTallas(g.tallas, nombre, g.unidad, c), [g, c.estilo, c.paleta])
+  const cobertura = useMemo(
+    () => imagenCobertura(g.tallas.map((a) => ({ a, nombre: a.talla?.etiqueta ?? a.nombre })), c, `¿Hasta cuándo alcanza cada talla? – ${nombre}`, 'Comparativa entre tallas con el consumo del periodo analizado'),
+    [g, c.estilo, c.paleta, c.escenarios],
+  )
+  const t = tablaTallas(g.tallas, c, g.unidad)
+  return (
+    <div class="stack" style={{ gap: '12px' }}>
+      <h3 style={{ margin: 0 }}>Comparativa por talla</h3>
+      <div class="tend-graficas">
+        <img src={consumo.src} alt={`Consumo por talla de ${nombre}`} />
+        <img src={cobertura.src} alt={`Hasta cuándo alcanza cada talla de ${nombre}`} />
+      </div>
+      <div class="tabla-wrap">
+        <table>
+          <thead>
+            <tr>
+              {t.encabezado.map((e) => (
+                <th key={e}>{e}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {t.filas.map((f, i) => (
+              <tr key={i}>
+                {f.map((v, j) => (
+                  <td key={j} class={j === f.length - 1 && /^Comprar/.test(v) ? 'tend-comprar' : ''}>
+                    {v}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p style={{ margin: 0 }}>
+        <b>{conclusionTallas(g.tallas, c, g.unidad)}</b>
+      </p>
     </div>
   )
 }
@@ -607,6 +780,7 @@ export function PantallaTendencias() {
   const [plantilla, setPlantilla] = useState<Plantilla | null>(null)
   const [imprimiendo, setImprimiendo] = useState(false)
   const [generandoWord, setGenerandoWord] = useState(false)
+  const [itemsPdf, setItemsPdf] = useState<Item[]>([])
   const guardado = useRef<number>()
 
   useEffect(() => {
@@ -626,51 +800,39 @@ export function PantallaTendencias() {
   const cambiar = (p: Partial<ConfigTendencia>) => c && lista && persistir(lista.map((x) => (x.id === c.id ? { ...x, ...p } : x)))
 
   const hoy = fechaLocal()
-  const analisis = useMemo(() => (c ? analizar(c, hoy) : []), [c, hoy, S.entregas.value, S.movimientos.value, S.materiales.value])
-  const conUnidad = useMemo(() => (c ? analisis.map((a) => ({ a, unidad: c.materiales.find((m) => m.materialId === a.material.id)?.unidad || 'piezas' })) : []), [analisis, c])
-  const imagenes = useMemo(() => (c ? conUnidad.map(({ a, unidad }) => imagenesMaterial(a, c, unidad)) : []), [conUnidad, c?.estilo, c?.paleta])
-  const planes = useMemo(() => (c ? compararPlanes(c, hoy) : new Map<string, ComparacionPlan>()), [c, hoy, S.entregas.value, S.movimientos.value])
+  const grupos = useMemo(() => (c ? analizar(c, hoy) : []), [c, hoy, S.entregas.value, S.movimientos.value, S.materiales.value])
+  const sujetos = useMemo(() => sujetosDe(grupos), [grupos])
+  const imagenes = useMemo(() => {
+    const r = new Map<string, ImagenesMaterial>()
+    if (c) for (const { a, unidad } of sujetos) r.set(a.clave, imagenesMaterial(a, c, unidad))
+    return r
+  }, [sujetos, c?.estilo, c?.paleta, c?.escenarios, c?.vistaEscenarios])
+  const planes = useMemo(() => (c ? compararPlanes(c, grupos, hoy) : new Map<string, ComparacionPlan>()), [c, grupos, hoy])
   const imgPlanes = useMemo(() => {
     const r = new Map<string, ImagenesPlan>()
     if (c)
-      for (const { a, unidad } of conUnidad) {
-        const cp = planes.get(a.material.id)
-        if (cp && cp.filas.length) r.set(a.material.id, imagenesPlan(cp, a.material.nombre, unidad, c))
+      for (const { a, unidad } of sujetos) {
+        const cp = planes.get(a.clave)
+        if (cp && cp.filas.length) r.set(a.clave, imagenesPlan(cp, a.nombre, unidad, c))
       }
     return r
-  }, [planes, conUnidad, c?.estilo, c?.paleta])
-  const comparativa = useMemo(() => (c && conUnidad.length > 1 ? imagenComparativa(conUnidad, c) : ''), [conUnidad, c?.estilo, c?.paleta])
+  }, [planes, sujetos, c?.estilo, c?.paleta])
+  const comparativa = useMemo(() => {
+    if (!c || grupos.length < 2) return null
+    const lista = grupos.flatMap((g) => (g.juntas ? [{ a: g.juntas }] : g.tallas.map((a) => ({ a }))))
+    return { lista, img: imagenCobertura(lista, c, '¿Hasta cuándo alcanzan las existencias?', 'Comparativa entre materiales con el consumo del periodo analizado') }
+  }, [grupos, c?.estilo, c?.paleta, c?.escenarios])
 
   if (!lista || !c) return <p class="muted">Cargando…</p>
   const valido = c.desde && c.hasta && c.desde <= c.hasta
-  const listo = valido && analisis.length > 0
-  const fecha = fechaDocumento(c, hoy)
+  const listo = valido && sujetos.length > 0
   const titulo = tituloDe(c)
-
-  const documento = () => {
-    const materiales = conUnidad.map(({ a, unidad }, i) => {
-      const cp = planes.get(a.material.id)
-      const ip = imgPlanes.get(a.material.id)
-      return {
-        t: contenidoMaterial(a, c, unidad, conUnidad.length === 1 ? titulo : undefined),
-        img: imagenes[i],
-        plan: cp && ip ? { t: contenidoPlan(cp, a.material.nombre, unidad), img: ip } : undefined,
-      }
-    })
-    const comp =
-      conUnidad.length > 1
-        ? {
-            titulo,
-            intro: `Comparativa de ${conUnidad.length} materiales con el consumo registrado ${rangoTexto(analisis[0].historico.map((f) => f.periodo), c.unidad)}${c.contexto.trim() ? `, durante el periodo de ${c.contexto.trim()}` : ''}. Cada barra indica cuántas ${unidadTexto(c.unidad)} alcanzan las existencias con el consumo promedio; la línea marca el rango entre el escenario conservador y el bajo.`,
-            imagen: comparativa,
-            tabla: filasComparativas(conUnidad),
-          }
-        : undefined
-    return { materiales, comp }
-  }
+  const principal = escenarioPrincipal(c)
+  const documento = () => construirDocumento(c, grupos, planes, { sujetos: imagenes, planes: imgPlanes }, hoy)
 
   const abrirPdf = async () => {
     if (!plantilla) setPlantilla(await cargarPlantilla())
+    setItemsPdf(documento().items)
     setImprimiendo(true)
   }
   const bajarWord = () =>
@@ -679,15 +841,46 @@ export function PantallaTendencias() {
       try {
         const p = plantilla ?? (await cargarPlantilla())
         setPlantilla(p)
-        const { materiales, comp } = documento()
+        const doc = documento()
         const { generarWord } = await import('../reportes/tendenciaWord')
-        const blob = await generarWord({ plantilla: p, config: c, fecha, comparativa: comp, materiales })
+        const blob = await generarWord({ plantilla: p, config: c, titulo: doc.titulo, items: doc.items })
         descargar(blob, `${nombreArchivo(titulo, hoy)}.docx`)
         avisar('Documento de Word descargado. Puede editarlo antes de imprimirlo.')
       } finally {
         setGenerandoWord(false)
       }
     })
+
+  const cambiarPlan = (a: AnalisisMaterial, plan: PlanMaterial | null) =>
+    cambiar({
+      materiales: c.materiales.map((m) => {
+        if (m.materialId !== a.material.id) return m
+        // Los planes de la 2.27 (uno por material) pasan a la lista por análisis
+        const planes = { ...(m.planes ?? (m.plan ? { [m.materialId]: m.plan } : {})), [a.clave]: plan }
+        return { ...m, planes, plan: undefined }
+      }),
+    })
+  const resultado = (a: AnalisisMaterial, unidad: string) => (
+    <ResultadoMaterial
+      a={a}
+      unidad={unidad}
+      c={c}
+      img={imagenes.get(a.clave)!}
+      extra={
+        <PlanVsReal
+          a={a}
+          unidad={unidad}
+          plan={planDe(
+            c.materiales.find((m) => m.materialId === a.material.id),
+            a.clave,
+          )}
+          cp={planes.get(a.clave)}
+          img={imgPlanes.get(a.clave)}
+          onPlan={(plan) => cambiarPlan(a, plan)}
+        />
+      }
+    />
+  )
 
   return (
     <div class="stack">
@@ -703,8 +896,8 @@ export function PantallaTendencias() {
         </div>
       </div>
       <p class="muted small">
-        Con las entregas registradas se calcula el consumo {porUnidad(c.unidad)} de cada material, hasta cuándo alcanzan las existencias y, si se indica una fecha, cuánto material hace falta.
-        Escenario bajo y conservador: el periodo de menor y de mayor consumo.
+        Con las entregas registradas se calcula el consumo {porUnidad(c.unidad)} de cada material (y de cada talla, si lo pide), hasta cuándo alcanzan las existencias y, si se indica una
+        fecha, cuánto material hace falta.
       </p>
 
       <div class="filtros" style={{ alignItems: 'flex-end' }}>
@@ -754,70 +947,77 @@ export function PantallaTendencias() {
       <Configuracion c={c} cambiar={cambiar} />
 
       {!valido && <div class="aviso bad small">La fecha «Desde» debe ser anterior a «Hasta».</div>}
-      {valido && !analisis.length && <div class="aviso small">Agregue al menos un material para ver la tendencia.</div>}
-      {listo && conUnidad.length > 1 && (
+      {valido && !sujetos.length && <div class="aviso small">Agregue al menos un material para ver la tendencia.</div>}
+      {listo && comparativa && (
         <div class="card stack" style={{ padding: '16px' }}>
-          <h2 style={{ margin: 0 }}>Comparativa</h2>
-          <img class="tend-img" src={comparativa} alt="Comparativa de hasta cuándo alcanzan las existencias de cada material" />
+          <h2 style={{ margin: 0 }}>Comparativa entre materiales</h2>
+          <img class="tend-img" src={comparativa.img.src} alt="Comparativa de hasta cuándo alcanzan las existencias de cada material" />
           <div class="tabla-wrap">
             <table>
               <thead>
                 <tr>
-                  {filasComparativas(conUnidad).encabezado.map((e) => (
-                    <th key={e}>{e}</th>
-                  ))}
+                  <th>Material</th>
+                  <th>{NOMBRE_ESCENARIO[principal]}</th>
+                  <th>Existencias</th>
+                  <th>Alcanza para</th>
+                  <th>Se terminaría en</th>
                 </tr>
               </thead>
               <tbody>
-                {filasComparativas(conUnidad).filas.map((f, i) => (
-                  <tr key={i}>
-                    {f.map((v, j) => (
-                      <td key={j}>{v}</td>
-                    ))}
-                  </tr>
-                ))}
+                {comparativa.lista.map(({ a }) => {
+                  const r = a.escenarios[principal]
+                  return (
+                    <tr key={a.clave}>
+                      <td>{a.nombre}</td>
+                      <td>
+                        {miles(r.consumo)} {porUnidad(a.unidad)}
+                      </td>
+                      <td>{miles(a.existencia)}</td>
+                      <td>{coberturaTexto(r, a.unidad)}</td>
+                      <td>{r.agotamiento ? `${r.agotamiento.etiqueta} ${r.agotamiento.clave.slice(0, 4)}` : 'No se agota'}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
       {listo &&
-        conUnidad.map(({ a, unidad }, i) => {
-          const cm = c.materiales.find((m) => m.materialId === a.material.id)
+        grupos.map((g) => {
+          const nombre = S.materialesPorId.value.get(g.materialId)?.nombre ?? ''
+          const periodo = rangoTexto((g.juntas ?? g.tallas[0]).historico.map((f) => f.periodo), c.unidad).replace(/^de (la )?/, '')
           return (
-            <ResultadoMaterial
-              key={a.material.id}
-              a={a}
-              unidad={unidad}
-              img={imagenes[i]}
-              extra={
-                <PlanVsReal
-                  a={a}
-                  unidad={unidad}
-                  plan={cm?.plan}
-                  cp={planes.get(a.material.id)}
-                  img={imgPlanes.get(a.material.id)}
-                  onPlan={(plan) => cambiar({ materiales: c.materiales.map((m) => (m.materialId === a.material.id ? { ...m, plan } : m)) })}
-                />
-              }
-            />
+            <div key={g.materialId} class="card stack" style={{ padding: '16px', gap: '14px' }}>
+              <div class="spread">
+                <h2 style={{ margin: 0 }}>
+                  {nombre}
+                  {g.juntas?.talla ? ` – ${g.juntas.talla.etiqueta}` : ''}
+                </h2>
+                <span class="muted small">{periodo}</span>
+              </div>
+              {g.juntas && resultado(g.juntas, g.unidad)}
+              {g.tallas.length > 1 && <ComparativaTallas g={g} c={c} />}
+              {g.tallas.map((a) => (
+                <details key={a.clave} class="tend-talla" open={!g.juntas && g.tallas.length === 1}>
+                  <summary>
+                    <b>{a.talla?.etiqueta ?? a.nombre}</b>
+                    <span class="muted small">
+                      {' '}
+                      · {miles(a.escenarios[principal].consumo)} {g.unidad} {porUnidad(a.unidad)} · existencia {miles(a.existencia)} ·{' '}
+                      {a.escenarios[principal].agotamiento ? `hasta ${a.escenarios[principal].agotamiento!.etiqueta} ${a.escenarios[principal].agotamiento!.clave.slice(0, 4)}` : 'no se agota'}
+                    </span>
+                  </summary>
+                  {resultado(a, g.unidad)}
+                </details>
+              ))}
+            </div>
           )
         })}
 
-      {imprimiendo && plantilla && listo && (
-        <VistaImpresionPortal onCerrar={() => setImprimiendo(false)}>
-          {(() => {
-            const { materiales, comp } = documento()
-            return [
-              comp && hojaComparativa(plantilla, c, { ...comp, fecha, nota: c.nota }),
-              ...materiales.flatMap(({ t, img, plan }, i) => [
-                ...hojasMaterial(plantilla, c, t, img, fecha, c.nota, `m${i}`),
-                ...(plan ? hojasPlan(plantilla, c, plan.t, plan.img, fecha, `m${i}`) : []),
-              ]),
-            ]
-          })()}
-        </VistaImpresionPortal>
-      )}
+      {imprimiendo && plantilla && listo && <VistaImpresionPortal onCerrar={() => setImprimiendo(false)}>
+          <DocumentoTendencia p={plantilla} c={c} items={itemsPdf} />
+        </VistaImpresionPortal>}
     </div>
   )
 }

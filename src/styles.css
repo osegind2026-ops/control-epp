@@ -1687,3 +1687,17 @@ details > summary { list-style: revert; }
 .hoja-tendencia .tdz-tallas img { width: 100%; height: auto; max-height: 52mm; object-fit: contain; }
 .hoja-tendencia .tdz-cajas.tdz-cajas-2 { grid-template-columns: 1fr 1fr; }
 .tend-plan { border-top: 1px solid var(--rule); padding-top: 12px; display: grid; gap: 10px; }
+.tend-tallas { display: grid; gap: 8px; border-top: 1px dashed var(--rule); padding-top: 8px; }
+.tend-tallas .check { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; }
+.tabla-tallas td, .tabla-tallas th { padding: 4px 8px; }
+.tabla-tallas .input { max-width: 120px; padding: 6px 8px; }
+.tend-talla { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; background: var(--surface); }
+.tend-talla > summary { cursor: pointer; padding: 2px 0; }
+.tend-talla[open] > summary { margin-bottom: 12px; }
+td.tend-comprar { color: var(--bad); font-weight: 700; }
+
+/* Hoja oculta para medir los bloques del documento de Tendencias antes de repartirlos en hojas */
+.tdz-medida { position: absolute; left: -10000px; top: 0; visibility: hidden; pointer-events: none; }
+.tdz-medida .hoja-tendencia .tdz-cuerpo { overflow: visible; }
+.tdz-medida .hoja-tendencia .tdz-cuerpo > * { flex-shrink: 0; }
+.hoja-tendencia .tdz-cuerpo > * { flex-shrink: 0; }

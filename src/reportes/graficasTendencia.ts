@@ -396,7 +396,7 @@ export interface FilaComparativa {
   texto: string
 }
 
-export function graficaComparativa(filas: FilaComparativa[], unidad: string, o: OpcionesGrafica & { titulo: string; subtitulo?: string }): HTMLCanvasElement {
+export function graficaComparativa(filas: FilaComparativa[], unidad: string, o: OpcionesGrafica & { titulo: string; subtitulo?: string; nota?: string }): HTMLCanvasElement {
   const ancho = o.ancho ?? 1600
   const alto = o.alto ?? Math.max(560, 210 + filas.length * 130)
   const k = ancho / 1600
@@ -490,7 +490,7 @@ export function graficaComparativa(filas: FilaComparativa[], unidad: string, o: 
   g.fillStyle = '#6F7271'
   g.textAlign = 'right'
   g.textBaseline = 'bottom'
-  g.fillText('Barra: consumo promedio · Línea delgada: del escenario conservador al bajo', x1, alto - 10 * k)
+  g.fillText(o.nota ?? 'Barra: consumo promedio · Línea delgada: del escenario conservador al bajo', x1, alto - 10 * k)
   return c
 }
 
@@ -590,8 +590,11 @@ export function graficaSeries(d: { titulo: string; subtitulo?: string; etiquetas
   const y0 = alto - ((n > 8 ? 150 : 100) * k + 44 * k)
   const todos = d.series.flatMap((s) => s.valores.filter((v): v is number => v != null))
   const minV = Math.min(0, ...todos)
-  const { tope, paso } = escalaBonita(Math.max(1, ...todos) * 1.1)
-  const base = minV < 0 ? -Math.ceil(-minV / paso) * paso : 0
+  // La escala se calcula con todo el rango (también los negativos) para no saturar el eje
+  const maxV = Math.max(1, ...todos)
+  const { paso } = escalaBonita((maxV - minV) * 1.1)
+  const tope = Math.ceil((maxV * 1.08) / paso) * paso
+  const base = minV < 0 ? -Math.ceil((-minV * 1.05) / paso) * paso : 0
   const Y = (v: number) => y0 - ((v - base) / (tope - base)) * (y0 - y1)
   const banda = (x1 - x0) / n
   const X = (i: number) => x0 + banda * (i + 0.5)
@@ -698,7 +701,12 @@ export function graficaSeries(d: { titulo: string; subtitulo?: string; etiquetas
         g.fill()
       })
       // Lo planeado lleva sus números abajo de la línea y lo real arriba, para que no se encimen
-      if (n <= 16) s.valores.forEach((v, i) => v != null && etiquetaValor(g, miles(v), X(i), Y(v) + (s.punteada ? 36 : -14) * k, k, tono(s.color, -0.35)))
+      if (n <= 16)
+        s.valores.forEach((v, i) => {
+          // Si otra serie ya muestra el mismo número en ese punto, no se repite
+          if (v == null || (s.punteada && d.series.some((o2) => o2 !== s && !o2.punteada && o2.valores[i] === v))) return
+          etiquetaValor(g, miles(v), X(i), Y(v) + (s.punteada ? 36 : -14) * k, k, tono(s.color, -0.35))
+        })
     })
   }
   // eje X

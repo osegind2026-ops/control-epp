@@ -73,6 +73,24 @@ describe('tendencia de consumo (caso del reporte de guantes de carnaza)', () => 
     expect(conclusion(a, 'pares')).toContain('alcanzarían hasta la Semana 02 del 2027')
   })
 
+  it('analiza cada talla por separado o un grupo de tallas', async () => {
+    const { etiquetaTallas } = await import('./tendencias')
+    const base = { entregas, movimientos, ubicaciones: ['alm'], material, desde: '2026-09-07', hasta: '2026-09-27', unidad: 'semana' as const, hoy: '2026-09-24' }
+    const g = analizarMaterial({ ...base, config: { materialId: 'carnaza', pedido: 100 }, variantes: ['G'] })
+    const m = analizarMaterial({ ...base, config: { materialId: 'carnaza', pedido: 0 }, variantes: ['M'] })
+    expect(g.total + m.total).toBe(456)
+    expect(g.nombre).toBe('Guantes de carnaza – Talla G')
+    expect(g.clave).toBe('carnaza|G')
+    expect(g.almacen).toBe(300) // el kardex de prueba solo tiene talla G
+    expect(m.almacen).toBe(0)
+    expect(g.existencia).toBe(400)
+    // Las dos tallas juntas = el material completo
+    const todas = analizarMaterial({ ...base, config: { materialId: 'carnaza', pedido: 0 }, variantes: ['M', 'G'] })
+    expect(todas.clave).toBe('carnaza')
+    expect(todas.talla).toBeUndefined()
+    expect(etiquetaTallas({ variantes: [{ id: 'CH', etiqueta: 'CH', activo: true }, { id: 'M', etiqueta: 'M', activo: true }, { id: 'G', etiqueta: 'G', activo: true }] }, ['CH', 'G'])).toBe('Tallas CH y G')
+  })
+
   it('calcula cuánto falta para llegar a una fecha', () => {
     const b = analizarMaterial({
       entregas, movimientos, ubicaciones: ['alm'], material, config: { materialId: 'carnaza', pedido: 0 },

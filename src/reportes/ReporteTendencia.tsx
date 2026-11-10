@@ -1,9 +1,12 @@
 // Documento de Tendencias en hojas carta (vista previa, impresión y «Guardar como PDF»).
+// Los bloques del documento se acomodan solos: cada título empieza hoja nueva y lo que no
+// cabe pasa a la siguiente hoja.
 import type { ComponentChildren } from 'preact'
+import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import type { Plantilla } from './plantilla'
 import type { ConfigTendencia } from '../state/tendencias'
-import type { Bloque, ContenidoMaterial, ContenidoPlan } from './tendenciaDoc'
-import type { ImagenesMaterial, ImagenesPlan } from './imagenesTendencia'
+import type { Bloque, Item } from './tendenciaDoc'
+
 
 function Hoja({ p, c, children }: { p: Plantilla; c: ConfigTendencia; children: ComponentChildren }) {
   return (
@@ -30,34 +33,30 @@ function Hoja({ p, c, children }: { p: Plantilla; c: ConfigTendencia; children: 
   )
 }
 
-function TablaBloques({ bloques }: { bloques: Bloque[] }) {
+function TablaBloque({ b }: { b: Bloque }) {
   return (
-    <div class="tdz-bloques">
-      {bloques.map((b, i) => (
-        <table key={i} class="tdz-tabla tdz-horiz">
-          <thead>
-            <tr>
-              <th />
-              {b.etiquetas.map((e) => (
-                <th key={e}>{e}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {b.filas.map((f) => (
-              <tr key={f.nombre}>
-                <th>{f.nombre}</th>
-                {f.valores.map((v, j) => (
-                  <td key={j} class={f.rojo?.[j] ? 'rojo' : ''}>
-                    {v}
-                  </td>
-                ))}
-              </tr>
+    <table class="tdz-tabla tdz-horiz">
+      <thead>
+        <tr>
+          <th />
+          {b.etiquetas.map((e, i) => (
+            <th key={i}>{e}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {b.filas.map((f) => (
+          <tr key={f.nombre}>
+            <th>{f.nombre}</th>
+            {f.valores.map((v, j) => (
+              <td key={j} class={f.rojo?.[j] ? 'rojo' : ''}>
+                {v}
+              </td>
             ))}
-          </tbody>
-        </table>
-      ))}
-    </div>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }
 
@@ -76,131 +75,122 @@ function Pares({ filas, destacar }: { filas: [string, string][]; destacar?: numb
   )
 }
 
-function Titulo({ titulo, subtitulo, fecha }: { titulo: string; subtitulo: string; fecha: string }) {
-  return (
-    <div class="tdz-titulo">
-      <h1>{titulo}</h1>
-      <p>{subtitulo}</p>
-      <p class="fecha">{fecha}</p>
-    </div>
-  )
-}
-
-export function hojasMaterial(p: Plantilla, c: ConfigTendencia, t: ContenidoMaterial, img: ImagenesMaterial, fecha: string, nota: string, clave = '') {
-  return [
-    <Hoja key={`${clave}a`} p={p} c={c}>
-      <Titulo titulo={t.titulo} subtitulo={t.subtitulo} fecha={fecha} />
-      <p class="tdz-parrafo">{t.intro}</p>
-      <TablaBloques bloques={t.historico} />
-      <div class="tdz-cajas">
-        <Pares filas={t.resumen} destacar={0} />
-        <Pares filas={t.existencias} destacar={2} />
-        <Pares filas={t.indicadores} destacar={0} />
-      </div>
-      <table class="tdz-tabla tdz-escenarios">
-        <thead>
-          <tr>
-            {t.escenarios.encabezado.map((e) => (
-              <th key={e}>{e}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {t.escenarios.filas.map((f, i) => (
-            <tr key={i} class={i === 1 ? 'destacado' : ''}>
-              {f.map((v, j) => (
-                <td key={j}>{v}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p class="tdz-parrafo tdz-conclusion">{t.conclusion}</p>
-      <p class="tdz-parrafo tdz-chico">{t.tendencia}</p>
-      <img class="tdz-grafica" src={img.historico} alt="" />
-    </Hoja>,
-    <Hoja key={`${clave}b`} p={p} c={c}>
-      <img class="tdz-grafica" src={img.proyeccion} alt="" />
-      <TablaBloques bloques={t.proyeccion} />
-      {t.proyeccionRecortada && <p class="tdz-chico">La tabla muestra el primer año; la gráfica y el cálculo consideran todo el periodo.</p>}
-      <p class="tdz-nota">{nota}</p>
-      {t.tallas.length > 0 && (
-        <div class="tdz-tallas">
-          <table class="tdz-tabla">
-            <thead>
-              <tr>
-                <th>Talla</th>
-                <th>Entregados</th>
-                <th>%</th>
-              </tr>
-            </thead>
-            <tbody>
-              {t.tallas.map((f) => (
-                <tr key={f[0]}>
-                  {f.map((v, j) => (
-                    <td key={j}>{v}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {img.tallas && <img src={img.tallas} alt="" />}
+function Elemento({ it }: { it: Item }) {
+  switch (it.t) {
+    case 'titulo':
+      return (
+        <div class="tdz-titulo">
+          <h1>{it.titulo}</h1>
+          <p>{it.subtitulo}</p>
+          <p class="fecha">{it.fecha}</p>
         </div>
-      )}
-      <p class="tdz-fuente">{t.fuente}</p>
-    </Hoja>,
-  ]
-}
-
-export function hojaComparativa(
-  p: Plantilla,
-  c: ConfigTendencia,
-  d: { titulo: string; fecha: string; intro: string; imagen: string; tabla: { encabezado: string[]; filas: string[][] }; nota: string },
-) {
-  return (
-    <Hoja key="comp" p={p} c={c}>
-      <Titulo titulo={d.titulo} subtitulo="Cálculo de tendencia conservadora de consumo de equipo de protección personal – comparativa" fecha={d.fecha} />
-      <p class="tdz-parrafo">{d.intro}</p>
-      <img class="tdz-grafica" src={d.imagen} alt="" />
-      <table class="tdz-tabla tdz-escenarios">
-        <thead>
-          <tr>
-            {d.tabla.encabezado.map((e) => (
-              <th key={e}>{e}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {d.tabla.filas.map((f, i) => (
-            <tr key={i}>
-              {f.map((v, j) => (
-                <td key={j}>{v}</td>
+      )
+    case 'parrafo': {
+      const clase = { normal: 'tdz-parrafo', conclusion: 'tdz-parrafo tdz-conclusion', chico: 'tdz-chico', nota: 'tdz-nota', fuente: 'tdz-fuente' }[it.estilo ?? 'normal']
+      return <p class={clase}>{it.texto}</p>
+    }
+    case 'bloque':
+      return <TablaBloque b={it.bloque} />
+    case 'cajas':
+      return (
+        <div class={`tdz-cajas ${it.grupos.length === 2 ? 'tdz-cajas-2' : ''}`}>
+          {it.grupos.map((g, i) => (
+            <Pares key={i} filas={g.filas} destacar={g.destacar} />
+          ))}
+        </div>
+      )
+    case 'tabla':
+      return (
+        <table class="tdz-tabla tdz-escenarios">
+          <thead>
+            <tr>
+              {it.encabezado.map((e) => (
+                <th key={e}>{e}</th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <p class="tdz-nota">{d.nota}</p>
-    </Hoja>
-  )
+          </thead>
+          <tbody>
+            {it.filas.map((f, i) => (
+              <tr key={i} class={it.destacar?.includes(i) ? 'destacado' : ''}>
+                {f.map((v, j) => (
+                  <td key={j}>{v}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )
+    case 'imagen':
+      // La proporción va fija para que la hoja se pueda medir aunque la imagen no haya cargado
+      return <img class="tdz-grafica" src={it.img.src} alt="" style={{ aspectRatio: `${1 / it.img.ratio}`, ...(it.ancho ? { width: `${it.ancho * 100}%`, alignSelf: 'center' } : {}) }} />
+  }
 }
 
-export function hojasPlan(p: Plantilla, c: ConfigTendencia, t: ContenidoPlan, img: ImagenesPlan, fecha: string, clave = '') {
-  return [
-    <Hoja key={`${clave}pa`} p={p} c={c}>
-      <Titulo titulo={t.titulo} subtitulo="Comparación de la tendencia planeada contra el consumo real registrado" fecha={fecha} />
-      <p class="tdz-parrafo">{t.intro}</p>
-      <div class="tdz-cajas tdz-cajas-2">
-        <Pares filas={t.resumen} destacar={2} />
-        <Pares filas={t.fechas} destacar={1} />
+/**
+ * Reparte los bloques en hojas con las medidas reales (en px) de cada bloque y del cuerpo de la
+ * hoja. Cada título empieza hoja; lo que no cabe pasa a la siguiente; una imagen más alta que
+ * la hoja se reduce para que quepa sola.
+ */
+export function paginar(items: Item[], altos: number[], util: number, espacio: number): Item[][] {
+  const hojas: Item[][] = []
+  let actual: Item[] = []
+  let usado = 0
+  const nueva = () => {
+    if (actual.length) hojas.push(actual)
+    actual = []
+    usado = 0
+  }
+  items.forEach((it, i) => {
+    let h = altos[i] ?? 0
+    let item = it
+    if (it.t === 'imagen' && h > util) {
+      item = { ...it, ancho: ((it.ancho ?? 1) * (util - 4)) / h }
+      h = util - 4
+    }
+    const sig = items[i + 1]
+    // Un título o un párrafo que presenta una tabla no se quedan solos al final de la hoja
+    const amarre = (it.t === 'titulo' || (it.t === 'parrafo' && sig?.t === 'bloque')) && sig ? (altos[i + 1] ?? 0) + espacio : 0
+    if (it.t === 'titulo') nueva()
+    else if (actual.length && usado + h + Math.min(amarre, util / 3) > util) nueva()
+    actual.push(item)
+    usado += h + espacio
+  })
+  nueva()
+  return hojas
+}
+
+/** Documento completo: primero mide los bloques en una hoja oculta y luego arma las hojas. */
+export function DocumentoTendencia({ p, c, items }: { p: Plantilla; c: ConfigTendencia; items: Item[] }) {
+  const medida = useRef<HTMLDivElement>(null)
+  const [hojas, setHojas] = useState<Item[][] | null>(null)
+  useLayoutEffect(() => {
+    const raiz = medida.current
+    if (!raiz) return
+    const cuerpo = raiz.querySelector('.tdz-cuerpo') as HTMLElement
+    const util = cuerpo.clientHeight
+    const espacio = parseFloat(getComputedStyle(cuerpo).rowGap || '0') || 8
+    const altos = [...cuerpo.children].map((el) => (el as HTMLElement).getBoundingClientRect().height)
+    setHojas(paginar(items, altos, util, espacio))
+  }, [items])
+  if (!hojas)
+    return (
+      <div ref={medida} class="tdz-medida" aria-hidden="true">
+        <Hoja p={p} c={c}>
+          {items.map((it, j) => (
+            <Elemento key={j} it={it} />
+          ))}
+        </Hoja>
       </div>
-      <p class="tdz-parrafo tdz-conclusion">{t.conclusion}</p>
-      <img class="tdz-grafica" src={img.consumo} alt="" />
-    </Hoja>,
-    <Hoja key={`${clave}pb`} p={p} c={c}>
-      <img class="tdz-grafica" src={img.existencia} alt="" />
-      <TablaBloques bloques={t.bloques} />
-      <p class="tdz-nota">{t.nota}</p>
-    </Hoja>,
-  ]
+    )
+  return (
+    <>
+      {hojas.map((hoja, i) => (
+        <Hoja key={i} p={p} c={c}>
+          {hoja.map((it, j) => (
+            <Elemento key={j} it={it} />
+          ))}
+        </Hoja>
+      ))}
+    </>
+  )
 }

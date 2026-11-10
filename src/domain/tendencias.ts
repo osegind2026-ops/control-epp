@@ -90,11 +90,13 @@ export interface FilaConsumo {
 }
 
 /** Las líneas que cuentan como consumo: entregas vigentes, sin préstamos (esos regresan). */
-function cantidadMaterial(e: Entrega, materialId: string): number {
-  return e.lineas.filter((l) => l.materialId === materialId && !l.esPrestamo).reduce((s, l) => s + l.cantidad, 0)
+function cantidadMaterial(e: Entrega, materialId: string, tallas?: Set<string>): number {
+  return e.lineas.filter((l) => l.materialId === materialId && !l.esPrestamo && (!tallas || tallas.has(l.varianteId))).reduce((s, l) => s + l.cantidad, 0)
 }
 
-export function consumoPorPeriodo(entregas: Entrega[], materialId: string, periodos: Periodo[]): FilaConsumo[] {
+/** `variantes`: solo esas tallas (vacío o sin indicar = todas). */
+export function consumoPorPeriodo(entregas: Entrega[], materialId: string, periodos: Periodo[], variantes?: string[]): FilaConsumo[] {
+  const tallas = variantes?.length ? new Set(variantes) : undefined
   const filas = periodos.map<FilaConsumo>((p) => ({ periodo: p, cantidad: 0, solicitudes: 0, conMaterial: 0, folios: [] }))
   if (!filas.length) return filas
   const desde = periodos[0].inicio
@@ -105,7 +107,7 @@ export function consumoPorPeriodo(entregas: Entrega[], materialId: string, perio
     if (i < 0) continue
     const f = filas[i]
     f.solicitudes++
-    const c = cantidadMaterial(e, materialId)
+    const c = cantidadMaterial(e, materialId, tallas)
     if (c > 0) {
       f.cantidad += c
       f.conMaterial++
@@ -117,9 +119,10 @@ export function consumoPorPeriodo(entregas: Entrega[], materialId: string, perio
 }
 
 /** Existencia total del material (todas las tallas) en las ubicaciones indicadas. */
-export function existenciaTotal(movs: Movimiento[], materialId: string, ubicaciones: string[]): number {
+export function existenciaTotal(movs: Movimiento[], materialId: string, ubicaciones: string[], variantes?: string[]): number {
   const ok = new Set(ubicaciones)
-  return movs.reduce((s, m) => (m.materialId === materialId && ok.has(m.ubicacionId) ? s + m.cantidad : s), 0)
+  const tallas = variantes?.length ? new Set(variantes) : undefined
+  return movs.reduce((s, m) => (m.materialId === materialId && ok.has(m.ubicacionId) && (!tallas || tallas.has(m.varianteId)) ? s + m.cantidad : s), 0)
 }
 
 // ---------------- Análisis y proyección ----------------
@@ -154,7 +157,13 @@ export interface ResultadoEscenario {
 }
 
 export interface AnalisisMaterial {
+  /** Identifica el análisis: material y, si aplica, las tallas analizadas ('carnaza' o 'carnaza|G'). */
+  clave: string
   material: Pick<Material, 'id' | 'nombre'>
+  /** Nombre para mostrar: «Guante de Carnaza» o «Guante de Carnaza – Talla G». */
+  nombre: string
+  /** Tallas analizadas cuando no son todas las del material. */
+  talla?: { ids: string[]; etiqueta: string }
   unidad: UnidadPeriodo
   historico: FilaConsumo[]
   total: number
@@ -216,15 +225,30 @@ export interface OpcionesAnalisis {
   fechaObjetivo?: string
   /** Hoy (para no proyectar desde un periodo que ya pasó). */
   hoy: string
+  /** Solo estas tallas (sin indicar = todas). */
+  variantes?: string[]
+}
+
+export const claveSujeto = (materialId: string, variantes?: string[]) => (variantes?.length ? `${materialId}|${[...variantes].sort().join(',')}` : materialId)
+
+/** «Talla G» / «Tallas M y G» / undefined si son todas. */
+export function etiquetaTallas(material: Pick<Material, 'variantes'>, variantes?: string[]): string | undefined {
+  if (!variantes?.length) return undefined
+  const activas = material.variantes.filter((v) => v.activo).map((v) => v.id)
+  if (activas.length && activas.every((v) => variantes.includes(v)) && variantes.length === activas.length) return undefined
+  const et = material.variantes.filter((v) => variantes.includes(v.id)).map((v) => v.etiqueta)
+  if (et.length === 1) return `Talla ${et[0]}`
+  return `Tallas ${et.slice(0, -1).join(', ')} y ${et[et.length - 1]}`
 }
 
 export function analizarMaterial(o: OpcionesAnalisis): AnalisisMaterial {
   const periodos = periodosEntre(o.desde, o.hasta, o.unidad)
-  const historico = consumoPorPeriodo(o.entregas, o.material.id, periodos)
+  const variantes = o.variantes?.length ? o.variantes : undefined
+  const historico = consumoPorPeriodo(o.entregas, o.material.id, periodos, variantes)
   const total = historico.reduce((s, f) => s + f.cantidad, 0)
   const solicitudes = historico.reduce((s, f) => s + f.solicitudes, 0)
   const conMaterial = historico.reduce((s, f) => s + f.conMaterial, 0)
-  const almacen = o.config.existenciaManual ?? existenciaTotal(o.movimientos, o.material.id, o.ubicaciones)
+  const almacen = o.config.existenciaManual ?? existenciaTotal(o.movimientos, o.material.id, o.ubicaciones, variantes)
   const existencia = Math.max(0, almacen + (o.config.pedido || 0))
   const n = historico.length || 1
   const cantidades = historico.map((f) => f.cantidad)
@@ -246,7 +270,7 @@ export function analizarMaterial(o: OpcionesAnalisis): AnalisisMaterial {
   const tallas = new Map<string, number>()
   for (const e of o.entregas) {
     if (e.estado !== 'registrada' || !periodos.length || e.fecha < periodos[0].inicio || e.fecha > ultimo.fin) continue
-    for (const l of e.lineas) if (l.materialId === o.material.id && !l.esPrestamo) tallas.set(l.varianteId, (tallas.get(l.varianteId) ?? 0) + l.cantidad)
+    for (const l of e.lineas) if (l.materialId === o.material.id && !l.esPrestamo && (!variantes || variantes.includes(l.varianteId))) tallas.set(l.varianteId, (tallas.get(l.varianteId) ?? 0) + l.cantidad)
   }
   const etiquetaTalla = (v: string) => (v === SIN_TALLA ? 'Sin talla' : (o.material.variantes.find((x) => x.id === v)?.etiqueta ?? v))
   const orden = (v: string) => {
@@ -271,8 +295,12 @@ export function analizarMaterial(o: OpcionesAnalisis): AnalisisMaterial {
     pendiente = den ? redondear(num / den) : 0
   }
 
+  const etiqueta = etiquetaTallas(o.material, variantes)
   return {
+    clave: claveSujeto(o.material.id, etiqueta ? variantes : undefined),
     material: { id: o.material.id, nombre: o.material.nombre },
+    nombre: etiqueta ? `${o.material.nombre} – ${etiqueta}` : o.material.nombre,
+    talla: etiqueta && variantes ? { ids: variantes, etiqueta } : undefined,
     unidad: o.unidad,
     historico,
     total,
@@ -320,7 +348,7 @@ export function coberturaTexto(r: ResultadoEscenario, u: UnidadPeriodo): string 
 /** Conclusión principal, en el mismo estilo del reporte de ejemplo. */
 export function conclusion(a: AnalisisMaterial, unidadMaterial: string): string {
   const p = a.escenarios.promedio
-  const base = `De acuerdo a este consumo promedio (${miles(p.consumo)} ${unidadMaterial} ${porUnidad(a.unidad)}), los ${miles(a.existencia)} ${unidadMaterial} de ${a.material.nombre.toLowerCase()}`
+  const base = `De acuerdo a este consumo promedio (${miles(p.consumo)} ${unidadMaterial} ${porUnidad(a.unidad)}), los ${miles(a.existencia)} ${unidadMaterial} de ${nombreEnTexto(a.nombre)}`
   let t = p.agotamiento ? `${base} alcanzarían hasta ${cuandoTexto(p.agotamiento, a.unidad)} aproximadamente.` : `${base} no se agotarían con el consumo registrado.`
   if (a.objetivo && p.faltante !== undefined) {
     t += p.faltante > 0
@@ -380,14 +408,15 @@ const fechaDeTs = (ts: string) => {
   return isNaN(d.getTime()) ? ts.slice(0, 10) : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export function compararPlan(o: { plan: PlanMaterial; entregas: Entrega[]; movimientos: Movimiento[]; ubicaciones: string[]; materialId: string; hoy: string }): ComparacionPlan {
+export function compararPlan(o: { plan: PlanMaterial; entregas: Entrega[]; movimientos: Movimiento[]; ubicaciones: string[]; materialId: string; hoy: string; variantes?: string[] }): ComparacionPlan {
+  const tallas = o.variantes?.length ? new Set(o.variantes) : undefined
   const u = o.plan.unidad
   const inicio = periodoDe(o.plan.inicio, u)
   const actual = periodoDe(o.hoy, u)
   const periodos = actual.clave >= inicio.clave ? periodosEntre(inicio.inicio, actual.fin, u) : []
-  const consumo = consumoPorPeriodo(o.entregas, o.materialId, periodos)
+  const consumo = consumoPorPeriodo(o.entregas, o.materialId, periodos, o.variantes)
   const ok = new Set(o.ubicaciones)
-  const movs = o.movimientos.filter((m) => m.materialId === o.materialId && ok.has(m.ubicacionId)).map((m) => ({ f: fechaDeTs(m.ts), c: m.cantidad, entrada: m.tipo === 'ENTRADA' }))
+  const movs = o.movimientos.filter((m) => m.materialId === o.materialId && ok.has(m.ubicacionId) && (!tallas || tallas.has(m.varianteId))).map((m) => ({ f: fechaDeTs(m.ts), c: m.cantidad, entrada: m.tipo === 'ENTRADA' }))
   const existenciaAl = (f: string) => movs.reduce((s, m) => (m.f < f ? s + m.c : s), 0)
   let acumP = 0
   let acumR = 0
@@ -444,5 +473,23 @@ export function conclusionPlan(c: ComparacionPlan, nombre: string, unidadMateria
     if (ar.clave === ap.clave) t += ` Al ritmo real (${miles(c.promedioReal)} ${porUnidad(u)}) el material alcanzaría hasta ${cuandoTexto(ar, u)}, igual que en el plan.`
     else t += ` Al ritmo real (${miles(c.promedioReal)} ${porUnidad(u)}) y con la existencia de hoy (${miles(c.existenciaHoy)}), el material alcanzaría hasta ${cuandoTexto(ar, u)}; el plan indicaba ${cuandoTexto(ap, u)}.`
   } else if (!ar) t += ` Con el consumo real registrado el material no se agotaría.`
+  return t
+}
+
+/** Nombre dentro de una oración: «guante de carnaza – talla G» (la talla conserva su mayúscula). */
+export function nombreEnTexto(nombre: string): string {
+  const [m, t] = nombre.split(' – ')
+  return t ? `${m.toLowerCase()} – ${t.replace(/^Talla/, 'talla').replace(/^Tallas/, 'tallas')}` : m.toLowerCase()
+}
+
+/** Texto de la conclusión con el escenario indicado (promedio, bajo o conservador). */
+export function conclusionEscenario(a: AnalisisMaterial, e: Escenario, unidadMaterial: string): string {
+  if (e === 'promedio') return conclusion(a, unidadMaterial)
+  const r = a.escenarios[e]
+  const nombreE = e === 'alto' ? 'el escenario conservador' : 'el escenario bajo'
+  let t = r.agotamiento
+    ? `Con ${nombreE} (${miles(r.consumo)} ${unidadMaterial} ${porUnidad(a.unidad)}) alcanzarían hasta ${cuandoTexto(r.agotamiento, a.unidad)}.`
+    : `Con ${nombreE} (${miles(r.consumo)} ${unidadMaterial} ${porUnidad(a.unidad)}) no se agotarían.`
+  if (a.objetivo && r.faltante !== undefined) t += r.faltante > 0 ? ` Para ${cuandoTexto(a.objetivo, a.unidad)} faltarían ${miles(r.faltante)}.` : ` Para ${cuandoTexto(a.objetivo, a.unidad)} alcanza.`
   return t
 }

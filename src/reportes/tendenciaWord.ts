@@ -2,16 +2,14 @@
 // las gráficas van como imagen de alta resolución (idénticas al PDF).
 import type { Plantilla } from './plantilla'
 import type { ConfigTendencia } from '../state/tendencias'
-import type { Bloque, ContenidoMaterial, ContenidoPlan } from './tendenciaDoc'
-import type { ImagenesMaterial, ImagenesPlan } from './imagenesTendencia'
+import type { Bloque, Item } from './tendenciaDoc'
 import { paleta } from './graficasTendencia'
 
 export interface DatosWord {
   plantilla: Plantilla
   config: ConfigTendencia
-  fecha: string
-  comparativa?: { titulo: string; intro: string; imagen: string; tabla: { encabezado: string[]; filas: string[][] } }
-  materiales: { t: ContenidoMaterial; img: ImagenesMaterial; plan?: { t: ContenidoPlan; img: ImagenesPlan } }[]
+  titulo: string
+  items: Item[]
 }
 
 function bytesDe(dataUrl: string): Uint8Array {
@@ -31,6 +29,26 @@ function medidasImagen(dataUrl: string): Promise<{ w: number; h: number }> {
   })
 }
 
+/** Convierte una gráfica PNG a JPG (fondo blanco) al tamaño indicado. */
+function aJpg(dataUrl: string, anchoMax: number): Promise<string> {
+  return new Promise((ok) => {
+    const i = new Image()
+    i.onload = () => {
+      const k = Math.min(1, anchoMax / i.naturalWidth)
+      const c = document.createElement('canvas')
+      c.width = Math.round(i.naturalWidth * k)
+      c.height = Math.round(i.naturalHeight * k)
+      const g = c.getContext('2d')!
+      g.fillStyle = '#fff'
+      g.fillRect(0, 0, c.width, c.height)
+      g.drawImage(i, 0, 0, c.width, c.height)
+      ok(c.toDataURL('image/jpeg', 0.9))
+    }
+    i.onerror = () => ok(dataUrl)
+    i.src = dataUrl
+  })
+}
+
 export async function generarWord(d: DatosWord): Promise<Blob> {
   const D = await import('docx')
   const { AlignmentType, BorderStyle, Document, Footer, Header, ImageRun, Packer, Paragraph, ShadingType, Table, TableCell, TableRow, TextRun, VerticalAlign, WidthType } = D
@@ -40,7 +58,9 @@ export async function generarWord(d: DatosWord): Promise<Blob> {
   const FUENTE = 'Arial'
   const ANCHO_PX = 680 // ancho útil en píxeles (carta con márgenes de 1.8 cm)
 
-  const imagen = async (dataUrl: string, anchoPx: number, alineacion = AlignmentType.CENTER) => {
+  const imagen = async (png: string, anchoPx: number, alineacion = AlignmentType.CENTER) => {
+    // Las gráficas van en JPG de alta calidad: se ven igual y el archivo pesa mucho menos
+    const dataUrl = await aJpg(png, anchoPx * 2)
     const m = await medidasImagen(dataUrl)
     return new Paragraph({
       alignment: alineacion,
@@ -78,7 +98,7 @@ export async function generarWord(d: DatosWord): Promise<Blob> {
     })
   const tabla = (filas: InstanceType<typeof TableRow>[]) => new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: filas })
   const tablaBloques = (bloques: Bloque[]) =>
-    bloques.flatMap((b) => [
+    bloques.flatMap((b: Bloque) => [
       tabla([
         new TableRow({ tableHeader: true, children: [celda('', { enc: true, ancho: 22 }), ...b.etiquetas.map((e) => celda(e, { enc: true, tam: 15 }))] }),
         ...b.filas.map((f) => new TableRow({ children: [celda(f.nombre, { izq: true, ancho: 22, tam: 15 }), ...f.valores.map((v, j) => celda(v, { rojo: f.rojo?.[j], tam: 15 }))] })),
@@ -87,13 +107,13 @@ export async function generarWord(d: DatosWord): Promise<Blob> {
     ])
   const tablaPares = (filas: [string, string][], destacar?: number) =>
     tabla(filas.map(([a, b], i) => new TableRow({ children: [celda(a, { izq: true, ancho: 62, destacado: i === destacar }), celda(b, { destacado: i === destacar })] })))
-  const tablaSimple = (t: { encabezado: string[]; filas: string[][] }, destacar?: number) =>
+  const tablaSimple = (t: { encabezado: string[]; filas: string[][] }, destacar: number[] = []) =>
     tabla([
       new TableRow({ tableHeader: true, children: t.encabezado.map((e) => celda(e, { enc: true })) }),
-      ...t.filas.map((f, i) => new TableRow({ children: f.map((v, j) => celda(v, { izq: j === 0, destacado: i === destacar })) })),
+      ...t.filas.map((f, i) => new TableRow({ children: f.map((v, j) => celda(v, { izq: j === 0, destacado: destacar.includes(i) })) })),
     ])
   // Tres tablas de datos lado a lado (como las cajas del reporte)
-  const cajas = (grupos: { filas: [string, string][]; destacar: number }[]) =>
+  const cajas = (grupos: { filas: [string, string][]; destacar?: number }[]) =>
     new Table({
       width: { size: 100, type: WidthType.PERCENTAGE },
       borders: sinBordes,
@@ -103,7 +123,7 @@ export async function generarWord(d: DatosWord): Promise<Blob> {
             (g) =>
               new TableCell({
                 borders: { top: sinBorde, bottom: sinBorde, left: sinBorde, right: sinBorde },
-                width: { size: 33, type: WidthType.PERCENTAGE },
+                width: { size: Math.floor(100 / grupos.length), type: WidthType.PERCENTAGE },
                 margins: { left: 50, right: 50 },
                 children: [tablaPares(g.filas, g.destacar)],
               }),
@@ -167,78 +187,46 @@ export async function generarWord(d: DatosWord): Promise<Blob> {
     ],
   })
 
-  const titulo = (t: string, sub: string, salto: boolean) => [
-    parrafo(t, { negrita: true, tam: 28, alin: AlignmentType.CENTER, antes: 0, despues: 20, saltoAntes: salto }),
-    parrafo(sub, { tam: 20, alin: AlignmentType.CENTER, antes: 0, despues: 60 }),
-    parrafo(d.fecha, { tam: 20, alin: AlignmentType.RIGHT, antes: 0, despues: 140 }),
-  ]
-
+  // Cada bloque del documento, en orden; cada título empieza página nueva
   const cuerpo: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = []
-  if (d.comparativa) {
-    cuerpo.push(...titulo(d.comparativa.titulo, 'Cálculo de tendencia conservadora de consumo de equipo de protección personal – comparativa', false))
-    cuerpo.push(parrafo(d.comparativa.intro))
-    cuerpo.push(await imagen(d.comparativa.imagen, ANCHO_PX))
-    cuerpo.push(tablaSimple(d.comparativa.tabla))
-    cuerpo.push(parrafo(d.config.nota, { tam: 16, italica: true, antes: 120 }))
-  }
-  for (const [i, { t, img, plan }] of d.materiales.entries()) {
-    cuerpo.push(...titulo(t.titulo, t.subtitulo, !!d.comparativa || i > 0))
-    cuerpo.push(parrafo(t.intro))
-    cuerpo.push(...tablaBloques(t.historico))
-    cuerpo.push(
-      cajas([
-        { filas: t.resumen, destacar: 0 },
-        { filas: t.existencias, destacar: 2 },
-        { filas: t.indicadores, destacar: 0 },
-      ]),
-    )
-    cuerpo.push(new Paragraph({ spacing: { after: 80 }, children: [] }))
-    cuerpo.push(tablaSimple(t.escenarios, 1))
-    cuerpo.push(parrafo(t.conclusion, { negrita: true, antes: 140 }))
-    cuerpo.push(parrafo(t.tendencia, { tam: 18 }))
-    cuerpo.push(await imagen(img.historico, ANCHO_PX))
-    cuerpo.push(await imagen(img.proyeccion, ANCHO_PX))
-    cuerpo.push(...tablaBloques(t.proyeccion))
-    if (t.proyeccionRecortada) cuerpo.push(parrafo('La tabla muestra el primer año; la gráfica y el cálculo consideran todo el periodo.', { tam: 16 }))
-    cuerpo.push(parrafo(d.config.nota, { tam: 16, italica: true }))
-    if (t.tallas.length) {
-      cuerpo.push(tablaSimple({ encabezado: ['Talla', 'Entregados', '%'], filas: t.tallas }))
-      if (img.tallas) cuerpo.push(await imagen(img.tallas, 420))
-    }
-    cuerpo.push(parrafo(t.fuente, { tam: 15, color: '6F7271' }))
-    if (plan) {
-      cuerpo.push(...titulo(plan.t.titulo, 'Comparación de la tendencia planeada contra el consumo real registrado', true))
-      cuerpo.push(parrafo(plan.t.intro))
-      cuerpo.push(
-        new Table({
-          width: { size: 100, type: WidthType.PERCENTAGE },
-          borders: sinBordes,
-          rows: [
-            new TableRow({
-              children: [plan.t.resumen, plan.t.fechas].map(
-                (f, j) =>
-                  new TableCell({
-                    borders: { top: sinBorde, bottom: sinBorde, left: sinBorde, right: sinBorde },
-                    width: { size: 50, type: WidthType.PERCENTAGE },
-                    margins: { left: 50, right: 50 },
-                    children: [tablaPares(f, j === 0 ? 2 : 1)],
-                  }),
-              ),
-            }),
-          ],
-        }),
-      )
-      cuerpo.push(parrafo(plan.t.conclusion, { negrita: true, antes: 140 }))
-      cuerpo.push(await imagen(plan.img.consumo, ANCHO_PX))
-      cuerpo.push(await imagen(plan.img.existencia, ANCHO_PX))
-      cuerpo.push(...tablaBloques(plan.t.bloques))
-      cuerpo.push(parrafo(plan.t.nota, { tam: 16, italica: true }))
+  let primero = true
+  for (const it of d.items) {
+    switch (it.t) {
+      case 'titulo':
+        cuerpo.push(parrafo(it.titulo, { negrita: true, tam: 28, alin: AlignmentType.CENTER, antes: 0, despues: 20, saltoAntes: !primero }))
+        cuerpo.push(parrafo(it.subtitulo, { tam: 20, alin: AlignmentType.CENTER, antes: 0, despues: 60 }))
+        cuerpo.push(parrafo(it.fecha, { tam: 20, alin: AlignmentType.RIGHT, antes: 0, despues: 140 }))
+        primero = false
+        break
+      case 'parrafo': {
+        const e = it.estilo ?? 'normal'
+        if (e === 'conclusion') cuerpo.push(parrafo(it.texto, { negrita: true, antes: 140 }))
+        else if (e === 'chico') cuerpo.push(parrafo(it.texto, { tam: 18 }))
+        else if (e === 'nota') cuerpo.push(parrafo(it.texto, { tam: 16, italica: true }))
+        else if (e === 'fuente') cuerpo.push(parrafo(it.texto, { tam: 15, color: '6F7271' }))
+        else cuerpo.push(parrafo(it.texto))
+        break
+      }
+      case 'bloque':
+        cuerpo.push(...tablaBloques([it.bloque]))
+        break
+      case 'cajas':
+        cuerpo.push(cajas(it.grupos))
+        cuerpo.push(new Paragraph({ spacing: { after: 80 }, children: [] }))
+        break
+      case 'tabla':
+        cuerpo.push(tablaSimple(it, it.destacar))
+        cuerpo.push(new Paragraph({ spacing: { after: 60 }, children: [] }))
+        break
+      case 'imagen':
+        cuerpo.push(await imagen(it.img.src, Math.round(ANCHO_PX * (it.ancho ?? 1))))
+        break
     }
   }
 
   const doc = new Document({
     creator: 'Control EPP',
-    title: d.comparativa?.titulo ?? d.materiales[0]?.t.titulo ?? 'Tendencia de consumo',
+    title: d.titulo,
     styles: { default: { document: { run: { font: FUENTE } } } },
     sections: [
       {
