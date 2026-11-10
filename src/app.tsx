@@ -23,6 +23,7 @@ import { PantallaInventario } from './ui/Inventario'
 import { PantallaPersonal } from './ui/Personal'
 import { PantallaReportes } from './ui/Reportes'
 import { PantallaFormatos } from './ui/Formatos'
+import { PantallaTendencias } from './ui/Tendencias'
 
 
 const NAV: { id: Pantalla; texto: string; icono: string }[] = [
@@ -33,6 +34,7 @@ const NAV: { id: Pantalla; texto: string; icono: string }[] = [
   { id: 'historial', texto: 'Historial', icono: 'historial' },
   { id: 'reportes', texto: 'Reportes', icono: 'reportes' },
   { id: 'formatos', texto: 'Formatos', icono: 'pdf' },
+  { id: 'tendencias', texto: 'Tendencias', icono: 'tendencia' },
   { id: 'catalogo', texto: 'Catálogo', icono: 'catalogo' },
   { id: 'personal', texto: 'Personal', icono: 'personal' },
   { id: 'ajustes', texto: 'Ajustes', icono: 'ajustes' },
@@ -82,6 +84,8 @@ function Contenido() {
       return <PantallaReportes />
     case 'formatos':
       return <PantallaFormatos />
+    case 'tendencias':
+      return <PantallaTendencias />
     case 'catalogo':
       return <PantallaCatalogo />
     case 'personal':

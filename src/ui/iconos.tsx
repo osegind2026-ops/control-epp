@@ -68,6 +68,7 @@ const UI: Record<string, JSX.Element> = {
   inventario: <path {...trazo} d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5zM3 7.5l9 4.5 9-4.5M12 12v9" />,
   historial: <path {...trazo} d="M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.5-6M3 4v4h4" />,
   mas: <path {...trazo} d="M5 12h.01M12 12h.01M19 12h.01" stroke-width={3} />,
+  tendencia: <path {...trazo} d="M3 17l6-6 4 4 8-8M15 7h6v6" />,
   reportes: <path {...trazo} d="M4 20V10M10 20V4M16 20v-7M22 20H2" />,
   catalogo: <path {...trazo} d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />,
   personal: <path {...trazo} d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M17 11a3 3 0 1 0 0-6M22 21a6 6 0 0 0-4-5.6" />,

@@ -404,7 +404,7 @@ function VistaPrevia({ paginas, horizontal = false }: { paginas: preact.Componen
 // =========================================================================
 // VENTANA MODAL / PORTAL DE IMPRESIÓN
 // =========================================================================
-function VistaImpresionPortal({
+export function VistaImpresionPortal({
   children,
   onCerrar,
   onImprimir,
