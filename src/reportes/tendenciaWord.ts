@@ -1,15 +1,19 @@
-// Documento de Tendencias en Word (.docx) editable: textos y tablas se pueden corregir en Word;
-// las gráficas van como imagen de alta resolución (idénticas al PDF).
+// Documento de Tendencias en Word (.docx) editable: textos y tablas se pueden corregir en Word.
+// Las gráficas van como gráficas NATIVAS de Word con su Excel incrustado (clic derecho →
+// «Editar datos»), o, si se elige, como imagen de alta resolución idéntica al PDF.
 import type { Plantilla } from './plantilla'
 import type { ConfigTendencia } from '../state/tendencias'
 import type { Bloque, Item } from './tendenciaDoc'
 import { paleta } from './graficasTendencia'
+import { incrustarGraficas, marcaGrafica, type GraficaNativa } from './graficaNativa'
 
 export interface DatosWord {
   plantilla: Plantilla
   config: ConfigTendencia
   titulo: string
   items: Item[]
+  /** Gráficas editables (nativas de Word) o como imagen. Por omisión, editables. */
+  graficas?: 'editables' | 'imagen'
 }
 
 function bytesDe(dataUrl: string): Uint8Array {
@@ -190,6 +194,8 @@ export async function generarWord(d: DatosWord): Promise<Blob> {
   // Cada bloque del documento, en orden; cada título empieza página nueva
   const cuerpo: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = []
   let primero = true
+  const editables = d.graficas !== 'imagen'
+  const nativas: { g: GraficaNativa; anchoEmu: number; altoEmu: number }[] = []
   for (const it of d.items) {
     switch (it.t) {
       case 'titulo':
@@ -218,9 +224,17 @@ export async function generarWord(d: DatosWord): Promise<Blob> {
         cuerpo.push(tablaSimple(it, it.destacar))
         cuerpo.push(new Paragraph({ spacing: { after: 60 }, children: [] }))
         break
-      case 'imagen':
-        cuerpo.push(await imagen(it.img.src, Math.round(ANCHO_PX * (it.ancho ?? 1))))
+      case 'imagen': {
+        const ancho = Math.round(ANCHO_PX * (it.ancho ?? 1))
+        if (editables && it.img.nativa) {
+          // Lugar de la gráfica: se reemplaza al final por la gráfica nativa
+          const anchoEmu = ancho * 9525
+          const ratio = Math.min(0.72, Math.max(0.46, it.img.ratio))
+          cuerpo.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 80, after: 80 }, children: [new TextRun({ text: marcaGrafica(nativas.length) })] }))
+          nativas.push({ g: it.img.nativa, anchoEmu, altoEmu: Math.round(anchoEmu * ratio) })
+        } else cuerpo.push(await imagen(it.img.src, ancho))
         break
+      }
     }
   }
 
@@ -237,5 +251,5 @@ export async function generarWord(d: DatosWord): Promise<Blob> {
       },
     ],
   })
-  return Packer.toBlob(doc)
+  return incrustarGraficas(await Packer.toBlob(doc), nativas)
 }

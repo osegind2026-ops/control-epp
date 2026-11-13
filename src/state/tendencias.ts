@@ -5,7 +5,7 @@ import {
   type AnalisisMaterial, type ComparacionPlan, type ConfigMaterial, type Escenario, type PlanMaterial, type UnidadPeriodo,
 } from '../domain/tendencias'
 import { variantesDe, tieneTallas } from '../domain/logica'
-import { fechaLocal } from '../lib/util'
+import { fechaLocal, nuevoId } from '../lib/util'
 import type { EstiloGrafica, PaletaGrafica } from '../reportes/graficasTendencia'
 import * as S from './store'
 
@@ -48,6 +48,8 @@ export interface ConfigTendencia {
   vistaEscenarios?: VistaEscenarios
   /** No contar para el promedio las semanas o meses sin existencia en almacén (por omisión, sí). */
   excluirSinExistencia?: boolean
+  /** Gráficas del Word: nativas editables (con su Excel) o imagen igual al PDF. Por omisión, editables. */
+  graficasWord?: 'editables' | 'imagen'
   /** Texto del periodo, p. ej. «pre recarga» → «durante el periodo de pre recarga». */
   contexto: string
   nota: string
@@ -79,7 +81,8 @@ export function ultimosPeriodos(n: number, u: UnidadPeriodo, hoy = fechaLocal())
 export function nuevaConfig(): ConfigTendencia {
   const r = ultimosPeriodos(8, 'semana')
   return {
-    id: crypto.randomUUID(),
+    // Sin crypto.randomUUID: no existe por http://IP (solo en https o localhost)
+    id: nuevoId('T'),
     nombre: 'Nuevo análisis',
     titulo: '',
     materiales: [],

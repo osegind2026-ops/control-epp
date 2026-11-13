@@ -1705,3 +1705,14 @@ td.tend-comprar { color: var(--bad); font-weight: 700; }
 /* Tendencias: periodos sin existencia en almacén */
 .tabla-tend td.tend-sinexist { color: var(--bad); font-weight: 700; background: repeating-linear-gradient(135deg, rgba(192, 57, 43, 0.08) 0 6px, rgba(192, 57, 43, 0.16) 6px 9px); }
 .tend-aviso { margin: 0; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(192, 57, 43, 0.35); background: rgba(192, 57, 43, 0.07); }
+
+/* Tendencias: gráficas con zoom */
+.tend-graficas img, .reporte-imprimible .hoja-tendencia img.tdz-grafica { cursor: zoom-in; }
+.tend-zoom { position: fixed; inset: 0; z-index: 1100; display: grid; grid-template-rows: auto 1fr; background: rgba(12, 14, 13, 0.88); }
+.tend-zoom-barra { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; padding: 10px 14px; background: var(--surface); color: var(--ink); border-bottom: 1px solid var(--rule); }
+.tend-zoom-barra span { margin-right: auto; font-size: 14px; color: var(--muted, inherit); }
+.tend-zoom-lienzo { min-height: 0; display: grid; place-items: center; padding: 16px; overflow: auto; }
+.tend-zoom-lienzo img { max-width: 100%; max-height: calc(100vh - 100px); border-radius: 8px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); background: #fff; cursor: zoom-in; }
+.tend-zoom-lienzo.real { place-items: start; }
+.tend-zoom-lienzo.real img { max-width: none; max-height: none; cursor: zoom-out; }
+@media print { .tend-zoom { display: none !important; } }

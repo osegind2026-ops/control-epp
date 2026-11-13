@@ -6,7 +6,7 @@ import {
   type AnalisisMaterial, type ComparacionPlan, type FilaConsumo, type PlanMaterial, type UnidadPeriodo,
 } from '../domain/tendencias'
 import { tieneTallas } from '../domain/logica'
-import { fechaLocal } from '../lib/util'
+import { fechaLocal, nuevoId } from '../lib/util'
 import { cargarPlantilla, type Plantilla } from '../reportes/plantilla'
 import { ESTILOS, PALETAS, type EstiloGrafica, type PaletaGrafica } from '../reportes/graficasTendencia'
 import { imagenConsumoTallas, imagenCobertura, imagenExistenciaTallas, imagenTallasExistencia, imagenesMaterial, imagenesPlan, type ImagenesMaterial, type ImagenesPlan } from '../reportes/imagenesTendencia'
@@ -308,6 +308,13 @@ function Configuracion({ c, cambiar }: { c: ConfigTendencia; cambiar: (p: Partia
                 {s.nombre}
               </option>
             ))}
+          </select>
+        </label>
+        <label class="campo">
+          Gráficas en Word
+          <select class="input" id="tend-graficas-word" value={c.graficasWord ?? 'editables'} onChange={(e) => cambiar({ graficasWord: (e.target as HTMLSelectElement).value as 'editables' | 'imagen' })}>
+            <option value="editables">Editables (con sus datos en Excel)</option>
+            <option value="imagen">Imagen (igual que el PDF)</option>
           </select>
         </label>
       </div>
@@ -812,6 +819,54 @@ function ComparativaTallas({ g, c }: { g: GrupoTendencia; c: ConfigTendencia }) 
   )
 }
 
+/**
+ * Zoom de las gráficas: al tocar cualquier gráfica de Tendencias (en pantalla o en la vista
+ * del PDF) se abre grande. Tocar la imagen alterna «ajustada a la ventana» y «tamaño real»
+ * (con desplazamiento); Esc o «Cerrar» la cierran.
+ */
+function ZoomGraficas() {
+  const [zoom, setZoom] = useState<{ src: string; alt: string } | null>(null)
+  const [real, setReal] = useState(false)
+  useEffect(() => {
+    const clic = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (t.tagName !== 'IMG' || !t.closest('.tend-graficas, .hoja-tendencia') || t.closest('.tdz-enc, .tdz-pie, .tdz-medida')) return
+      e.preventDefault()
+      setReal(false)
+      setZoom({ src: (t as HTMLImageElement).src, alt: (t as HTMLImageElement).alt })
+    }
+    document.addEventListener('click', clic)
+    return () => document.removeEventListener('click', clic)
+  }, [])
+  useEffect(() => {
+    if (!zoom) return
+    const tecla = (e: KeyboardEvent) => e.key === 'Escape' && setZoom(null)
+    document.addEventListener('keydown', tecla)
+    return () => document.removeEventListener('keydown', tecla)
+  }, [zoom])
+  if (!zoom) return null
+  const nombre = (zoom.alt || 'grafica').replace(/[\/:*?"<>|]+/g, '').slice(0, 80)
+  return (
+    <div class="tend-zoom" role="dialog" aria-modal="true" aria-label={zoom.alt || 'Gráfica ampliada'} onClick={(e) => e.target === e.currentTarget && setZoom(null)}>
+      <div class="tend-zoom-barra">
+        <span>{real ? 'Tamaño real: deslice para recorrer' : 'Toque la gráfica para verla en tamaño real'}</span>
+        <button class="btn sm" onClick={() => setReal(!real)}>
+          {real ? 'Ajustar a la ventana' : 'Tamaño real'}
+        </button>
+        <a class="btn sm" href={zoom.src} download={`${nombre}.png`}>
+          <Icono n="descarga" /> Descargar
+        </a>
+        <button class="btn sm primary" onClick={() => setZoom(null)} autoFocus>
+          Cerrar
+        </button>
+      </div>
+      <div class={`tend-zoom-lienzo ${real ? 'real' : ''}`} onClick={(e) => e.target === e.currentTarget && setZoom(null)}>
+        <img src={zoom.src} alt={zoom.alt} onClick={() => setReal(!real)} />
+      </div>
+    </div>
+  )
+}
+
 // ---------------- Pantalla ----------------
 export function PantallaTendencias() {
   const [lista, setLista] = useState<ConfigTendencia[] | null>(null)
@@ -882,9 +937,13 @@ export function PantallaTendencias() {
         setPlantilla(p)
         const doc = documento()
         const { generarWord } = await import('../reportes/tendenciaWord')
-        const blob = await generarWord({ plantilla: p, config: c, titulo: doc.titulo, items: doc.items })
+        const blob = await generarWord({ plantilla: p, config: c, titulo: doc.titulo, items: doc.items, graficas: c.graficasWord ?? 'editables' })
         descargar(blob, `${nombreArchivo(titulo, hoy)}.docx`)
-        avisar('Documento de Word descargado. Puede editarlo antes de imprimirlo.')
+        avisar(
+          c.graficasWord === 'imagen'
+            ? 'Documento de Word descargado. Puede editarlo antes de imprimirlo.'
+            : 'Word descargado. Para cambiar las cifras de una gráfica: clic derecho en ella → «Editar datos».',
+        )
       } finally {
         setGenerandoWord(false)
       }
@@ -923,6 +982,7 @@ export function PantallaTendencias() {
 
   return (
     <div class="stack">
+      <ZoomGraficas />
       <div class="spread">
         <h1>Tendencias</h1>
         <div class="row" style={{ flexWrap: 'wrap' }}>
@@ -963,7 +1023,7 @@ export function PantallaTendencias() {
         <button
           class="btn"
           onClick={() => {
-            const n = { ...structuredClone(c), id: crypto.randomUUID(), nombre: `${c.nombre} (copia)` }
+            const n = { ...structuredClone(c), id: nuevoId('T'), nombre: `${c.nombre} (copia)` }
             persistir([...lista, n])
             setActualId(n.id)
           }}
